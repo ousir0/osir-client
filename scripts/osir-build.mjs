@@ -645,6 +645,7 @@ function checkedTool(command, args, label) {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    timeout: 180000,
   });
   requireThat(
     !result.error && result.status === 0,
@@ -1066,9 +1067,7 @@ async function main() {
     // The signer uses an existing identity only. The local path cannot inherit a signer.
     config.bundle.macOS.signingIdentity = release
       ? process.env.APPLE_SIGNING_IDENTITY
-      : selfSigned
-        ? localIdentity.identity
-        : "-";
+      : "-";
     const environment = packagingEnvironments(
       {
         ...process.env,
@@ -1117,6 +1116,49 @@ async function main() {
       env,
       "Build native app (one Cargo job)",
     );
+    if (selfSigned) {
+      // Tauri does not pass our dedicated keychain to codesign. Select it
+      // explicitly after bundling, then regenerate the updater from that app.
+      // Never let a default-keychain search prompt for another private key.
+      const signing = prepareDevSigning();
+      requireThat(
+        signing.identity === localIdentity.identity &&
+          signing.keychain === localIdentity.keychain,
+        "Local signing selection changed during compilation.",
+      );
+      checkedTool(
+        "/usr/bin/codesign",
+        [
+          "--force",
+          "--deep",
+          "--options",
+          "runtime",
+          "--timestamp=none",
+          ...(signing.keychain ? ["--keychain", signing.keychain] : []),
+          "--sign",
+          signing.identity,
+          sourceApp,
+        ],
+        "Sign app with selected stable local certificate",
+      );
+      if (updater) {
+        checkedTool(
+          "/usr/bin/tar",
+          ["-czf", sourceUpdater, "-C", bundleRoot, basename(sourceApp)],
+          "Archive finalized stable-signed app",
+        );
+        checkedTool(
+          process.execPath,
+          [
+            join(root, "node_modules/@tauri-apps/cli/tauri.js"),
+            "signer",
+            "sign",
+            sourceUpdater,
+          ],
+          "Sign finalized updater payload",
+        );
+      }
+    }
     const parent = join(root, "release/osir", options.channel, mode, target);
     mkdirSync(parent, { recursive: true });
     output = mkdtempSync(join(parent, version + "-"));
