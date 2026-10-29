@@ -67,6 +67,9 @@ if (process.argv[2] === "prepare") {
   }
   assert.equal(report.stages.launch.windowObserved, true);
   assert.equal(report.stages.launch.remainedRunning, true);
+  assert.equal(report.stages.launch.windowTitle, "OSIR Client");
+  assert.ok(report.stages.launch.windowWidth >= 900 && report.stages.launch.windowHeight >= 600);
+  assert.equal(report.stages.launch.excludesSingleInstanceToolWindow, true);
   assert.equal(report.stages.upgrade.kind, "same-version-reinstall-update-path");
   assert.equal(report.stages.uninstall.mainExecutableRemoved, true);
   const toolFiles = ["scripts/osir-windows-artifact-acceptance.mjs", "scripts/osir-nsis-payload.mjs", "scripts/osir-windows-packaged-smoke.ps1", "scripts/osir-pe-verify.mjs", ".github/workflows/osir-windows-artifact-acceptance.yml"].map((file) => ({ path: file, ...digest(file) }));

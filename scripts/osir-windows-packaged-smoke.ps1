@@ -43,6 +43,46 @@ $report = [ordered]@{
     stages = [ordered]@{}
 }
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public class OsirRealWindow {
+    public long Handle; public string Title; public string ClassName;
+    public int Left; public int Top; public int Width; public int Height;
+}
+public static class OsirWindows {
+    private delegate bool Callback(IntPtr h, IntPtr p);
+    [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left,Top,Right,Bottom; }
+    [DllImport("user32.dll")] private static extern bool EnumWindows(Callback cb, IntPtr p);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr h, StringBuilder s, int count);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassNameW(IntPtr h, StringBuilder s, int count);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out Rect rect);
+    [DllImport("user32.dll")] private static extern int GetWindowLongW(IntPtr h, int index);
+    public static OsirRealWindow[] ForProcess(int pid) {
+        var result = new List<OsirRealWindow>();
+        EnumWindows((h,p) => {
+            uint owner; GetWindowThreadProcessId(h, out owner);
+            if(owner!=(uint)pid || !IsWindowVisible(h)) return true;
+            var title=new StringBuilder(1024); GetWindowTextW(h,title,title.Capacity);
+            var cls=new StringBuilder(512); GetClassNameW(h,cls,cls.Capacity);
+            Rect r; if(!GetWindowRect(h,out r)) return true;
+            if(title.ToString().EndsWith("-siw") || (GetWindowLongW(h,-20)&0x80)!=0 || r.Right-r.Left<900 || r.Bottom-r.Top<600) return true;
+            result.Add(new OsirRealWindow {Handle=h.ToInt64(),Title=title.ToString(),ClassName=cls.ToString(),Left=r.Left,Top=r.Top,Width=r.Right-r.Left,Height=r.Bottom-r.Top});
+            return true;
+        },IntPtr.Zero);
+        return result.ToArray();
+    }
+}
+'@
+
+function Get-RealWindow([int]$ProcessId) {
+    return @([OsirWindows]::ForProcess($ProcessId) | Where-Object { $_.Title -eq 'OSIR Client' }) | Select-Object -First 1
+}
+
 function Assert-Smoke([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "[$script:stage] $Message" }
 }
@@ -143,23 +183,36 @@ try {
     $stage = 'launch'
     $ownedLaunch = Start-Isolated $mainExe
     $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
-    $windowFound = $false
+    $realWindow = $null
     while ([DateTime]::UtcNow -lt $deadline) {
         $ownedLaunch.Refresh()
         Assert-Smoke (-not $ownedLaunch.HasExited) 'Installed application exited before displaying its window.'
-        if ($ownedLaunch.MainWindowHandle -ne [IntPtr]::Zero) { $windowFound = $true; break }
+        $realWindow = Get-RealWindow $ownedLaunch.Id
+        if ($null -ne $realWindow) { break }
         Start-Sleep -Milliseconds 250
     }
-    Assert-Smoke $windowFound 'Installed application did not display a main window.'
+    Assert-Smoke ($null -ne $realWindow) 'Installed application did not display a visible OSIR Client window of at least 900x600.'
     # Observe briefly after the window appears; a momentary handle is insufficient.
     Start-Sleep -Seconds 3
     $ownedLaunch.Refresh()
-    Assert-Smoke (-not $ownedLaunch.HasExited -and $ownedLaunch.MainWindowHandle -ne [IntPtr]::Zero) 'Application window closed immediately after launch.'
+    $realWindow = Get-RealWindow $ownedLaunch.Id
+    Assert-Smoke (-not $ownedLaunch.HasExited -and $null -ne $realWindow) 'Application window closed immediately after launch.'
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = [Drawing.Bitmap]::new($realWindow.Width, $realWindow.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($realWindow.Left, $realWindow.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save((Join-Path $artifactDir 'windows-app-window.png'), [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
     $report.stages.launch = [ordered]@{
         passed = $true
         processId = $ownedLaunch.Id
         windowObserved = $true
-        windowTitle = $ownedLaunch.MainWindowTitle
+        windowTitle = $realWindow.Title
+        windowClass = $realWindow.ClassName
+        windowWidth = $realWindow.Width
+        windowHeight = $realWindow.Height
+        excludesSingleInstanceToolWindow = $true
         remainedRunning = $true
     }
     Stop-OwnedApp
