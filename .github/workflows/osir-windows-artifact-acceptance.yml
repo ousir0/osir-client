@@ -1,0 +1,72 @@
+name: OSIR existing Windows artifact lifecycle acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/artifact-acceptance]
+    paths:
+      - .github/workflows/osir-windows-artifact-acceptance.yml
+      - scripts/osir-windows-artifact-acceptance.mjs
+      - scripts/osir-nsis-payload.mjs
+permissions:
+  contents: read
+  actions: read
+jobs:
+  acceptance:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CI: 'true'
+      SOURCE_RUN_ID: '40968945461'
+      SOURCE_ARTIFACT_NAME: osir-ci-0.1.0-prod-windows-x64-40968945461-1
+      EXPECTED_SOURCE_SHA256: 3766c259cfc0119a089a9ceedc88f73545aec4c5080f5228eaabe52d2e49d922
+      EXPECTED_APP_HEAD: b864057027fad5837d3e72c490879d617344729e
+      EXPECTED_APP_VERSION: 0.1.0
+      EXPECTED_INSTALLER_SHA256: dc0d6bb7a6b97e5cabf9b5dadcb983ae41b9986b0bc9d200e9d89ff7d5b3d48b
+      EXPECTED_COMPILED_SHA256: 134bd4c02d193bb028f98c2e592d6428deb7591f772b8ce31b0268485e8b6e27
+      EXPECTED_NSIS_MAIN_SHA256: 14bf193d38070d08e08bae4df495cb72ec97bd5415198ba8005bc8942a85e4da
+      OSIR_ARTIFACT_DIRECTORY: ${{ runner.temp }}/osir-existing-artifact
+      OSIR_EXTRACTED_MAIN: ${{ runner.temp }}/osir-nsis-main/osir_client.exe
+    steps:
+      - name: Keep acceptance tools LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Download the fixed existing build artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name $env:SOURCE_ARTIFACT_NAME --dir $env:OSIR_ARTIFACT_DIRECTORY
+          if ($LASTEXITCODE -ne 0) { throw 'Original artifact download failed' }
+      - name: Extract the executable from the actual NSIS payload
+        run: |
+          $installer = Join-Path $env:OSIR_ARTIFACT_DIRECTORY 'OSIR-Client-prod-0.1.0-x86_64-pc-windows-msvc-setup.exe'
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:EXPECTED_INSTALLER_SHA256) { throw 'Original installer changed' }
+          $sevenZip = Join-Path $env:ProgramFiles '7-Zip/7z.exe'
+          $extracted = Split-Path -Parent $env:OSIR_EXTRACTED_MAIN
+          & $sevenZip x $installer osir_client.exe "-o$extracted" -y
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS executable extraction failed' }
+          node scripts/osir-windows-artifact-acceptance.mjs prepare
+          if ($LASTEXITCODE -ne 0) { throw 'Exact NSIS marker verification failed' }
+      - name: Install, launch actual window, UPDATE reinstall, uninstall
+        run: '& ./scripts/osir-windows-packaged-smoke.ps1 -ArtifactDirectory $env:OSIR_ARTIFACT_DIRECTORY'
+      - name: Verify complete evidence and record independent acceptance tool hash
+        run: node scripts/osir-windows-artifact-acceptance.mjs accept
+      - name: Upload original installer and real lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: osir-accepted-0.1.0-prod-windows-x64-${{ github.run_id }}
+          path: ${{ env.OSIR_ARTIFACT_DIRECTORY }}/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
