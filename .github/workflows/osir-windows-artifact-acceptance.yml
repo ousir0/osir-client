@@ -27,13 +27,13 @@ jobs:
       EXPECTED_INSTALLER_SHA256: dc0d6bb7a6b97e5cabf9b5dadcb983ae41b9986b0bc9d200e9d89ff7d5b3d48b
       EXPECTED_COMPILED_SHA256: 134bd4c02d193bb028f98c2e592d6428deb7591f772b8ce31b0268485e8b6e27
       EXPECTED_NSIS_MAIN_SHA256: 14bf193d38070d08e08bae4df495cb72ec97bd5415198ba8005bc8942a85e4da
-      OSIR_ARTIFACT_DIRECTORY: ${{ runner.temp }}/osir-existing-artifact
-      OSIR_EXTRACTED_MAIN: ${{ runner.temp }}/osir-nsis-main/osir_client.exe
     steps:
       - name: Keep acceptance tools LF
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
+          "OSIR_ARTIFACT_DIRECTORY=$(Join-Path $env:RUNNER_TEMP 'osir-existing-artifact')" >> $env:GITHUB_ENV
+          "OSIR_EXTRACTED_MAIN=$(Join-Path $env:RUNNER_TEMP 'osir-nsis-main/osir_client.exe')" >> $env:GITHUB_ENV
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
