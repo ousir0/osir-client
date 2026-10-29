@@ -1,0 +1,185 @@
+@import "./tokens.css";
+.osir-welcome {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 56px 32px;
+  position: relative;
+  overflow: hidden;
+  color: var(--osir-text);
+  color-scheme: light;
+  background: var(--osir-bg);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+}
+.osir-welcome-drag {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 36px;
+}
+.osir-welcome-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--osir-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.osir-welcome-loading svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--osir-accent);
+}
+.osir-welcome-card {
+  width: min(100%, 456px);
+  padding: 40px 32px 32px;
+  border: 1px solid var(--osir-border);
+  border-radius: var(--osir-radius);
+  background: var(--osir-surface);
+  text-align: center;
+}
+.osir-welcome-logo {
+  display: grid;
+  place-items: center;
+  margin-bottom: 24px;
+  color: var(--osir-accent);
+}
+.osir-welcome-logo img {
+  width: 64px;
+  height: 64px;
+}
+.osir-welcome-card h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+.osir-welcome-subtitle {
+  margin: 8px 0 32px;
+  color: var(--osir-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.osir-welcome-login {
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--osir-primary);
+  border-radius: var(--osir-radius);
+  background: var(--osir-primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.osir-welcome-login:hover:not(:disabled) {
+  background: var(--osir-primary-hover);
+}
+.osir-welcome-login:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 3px;
+}
+.osir-welcome-login:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.osir-welcome-login svg {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+}
+.osir-welcome-note {
+  margin: 20px 0 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.osir-welcome-feedback {
+  margin: 14px 0 0;
+  color: #925036;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.osir-welcome-reauthorize {
+  min-height: 32px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--osir-radius);
+  background: transparent;
+  color: var(--osir-accent-strong);
+  font-size: 13px;
+  cursor: pointer;
+}
+.osir-welcome-reauthorize:hover:not(:disabled) {
+  background: var(--osir-accent-soft);
+}
+.osir-welcome-reauthorize:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+.osir-welcome-reauthorize:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.osir-welcome-reauthorize-dialog {
+  width: min(384px, calc(100vw - 40px));
+  border: 1px solid var(--osir-border);
+  border-radius: var(--osir-radius);
+  background: var(--osir-surface);
+  color: var(--osir-text);
+}
+.osir-welcome-reauthorize-dialog h2,
+.osir-welcome-reauthorize-dialog svg {
+  color: var(--osir-text);
+}
+.osir-welcome-reauthorize-dialog p {
+  color: var(--osir-muted);
+}
+.osir-welcome-reauthorize-dialog button {
+  min-height: var(--osir-control-height);
+  border-radius: var(--osir-radius);
+}
+.osir-welcome-wordmark {
+  position: absolute;
+  bottom: 24px;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-welcome-spinner {
+  animation: osir-welcome-spin 1s linear infinite;
+}
+@keyframes osir-welcome-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .osir-welcome-spinner {
+    animation: none;
+  }
+  .osir-welcome-login {
+    transition: none;
+  }
+}
+@media (max-width: 520px) {
+  .osir-welcome {
+    padding-inline: 20px;
+  }
+  .osir-welcome-card {
+    padding-inline: 24px;
+  }
+  .osir-welcome-card h1 {
+    font-size: 24px;
+  }
+}

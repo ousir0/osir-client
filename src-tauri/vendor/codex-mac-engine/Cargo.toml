@@ -1,0 +1,17 @@
+[package]
+name = "codex-mac-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+autobins = false
+description = "Vendored Codex macOS update engine for native OSIR lifecycle services"
+
+[dependencies]
+roxmltree = "0.21"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+ed25519-dalek = "3"
+base64 = "0.22"
+log = "0.4"
+uuid = { version = "1", features = ["v4"] }
+libc = "0.2"

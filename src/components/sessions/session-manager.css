@@ -1,0 +1,555 @@
+/* Only the OSIR host opts in; the upstream session reader is unchanged. */
+.osir-session-page {
+  min-width: 0;
+  min-height: 360px;
+  color: var(--osir-text);
+}
+
+.osir-session-page > header {
+  min-height: 56px;
+  height: auto;
+  padding: 10px 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--osir-border-subtle);
+}
+
+.osir-shell .osir-session-page > header h1 {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.osir-session-page .session-list-toolbar {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px 0;
+}
+
+.osir-session-page .session-list-search {
+  flex: 1 1 160px;
+  min-width: 160px;
+}
+
+.osir-shell .osir-session-page .session-list-search input {
+  height: 32px;
+  padding: 4px 30px;
+  border-color: var(--osir-border);
+  background: var(--osir-surface);
+  font-size: 13px;
+}
+
+.osir-shell .osir-session-page .session-list-app-filter {
+  min-width: 0;
+  max-width: 180px;
+  min-height: 32px;
+  height: 32px;
+  padding: 4px 8px;
+  gap: 6px;
+  background: var(--osir-surface);
+}
+
+.osir-session-page .session-list-app-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.osir-session-page .session-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--osir-border-subtle);
+  border-radius: 8px;
+  background: var(--osir-bg);
+  color: var(--osir-text);
+  font-size: 12px;
+}
+
+.osir-session-page .session-source-count {
+  color: var(--osir-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.osir-session-page .session-source-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 16px 2px;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.osir-session-page .session-source-note p {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.session-source-readonly {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--osir-border, var(--border));
+  border-radius: 4px;
+  background: var(--osir-bg, transparent);
+  color: var(--osir-muted, var(--fg-2));
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.osir-session-page .session-list-grouping {
+  height: 32px;
+  padding: 2px;
+  background: var(--osir-bg);
+}
+
+.osir-shell .osir-session-page .session-list-grouping > button {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+}
+
+.osir-shell
+  .osir-session-page
+  .session-list-grouping
+  > button[aria-pressed="true"] {
+  color: var(--osir-accent-strong);
+}
+
+.osir-shell .osir-session-page .session-list-search button {
+  width: 24px;
+  min-height: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.osir-shell
+  .osir-session-page
+  .session-list-search
+  button:hover:not(:disabled) {
+  background: var(--osir-accent-soft);
+}
+
+/* The full-row hit target must never paint over the session text beneath it. */
+.osir-shell .osir-session-page button.session-row-open,
+.osir-shell .osir-session-page button.session-row-open:hover,
+.osir-shell .osir-session-page button.session-row-open:focus-visible {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.osir-shell .osir-session-page button.session-row-action {
+  width: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.osir-shell .osir-session-page input.session-row-checkbox {
+  flex-shrink: 0;
+  width: 16px;
+  min-height: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 4px;
+}
+
+.osir-shell .osir-session-page input.session-row-checkbox:checked {
+  color: white;
+  background: var(--osir-primary);
+  border-color: var(--osir-primary);
+}
+
+.osir-shell .osir-session-page button.session-project-toggle {
+  justify-content: flex-start;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 8px 0 6px;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+}
+
+.osir-shell .osir-session-page button.session-row-action:hover:not(:disabled),
+.osir-shell
+  .osir-session-page
+  button.session-project-toggle:hover:not(:disabled) {
+  background: var(--osir-accent-soft);
+}
+
+.osir-session-page .session-list-region {
+  min-height: 180px;
+  max-height: 440px;
+  margin-inline: 16px;
+  border-color: var(--osir-border);
+  border-radius: 8px;
+}
+
+.osir-session-page .session-list-row {
+  border-color: var(--osir-border-subtle);
+}
+
+.osir-session-page .session-row-title {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 21px;
+}
+
+.osir-session-page .session-row-preview {
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.osir-session-page .session-project-toggle {
+  font-size: 13px;
+  color: var(--osir-text);
+}
+
+.osir-session-page .session-source-notice {
+  margin-inline: 16px;
+}
+
+.osir-session-page .session-list-region button:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: -2px;
+}
+
+.osir-session-page > #main-content > .osir-session-inspection {
+  padding: 12px;
+  background: var(--osir-bg);
+}
+
+.osir-management-history .osir-session-page .osir-session-reader-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.osir-management-history .osir-session-page .osir-session-inspection {
+  flex: 0 0 auto;
+  max-height: none;
+  overflow: visible;
+  border-bottom: 1px solid var(--osir-border);
+}
+
+.osir-session-page .session-inspection-disclosure > summary {
+  padding: 10px 16px;
+  color: var(--osir-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.osir-session-page .session-inspection-disclosure > summary:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: -2px;
+}
+
+.osir-management-history
+  .osir-session-page
+  .osir-session-inspection:has(.session-inspection-disclosure) {
+  padding: 0;
+  background: var(--osir-accent-soft);
+}
+
+.osir-session-page .session-inspection-disclosure[open] > summary {
+  border-bottom: 1px solid var(--osir-border);
+}
+
+.osir-session-page .session-inspection-disclosure .osir-history-inspection {
+  border: 0;
+  border-radius: 0;
+}
+
+.osir-session-page .session-reader {
+  flex: none;
+  height: clamp(360px, calc(100dvh - 250px), 680px);
+  min-width: 0;
+  background: var(--osir-surface);
+}
+
+.osir-session-page .session-reader-header {
+  min-height: 56px;
+  height: auto;
+  padding: 10px 16px;
+  gap: 8px;
+  border-color: var(--osir-border-subtle);
+}
+
+.osir-shell .osir-session-page .session-reader-header h1 {
+  min-width: 0;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.osir-session-page .session-reader-toolbar {
+  padding: 8px 16px;
+  border-color: var(--osir-border);
+  background: var(--osir-bg);
+}
+
+.osir-session-page .session-reader-metadata {
+  flex-basis: 100%;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.osir-session-page .session-reader-controls {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.osir-shell .osir-session-page button.session-reader-icon {
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.osir-shell .osir-session-page button.session-reader-icon:hover:not(:disabled) {
+  background: var(--osir-accent-tint);
+}
+
+.osir-session-page .session-reader-transcript {
+  padding-inline: 16px;
+}
+
+.osir-session-page .session-reader-outline {
+  width: 210px;
+  background: var(--osir-bg);
+}
+
+.osir-session-page .session-reader-body {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.osir-session-page .osir-history-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+}
+
+.osir-session-page .osir-history-entry h2 {
+  margin-bottom: 4px;
+}
+
+.osir-session-page .osir-history-entry p {
+  margin: 0;
+}
+
+.osir-session-page .osir-history-entry > button {
+  flex-shrink: 0;
+}
+
+/* A history reader has its own scrolling surface; the source list stays put. */
+.osir-session-dialog {
+  width: calc(100vw - 48px);
+  max-width: 1100px;
+  height: min(760px, calc(100dvh - 72px));
+  max-height: calc(100dvh - 72px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--osir-border);
+  border-radius: var(--osir-radius);
+  background: var(--osir-surface);
+}
+
+.osir-session-dialog .osir-session-dialog-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--osir-surface);
+}
+
+.osir-session-dialog .session-reader {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  --reader-accent: var(--osir-accent) !important;
+}
+
+.osir-session-dialog .osir-session-inspection {
+  flex: 0 0 auto;
+  max-height: 35%;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--osir-border);
+  background: var(--osir-bg);
+}
+
+.osir-session-dialog .session-reader-outline {
+  display: flex;
+  order: -1;
+  width: 202px;
+  border-inline-start: 0;
+  border-inline-end: 1px solid var(--osir-border);
+}
+
+.osir-session-dialog .session-reader-outline ol > li {
+  padding-inline: 6px;
+  border-radius: 8px;
+}
+
+.osir-session-dialog .session-reader-outline button {
+  align-items: flex-start;
+  align-self: stretch;
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+
+.osir-session-dialog .session-reader-outline button:hover {
+  background: var(--osir-accent-tint);
+}
+
+.osir-session-dialog .session-reader-outline button > span:first-child {
+  font-size: 12px;
+}
+
+.osir-session-dialog .session-reader-outline button > span:last-child {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.osir-session-dialog .session-reader-controls .session-outline-toggle {
+  display: inline-flex;
+}
+
+/* The modal is portaled: its shell and page share one element, so the regular
+   descendant selector above cannot reset the shell's 14px button padding. */
+.osir-session-dialog.osir-drawer button.session-reader-icon {
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.osir-session-dialog.osir-drawer button.session-reader-icon > svg {
+  flex-shrink: 0;
+}
+
+.osir-session-dialog.osir-drawer
+  button.session-reader-icon:hover:not(:disabled) {
+  background: var(--osir-accent-tint);
+}
+
+.osir-session-dialog .session-reader-transcript {
+  padding-inline: 20px;
+}
+
+.osir-session-dialog .session-reader-header button.bg-action {
+  color: white;
+  border-color: var(--osir-primary);
+  background: var(--osir-primary);
+}
+
+.osir-session-dialog
+  .session-reader-header
+  button.bg-action:hover:not(:disabled) {
+  background: var(--osir-primary-hover);
+}
+
+.osir-session-confirm {
+  max-width: min(520px, calc(100vw - 48px));
+  overflow-y: auto;
+  border-color: var(--osir-border);
+  border-radius: var(--osir-radius);
+}
+
+.osir-session-confirm button.bg-danger {
+  color: white;
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.osir-session-menu {
+  border-color: var(--osir-border);
+  border-radius: var(--osir-radius);
+  color: var(--osir-text);
+  background: var(--osir-surface);
+}
+
+.osir-session-menu [role^="menuitem"] {
+  min-height: 34px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.osir-session-menu [role^="menuitem"][data-highlighted] {
+  color: var(--osir-accent-strong);
+  background: var(--osir-accent-soft);
+}
+
+@media (max-width: 980px) {
+  .osir-session-dialog {
+    width: calc(100vw - 32px);
+  }
+
+  .osir-session-dialog .session-reader-outline {
+    width: 180px;
+  }
+
+  .osir-session-dialog .session-reader-transcript {
+    padding-inline: 16px;
+  }
+}
+
+@media (max-width: 980px) {
+  .osir-session-page .session-list-region {
+    max-height: 340px;
+  }
+
+  .osir-session-page .osir-history-entry {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .osir-session-page .session-list-grouping {
+    margin-left: auto;
+  }
+
+  .osir-session-page .session-reader-header {
+    flex-wrap: wrap;
+  }
+
+  .osir-session-page .session-reader-header > div:first-child {
+    flex-basis: 200px;
+  }
+}

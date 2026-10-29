@@ -1,0 +1,31 @@
+{
+  "productName": "OSIR Client Dev",
+  "identifier": "com.osir.client.dev",
+  "bundle": {
+    "active": false,
+    "createUpdaterArtifacts": false,
+    "publisher": "OSIR",
+    "shortDescription": "OSIR account and AI tool connection client",
+    "longDescription": "OSIR desktop client for account resources and provider connections to Codex, Claude Code, OpenCode, and Gemini CLI. Built on CC Switch.",
+    "icon": [
+      "icons/osir/dev/32x32.png",
+      "icons/osir/dev/128x128.png",
+      "icons/osir/dev/128x128@2x.png",
+      "icons/osir/dev/icon.icns",
+      "icons/osir/dev/icon.ico"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "osir-client-dev"
+        ]
+      }
+    },
+    "updater": {
+      "endpoints": []
+    }
+  },
+  "mainBinaryName": "osir_client"
+}

@@ -1,0 +1,404 @@
+/* Scoped to overview/profile; account resource and drawer styles stay intact. */
+.osir-account-overview {
+  color: var(--osir-text, #20324b);
+}
+.osir-account-overview[data-variant="overview"] .osir-stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.osir-account-overview[data-variant="overview"] .osir-stats article {
+  height: 84px;
+  min-height: 84px;
+  align-content: center;
+  gap: 4px 8px;
+}
+.osir-account-overview[data-variant="overview"] .osir-stats article > .sr-only {
+  grid-column: auto;
+}
+.osir-account-overview .osir-overview-metric-icon,
+.osir-account-overview .osir-overview-card-action > .osir-overview-metric-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--osir-muted, #60748f);
+}
+.osir-account-overview .osir-overview-metric-icon:hover {
+  color: var(--osir-accent, #4679a7);
+}
+.osir-account-overview .osir-stats .osir-overview-metric-glyph {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: center;
+  color: var(--osir-muted, #60748f);
+}
+.osir-account-overview .osir-overview-resource-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--osir-muted, #60748f);
+  font-size: 12px;
+}
+.osir-account-overview[data-variant="profile"] .osir-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.osir-account-overview .osir-overview-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.osir-account-overview .osir-overview-card-title svg {
+  flex-shrink: 0;
+  color: var(--osir-muted, #60748f);
+}
+.osir-account-overview .osir-stats article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 12px 14px;
+  border-color: var(--osir-border, #e2eaf4);
+  border-radius: var(--osir-radius, 8px);
+}
+.osir-account-overview .osir-stats article > * {
+  grid-column: 1 / -1;
+}
+.osir-account-overview .osir-stats article > strong {
+  grid-column: 1;
+  grid-row: 2;
+  font-size: 23px;
+  font-variant-numeric: tabular-nums;
+}
+.osir-account-overview .osir-stats article > small {
+  color: var(--osir-muted, #60748f);
+}
+.osir-account-overview .osir-stats .osir-overview-count-unit {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--osir-muted, #60748f);
+}
+.osir-account-overview .osir-stats article > .osir-overview-card-action {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 0;
+  padding: 0;
+}
+.osir-account-overview button.osir-overview-card-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.osir-account-overview .osir-overview-card-action > button {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.osir-account-overview .osir-overview-subscription-details {
+  width: 100%;
+  font-size: 12px;
+}
+.osir-account-overview .osir-overview-subscription-details summary {
+  color: var(--osir-muted);
+}
+.osir-account-overview .osir-overview-subscription-details[open] > summary {
+  margin-bottom: 6px;
+}
+.osir-account-overview button {
+  min-height: var(--osir-control-height, 34px);
+  border-radius: var(--osir-radius, 8px);
+}
+.osir-account-overview .osir-overview-subscriptions {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.osir-account-overview .osir-overview-subscriptions li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.osir-account-overview .osir-overview-subscriptions li > span {
+  flex: 1 1 80px;
+  color: var(--osir-text, #20324b);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.osir-account-overview .osir-overview-subscriptions time {
+  font-size: 12px;
+  color: var(--osir-muted, #60748f);
+}
+.osir-account-overview .osir-overview-identity-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+.osir-account-overview .osir-account-identity {
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px;
+}
+.osir-account-overview .osir-account-identity h3 {
+  overflow-wrap: anywhere;
+}
+.osir-account-overview .osir-account-privacy {
+  margin: 12px 0;
+  padding: 14px;
+  border-color: var(--osir-border, #e2eaf4);
+}
+.osir-account-overview .osir-account-privacy p {
+  overflow-wrap: anywhere;
+}
+.osir-account-overview .osir-overview-sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 12px 0;
+  color: var(--osir-muted, #60748f);
+  font-size: 12px;
+}
+.osir-account-overview .osir-overview-sync p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.osir-account-overview .osir-overview-sync > p:first-child {
+  flex-basis: 100%;
+}
+.osir-overview-tools {
+  margin: 16px 0;
+  color: var(--osir-text, #20324b);
+}
+.osir-overview-tools-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.osir-overview-tools-heading > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.osir-overview-tools-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.osir-overview-tools p {
+  margin: 0;
+  color: var(--osir-muted, #60748f);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.osir-overview-tools-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.osir-overview-tools-toolbar button.osir-overview-version-check {
+  width: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--osir-muted, #60748f);
+  font-size: 0;
+}
+.osir-overview-tools-toolbar
+  button.osir-overview-version-check:hover:not(:disabled) {
+  color: var(--osir-accent, #4679a7);
+}
+.osir-overview-tools-toolbar button.osir-overview-version-check svg {
+  flex-shrink: 0;
+}
+.osir-overview-tools-toolbar button,
+.osir-overview-tool-actions > button,
+.osir-overview-tool-actions .osir-tool-launch-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.osir-overview-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 12px;
+}
+.osir-overview-tool-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--osir-border, #e2eaf4);
+  border-radius: var(--osir-radius, 8px);
+  background: var(--osir-surface, #fff);
+}
+.osir-overview-tool-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+}
+.osir-overview-tool-title > div {
+  flex: 1;
+  min-width: 0;
+}
+.osir-overview-tool-title h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.osir-overview-tools .osir-overview-tool-version {
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.osir-overview-tool-status {
+  flex-shrink: 0;
+  max-width: 88px;
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: var(--osir-radius, 8px);
+  color: var(--osir-muted, #60748f);
+  background: #f1f4f8;
+  font-size: 12px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.osir-overview-tools .osir-overview-tool-connection {
+  min-height: 20px;
+  margin: 10px 0 12px;
+}
+.osir-overview-tool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+.osir-overview-tools button {
+  min-height: var(--osir-control-height, 34px);
+  max-width: 100%;
+  border-radius: var(--osir-radius, 8px);
+  font-size: 13px;
+}
+.osir-overview-tool-actions > button:not(.osir-tool-close) {
+  min-width: 72px;
+}
+.osir-overview-tools
+  .osir-overview-tool-actions
+  > button.osir-overview-tool-icon,
+.osir-shell button.osir-overview-account-action {
+  flex: 0 0 34px;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--osir-text, #293b4d);
+  box-shadow: none;
+}
+.osir-overview-tools
+  .osir-overview-tool-actions
+  > button.osir-overview-tool-icon {
+  color: var(--osir-muted, #6f8092);
+}
+.osir-overview-tools
+  .osir-overview-tool-actions
+  > button.osir-overview-tool-icon:hover:not(:disabled),
+.osir-shell button.osir-overview-account-action:hover:not(:disabled) {
+  background: transparent;
+  color: var(--osir-accent-strong, #38668f);
+}
+.osir-overview-tool-actions
+  .osir-tool-launch-actions
+  > button:not(.osir-tool-restart) {
+  min-width: 72px;
+}
+.osir-overview-tool-actions > .osir-tool-close {
+  margin-left: auto;
+}
+.osir-overview-tools-toolbar .osir-tool-update-status {
+  align-self: center;
+  color: var(--osir-muted, #60748f);
+  font-size: 12px;
+}
+.osir-overview-tools .osir-overview-tool-note {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--osir-muted, #60748f);
+  overflow-wrap: anywhere;
+}
+.osir-overview-tools [role="alert"] {
+  color: #a53e3e;
+}
+.osir-overview-tool-actions > [role="alert"] {
+  order: 1;
+  flex-basis: 100%;
+  margin-top: 0;
+  font-size: 12px;
+}
+.osir-overview-tools-empty {
+  padding: 18px 0;
+}
+.osir-tool-update-dialog {
+  border-color: var(--osir-border);
+  border-radius: var(--osir-radius);
+  background: var(--osir-surface);
+  color: var(--osir-text);
+}
+.osir-tool-update-dialog button {
+  min-height: var(--osir-control-height);
+  border-radius: var(--osir-radius);
+}
+.osir-tool-update-dialog .bg-warning-soft {
+  background: var(--osir-accent-soft);
+}
+.osir-tool-update-dialog .text-warning-text {
+  color: var(--osir-accent-strong);
+}
+@media (max-width: 960px) {
+  .osir-account-overview .osir-stats article {
+    padding: 12px;
+  }
+  .osir-account-overview .osir-account-privacy > div {
+    gap: 8px;
+  }
+  .osir-overview-tool-card {
+    padding: 12px;
+  }
+}
+@media (max-width: 600px) {
+  .osir-account-overview[data-variant="profile"] .osir-stats {
+    grid-template-columns: 1fr;
+  }
+  .osir-overview-tools-grid {
+    grid-template-columns: 1fr;
+  }
+}

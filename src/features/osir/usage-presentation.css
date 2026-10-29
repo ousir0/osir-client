@@ -1,0 +1,352 @@
+/* OSIR user usage semantics; colors identify metrics, never request success. */
+.osir-local-usage button.usage-metric-hit-target {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.osir-local-usage button.usage-metric-hit-target:hover:not(:disabled) {
+  background: var(--osir-accent-soft);
+}
+.osir-usage-tone-blue {
+  --usage-color: #1d5fd0;
+  --usage-bg: #edf4ff;
+  --usage-border: #dce8ff;
+}
+.osir-usage-tone-green {
+  --usage-color: #167252;
+  --usage-bg: #edf8f2;
+  --usage-border: #d8eee2;
+}
+.osir-usage-tone-violet {
+  --usage-color: #7551b5;
+  --usage-bg: #f3effa;
+  --usage-border: #e8dff5;
+}
+.osir-usage-tone-amber {
+  --usage-color: #966012;
+  --usage-bg: #fff7e8;
+  --usage-border: #f4e6c8;
+}
+.osir-usage-tone-cyan {
+  --usage-color: #16738c;
+  --usage-bg: #edf8fb;
+  --usage-border: #d6edf4;
+}
+.osir-usage-tone-pink {
+  --usage-color: #ab4b7a;
+  --usage-bg: #fcf0f6;
+  --usage-border: #f2dfea;
+}
+.osir-usage-tone-slate {
+  --usage-color: #60718a;
+  --usage-bg: #f4f6f9;
+  --usage-border: #e4eaf2;
+}
+.osir-usage-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.osir-usage-stats article {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--osir-border, #e2eaf4);
+  border-radius: 8px;
+  background: #fff;
+}
+.osir-usage-stat-icon {
+  display: grid;
+  flex: 0 0 24px;
+  place-items: center;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--usage-color);
+  background: var(--usage-bg);
+}
+.osir-usage-stat-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.osir-usage-stats article > div {
+  min-width: 0;
+}
+.osir-usage-stat-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-usage-stats strong {
+  display: block;
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+.osir-usage-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+.osir-usage-badge {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--usage-border);
+  border-radius: 5px;
+  background: var(--usage-bg);
+  color: var(--usage-color);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.osir-usage-badge svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.osir-usage-records-table table {
+  min-width: 950px;
+}
+.osir-usage-records-table th,
+.osir-usage-records-table td {
+  padding: 12px;
+}
+.osir-usage-records-table td:first-child {
+  width: 125px;
+  font-size: 12px;
+  color: #60748f;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.osir-account-usage .osir-usage-detail-trigger {
+  display: block;
+  min-height: 34px;
+  margin-top: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--osir-accent);
+  font-size: 12px;
+}
+.osir-account-usage .osir-usage-detail-trigger:hover {
+  text-decoration: underline;
+}
+.osir-usage-model {
+  min-width: 170px;
+  max-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.osir-usage-model > strong {
+  color: #20324b;
+  font-size: 13px;
+  font-weight: 600;
+}
+.osir-usage-key {
+  display: inline-flex;
+  gap: 5px;
+  align-items: flex-start;
+  color: #60748f;
+  font-size: 12px;
+}
+.osir-usage-key svg {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+}
+.osir-usage-records-table td:nth-child(3) {
+  min-width: 130px;
+  max-width: 170px;
+}
+.osir-usage-token-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 140px;
+}
+.osir-usage-metric {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--usage-color);
+  font-variant-numeric: tabular-nums;
+}
+.osir-usage-metric svg {
+  flex: 0 0 13px;
+  width: 13px;
+  height: 13px;
+}
+.osir-usage-metric b {
+  font-weight: 500;
+}
+.osir-usage-cost {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 115px;
+  font-variant-numeric: tabular-nums;
+}
+.osir-usage-cost strong {
+  color: #167252;
+  font-size: 14px;
+  font-weight: 600;
+}
+.osir-usage-cost > span:not(.osir-usage-badge) {
+  color: #60748f;
+  font-size: 12px;
+}
+.osir-usage-latency {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  gap: 5px 8px;
+  margin: 0;
+  font-size: 12px;
+  border-left: 3px solid #d9e9fb;
+  padding-left: 8px;
+}
+.osir-usage-latency dt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #60748f;
+}
+.osir-usage-latency svg {
+  width: 12px;
+  height: 12px;
+}
+.osir-usage-latency dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.osir-usage-breakdown {
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid #e2eaf4;
+  border-radius: 8px;
+  background: #fff;
+}
+.osir-usage-breakdown header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.osir-usage-breakdown h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.osir-usage-breakdown h3 svg {
+  width: 16px;
+  height: 16px;
+  color: #60748f;
+}
+.osir-usage-metric-switch {
+  display: flex;
+  border: 1px solid #e2eaf4;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+.osir-usage-metric-switch button {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+  background: transparent;
+  color: #60748f;
+}
+.osir-usage-metric-switch button[aria-pressed="true"] {
+  color: var(--osir-accent-strong);
+  background: var(--osir-accent-soft);
+}
+.osir-usage-breakdown ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.osir-usage-breakdown li {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(80px, 2fr) 105px 45px;
+  gap: 12px;
+  align-items: center;
+  font-size: 12px;
+}
+.osir-usage-breakdown-name {
+  overflow-wrap: anywhere;
+}
+.osir-usage-bar-track {
+  height: 7px;
+  border-radius: 3px;
+  background: #f0f4f8;
+  overflow: hidden;
+}
+.osir-usage-bar {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: #4d88ee;
+}
+.osir-usage-bar-1 {
+  background: #8c73c8;
+}
+.osir-usage-bar-2 {
+  background: #48a6ae;
+}
+.osir-usage-bar-3 {
+  background: #cc9a48;
+}
+.osir-usage-bar-4 {
+  background: #c57fa2;
+}
+.osir-usage-breakdown li strong,
+.osir-usage-breakdown li small {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.osir-usage-breakdown > p:last-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+@media (max-width: 760px) {
+  .osir-usage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .osir-usage-breakdown li {
+    grid-template-columns: 1fr 80px 45px;
+  }
+  .osir-usage-bar-track {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}

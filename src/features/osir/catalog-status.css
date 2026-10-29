@@ -1,0 +1,47 @@
+.osir-catalog-status {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--osir-border, #e2eaf4);
+  border-radius: 8px;
+  background: #f3f7ff;
+  color: var(--osir-text, #20324b);
+}
+.osir-catalog-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.osir-catalog-status-row > div:first-child {
+  flex: 1 1 250px;
+}
+.osir-catalog-status p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.osir-catalog-status strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.osir-catalog-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.osir-drawer.osir-catalog-confirm {
+  max-width: min(420px, calc(100vw - 32px));
+  border-radius: 8px;
+}
+.osir-catalog-status [role="alert"],
+.osir-catalog-confirm [role="alert"] {
+  color: var(--osir-danger, #b42318);
+  overflow-wrap: anywhere;
+}
+.osir-catalog-confirm > [role="alert"] {
+  margin: 0 24px 8px;
+  font-size: 13px;
+}

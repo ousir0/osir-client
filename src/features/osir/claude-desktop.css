@@ -1,0 +1,110 @@
+.osir-claude-desktop {
+  min-width: 0;
+}
+.osir-claude-desktop-history {
+  display: flex;
+  min-width: 0;
+  height: max(360px, calc(100vh - 285px));
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.osir-claude-desktop-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.osir-claude-desktop-heading h1 {
+  margin: 0;
+}
+.osir-claude-desktop-heading p {
+  margin-top: 4px;
+}
+.osir-claude-desktop-provider {
+  background: var(--osir-surface);
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+.osir-claude-desktop-provider-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  min-width: 0;
+}
+.osir-claude-desktop-provider-name {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.osir-claude-desktop-provider-name small {
+  font-size: 12px;
+  color: var(--osir-muted);
+}
+.osir-claude-desktop-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #278368;
+  white-space: nowrap;
+}
+.osir-claude-desktop-provider-heading > button {
+  flex-shrink: 0;
+}
+.osir-claude-desktop-models {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-top: 1px solid var(--osir-border);
+}
+.osir-claude-desktop-models > span {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--osir-bg);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.osir-claude-desktop-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 28px 16px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: var(--osir-surface);
+  color: var(--osir-muted);
+}
+.osir-claude-desktop-empty p {
+  margin: 0;
+  text-align: center;
+}
+.osir-claude-desktop-install {
+  padding: 16px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: var(--osir-surface);
+}
+.osir-claude-desktop-scope {
+  margin-top: 16px;
+  font-size: 12px;
+}
+.osir-claude-desktop-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+@media (max-width: 960px) {
+  .osir-claude-desktop-provider-heading {
+    flex-wrap: wrap;
+  }
+  .osir-claude-desktop-provider-name {
+    min-width: 160px;
+  }
+}

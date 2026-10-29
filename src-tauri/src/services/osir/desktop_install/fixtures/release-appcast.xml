@@ -1,0 +1,60 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Codex</title>
+    <item>
+      <title>26.602.30954</title>
+      <sparkle:version>3575</sparkle:version>
+      <sparkle:shortVersionString>26.602.30954</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-arm64-26.602.30954.zip"
+                 sparkle:version="3575" sparkle:shortVersionString="26.602.30954"
+                 length="406581087" type="application/octet-stream"
+                 sparkle:edSignature="xhD+k3d+/EYsdAA+6F4T9Yt/OilnN8nALJOti6Ao6iMwsELwhfvKmWiaKj8Tel4rhp+yx4IJy/jjGI+wJU6fAg=="/>
+      <sparkle:deltas>
+        <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex3575-3511-arm64.delta"
+                   sparkle:deltaFrom="3511" length="18260894" type="application/octet-stream"
+                   sparkle:edSignature="ZGVsdGEzNTExc2lnbmF0dXJlZXhhbXBsZQ=="/>
+        <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex3575-3497-arm64.delta"
+                   sparkle:deltaFrom="3497" length="21947738" type="application/octet-stream"
+                   sparkle:edSignature="ZGVsdGEzNDk3c2lnbmF0dXJlZXhhbXBsZQ=="/>
+        <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex3575-3437-arm64.delta"
+                   sparkle:deltaFrom="3437" length="62563010" type="application/octet-stream"/>
+        <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex3575-3390-arm64.delta"
+                   sparkle:deltaFrom="3390" length="66263370" type="application/octet-stream"/>
+        <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex3575-3370-arm64.delta"
+                   sparkle:deltaFrom="3370" length="66264078" type="application/octet-stream"/>
+      </sparkle:deltas>
+    </item>
+    <item>
+      <sparkle:version>3511</sparkle:version>
+      <sparkle:shortVersionString>26.601.21317</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-arm64-26.601.21317.zip"
+                 sparkle:version="3511" length="404477775" type="application/octet-stream"
+                 sparkle:edSignature="CQ1PivfTx8Py4t7Sbkx1PTR90y1ekP45eMWVF0ZrCRIuIwOCqZ8IE6lFZ8ap5Ws9OcYratkA+u6ab4PFRf3yCw=="/>
+      <sparkle:deltas>
+        <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex3511-3497-arm64.delta"
+                   sparkle:deltaFrom="3497" length="9123456" type="application/octet-stream"/>
+      </sparkle:deltas>
+    </item>
+    <item>
+      <sparkle:version>3497</sparkle:version>
+      <sparkle:shortVersionString>26.601.20914</sparkle:shortVersionString>
+      <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-arm64-26.601.20914.zip"
+                 sparkle:version="3497" length="404816296" type="application/octet-stream"/>
+    </item>
+    <item>
+      <sparkle:version>3437</sparkle:version>
+      <sparkle:shortVersionString>26.527.60818</sparkle:shortVersionString>
+      <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-arm64-26.527.60818.zip"
+                 sparkle:version="3437" length="402462711" type="application/octet-stream"/>
+    </item>
+    <item>
+      <sparkle:version>3390</sparkle:version>
+      <sparkle:shortVersionString>26.527.31326</sparkle:shortVersionString>
+      <enclosure url="https://persistent.oaistatic.com/codex-app-prod/Codex-darwin-arm64-26.527.31326.zip"
+                 sparkle:version="3390" length="401275684" type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>
