@@ -1,0 +1,1029 @@
+/* Account pages only: shared workbench and drawer geometry stay independent. */
+.osir-account-pages {
+  min-width: 0;
+  max-width: 100%;
+  color: #263247;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.osir-account-pages .osir-tabs {
+  display: flex;
+  gap: 24px;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #e3e9f1;
+  border-radius: 0;
+  background: transparent;
+}
+.osir-account-pages .osir-tabs button {
+  padding: 10px 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: #66758a;
+  background: transparent;
+}
+.osir-account-pages .osir-tabs button[aria-selected="true"],
+.osir-account-pages .osir-tabs button[aria-pressed="true"] {
+  color: var(--osir-accent);
+  border-bottom-color: var(--osir-accent);
+  background: transparent;
+}
+.osir-account-pages .osir-muted,
+.osir-account-pages small {
+  color: #748196;
+  font-size: 12px;
+}
+.osir-account-pages button:focus-visible,
+.osir-account-pages summary:focus-visible,
+.osir-account-pages input:focus-visible,
+.osir-account-pages select:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 3px;
+}
+.osir-account-pages button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.osir-account-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  padding: 0 0 12px;
+  margin: 0 0 12px;
+  border-bottom: 1px solid var(--osir-border-subtle, #ebf0f4);
+  background: transparent;
+}
+.osir-account-filter label {
+  min-width: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+.osir-usage-date-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-basis: 100%;
+}
+.osir-account-filter .osir-usage-date-presets .osir-tabs {
+  gap: 4px;
+  margin: 0;
+  border: 0;
+}
+.osir-account-filter .osir-usage-date-presets .osir-tabs button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.osir-account-filter
+  .osir-usage-date-presets
+  .osir-tabs
+  button[aria-selected="true"] {
+  color: var(--osir-accent-strong);
+  border-color: var(--osir-accent-border);
+  background: var(--osir-accent-soft);
+}
+.osir-account-filter input,
+.osir-account-filter select {
+  max-width: 100%;
+  height: 34px;
+  border-radius: 8px;
+}
+.osir-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.osir-account-filter .osir-filter-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--osir-muted);
+  background: var(--osir-surface, #fff);
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+}
+.osir-account-filter .osir-filter-actions .osir-filter-query {
+  color: var(--osir-accent-strong);
+  border-color: var(--osir-accent-border);
+  background: var(--osir-accent-soft);
+}
+.osir-account-filter .osir-filter-actions button:hover:not(:disabled) {
+  border-color: var(--osir-accent-border);
+  background: var(--osir-accent-soft);
+}
+.osir-usage-date-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.osir-usage-date-range > span {
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-usage-date-range input {
+  width: 132px;
+}
+.osir-account-filter[data-page="usage"] > .osir-usage-name-filter select {
+  width: 148px;
+}
+.osir-usage-date-range .osir-filter-label,
+.osir-account-filter[data-page="usage"]
+  > .osir-usage-name-filter
+  .osir-filter-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.osir-account-filter[data-page="usage"] {
+  align-items: center;
+}
+.osir-account-filter[data-page="usage"] > [role="alert"] {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+}
+.osir-usage-range-caption {
+  margin: 0 0 8px;
+}
+.osir-account-filter select,
+.osir-account-detail-drawer .osir-form select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px;
+  border: 1px solid #dce4ef;
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='1.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  text-overflow: ellipsis;
+}
+.osir-account-filter select {
+  width: 180px;
+}
+.osir-account-filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  padding: 8px 0 0;
+}
+.osir-account-advanced {
+  min-height: 34px;
+  align-content: center;
+}
+.osir-account-advanced[open] {
+  flex-basis: 100%;
+  order: 2;
+  border-top: 1px solid #edf1f6;
+  padding-top: 8px;
+}
+.osir-account-pages summary {
+  color: var(--osir-accent);
+  cursor: pointer;
+  font-size: 12px;
+}
+.osir-account-pages details[open] > summary {
+  margin-bottom: 8px;
+}
+.osir-account-pages .osir-resource-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0;
+  font-size: 12px;
+  color: #748196;
+}
+.osir-account-pages .osir-resource-table {
+  overflow-x: auto;
+  border: 1px solid #e3e9f1;
+  border-radius: 8px;
+  background: #fff;
+}
+.osir-account-pages .osir-resource-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.osir-account-pages .osir-resource-table th {
+  padding: 12px 16px;
+  color: #748196;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+.osir-account-pages .osir-resource-table td {
+  padding: 16px;
+  border-top: 1px solid #edf1f6;
+  vertical-align: top;
+}
+.osir-account-pages .osir-resource-table tbody tr:hover {
+  background: #fafcff;
+}
+.osir-account-pages .osir-resource-table td:first-child {
+  font-weight: 500;
+}
+.osir-account-pages .osir-resource-table td small {
+  font-weight: 400;
+  margin-top: 4px;
+}
+.osir-account-pages .osir-resource-table details[open] {
+  min-width: 230px;
+  max-width: 380px;
+  overflow-wrap: anywhere;
+}
+.osir-account-pages .osir-empty {
+  padding: 36px 20px;
+  text-align: center;
+  color: #748196;
+}
+.osir-account-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border: 1px solid #e2e9f2;
+  border-radius: 5px;
+  background: #f7f9fc;
+  color: #56677e;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.osir-account-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: #748196;
+}
+.osir-account-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+.osir-account-status[data-active="true"] {
+  color: #258269;
+}
+.osir-account-status[data-active="true"]::before {
+  background: #2eaa84;
+}
+.osir-account-pages .osir-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.osir-account-pages .osir-stats article {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: var(--osir-surface, #fff);
+  min-width: 0;
+}
+.osir-account-pages .osir-stats article > span {
+  font-size: 13px;
+  color: #64748b;
+}
+.osir-account-pages .osir-stats article strong {
+  color: var(--osir-text);
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.osir-account-subscriptions {
+  display: grid;
+  gap: 12px;
+}
+.osir-account-subscriptions .osir-tabs {
+  margin-bottom: 0;
+}
+.osir-account-subscription {
+  padding: 16px;
+  border: 1px solid #e3e9f1;
+  border-radius: 8px;
+  background: #fff;
+}
+.osir-account-subscription header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.osir-account-subscription h3 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.osir-subscription-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.osir-subscription-entitlements,
+.osir-subscription-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.osir-subscription-actions {
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #edf1f6;
+}
+.osir-account-quotas {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.osir-account-quotas section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.osir-account-quotas section > span {
+  color: #748196;
+  font-size: 12px;
+}
+.osir-account-quotas strong {
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.osir-account-quotas progress {
+  display: block;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #edf2f8;
+}
+.osir-account-quotas progress::-webkit-progress-bar {
+  background: #edf2f8;
+}
+.osir-account-quotas progress::-webkit-progress-value {
+  background: var(--osir-accent);
+  border-radius: 4px;
+}
+.osir-account-quotas progress::-moz-progress-bar {
+  background: var(--osir-accent);
+  border-radius: 4px;
+}
+.osir-account-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 12px;
+  background: #fff;
+  border: 1px solid #e3e9f1;
+  border-radius: 8px;
+}
+.osir-account-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: var(--osir-accent-soft);
+  color: var(--osir-accent);
+  font-size: 20px;
+  font-weight: 600;
+}
+.osir-account-identity h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.osir-account-identity p {
+  margin: 2px 0;
+  color: #748196;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.osir-account-identity > div {
+  min-width: 0;
+}
+.osir-account-identity > .osir-account-badge {
+  margin-left: auto;
+}
+@media (max-width: 960px) {
+  .osir-account-pages .osir-stats {
+    gap: 10px;
+  }
+  .osir-account-pages .osir-stats article {
+    padding: 12px;
+  }
+  .osir-account-pages .osir-resource-table td {
+    padding: 12px;
+  }
+  .osir-account-quotas {
+    gap: 12px;
+  }
+  .osir-account-subscription {
+    padding: 14px;
+  }
+}
+@media (max-width: 600px) {
+  .osir-account-pages .osir-stats,
+  .osir-account-quotas {
+    grid-template-columns: 1fr;
+  }
+  .osir-account-identity {
+    flex-wrap: wrap;
+  }
+}
+.osir-account-subscription-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 12px;
+  align-items: start;
+}
+.osir-account-subscription-list {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.osir-account-wallet {
+  padding: 14px;
+  border: 1px solid #e3e9f1;
+  border-radius: 8px;
+  background: #fff;
+}
+.osir-account-wallet h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.osir-account-wallet > strong {
+  display: block;
+  font-size: 23px;
+  margin-bottom: 10px;
+}
+.osir-account-wallet button {
+  width: 100%;
+}
+.osir-account-wallet p {
+  margin: 8px 0 0;
+}
+.osir-account-subscription .osir-account-quotas {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.osir-account-subscription .osir-account-quotas section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.osir-account-subscription .osir-account-quotas progress,
+.osir-account-subscription .osir-account-quotas small {
+  grid-column: 1 / -1;
+}
+.osir-account-subscription > p {
+  margin: 8px 0 0;
+}
+.osir-account-subscription .osir-subscription-entitlements {
+  margin-top: 8px;
+}
+.osir-account-privacy {
+  margin: 20px 0;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #e3e9f1;
+  border-radius: 8px;
+}
+.osir-account-privacy h3 {
+  font-size: 15px;
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.osir-account-privacy > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid #edf1f6;
+}
+.osir-account-privacy p {
+  flex: 1 1 220px;
+  margin: 0;
+  color: #748196;
+  font-size: 12px;
+}
+@media (max-width: 960px) {
+  .osir-account-subscription-layout {
+    grid-template-columns: minmax(0, 1fr) 180px;
+    gap: 12px;
+  }
+  .osir-account-wallet {
+    padding: 16px;
+  }
+}
+@media (max-width: 760px) {
+  .osir-account-subscription-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.osir-account-resource-layout {
+  min-width: 0;
+}
+.osir-account-resource-layout.has-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+  align-items: start;
+}
+.osir-account-key-detail {
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #e3e9f1;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.osir-account-key-detail header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.osir-account-key-detail h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.osir-account-key-detail h4 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.osir-account-key-detail p {
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid #edf1f6;
+  font-size: 12px;
+}
+@media (max-width: 960px) {
+  .osir-account-resource-layout.has-detail {
+    grid-template-columns: 1fr;
+  }
+}
+.osir-account-pages > *,
+.osir-account-resource-layout > *,
+.osir-account-subscription-layout > *,
+.osir-account-subscription > *,
+.osir-account-usage-page > div {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.osir-account-wallet > strong {
+  font-size: 23px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.osir-account-create-help {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid #e3e9f1;
+  border-radius: 8px;
+  background: #fff;
+}
+.osir-account-create-help p {
+  margin: 8px 0 0;
+  color: #748196;
+  font-size: 12px;
+}
+/* Account resources share the website semantics within the desktop geometry. */
+.osir-account-resource .osir-account-badge {
+  gap: 5px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+.osir-account-resource .osir-account-badge svg {
+  flex-shrink: 0;
+}
+.osir-account-resource [data-tone="success"] {
+  color: #16775b;
+}
+.osir-account-resource .osir-account-badge[data-tone="success"] {
+  background: #eefaf4;
+  border-color: #ceeadd;
+}
+.osir-account-resource [data-tone="warning"] {
+  color: #a76311;
+}
+.osir-account-resource .osir-account-badge[data-tone="warning"] {
+  background: #fff8eb;
+  border-color: #f5dfb5;
+}
+.osir-account-resource [data-tone="danger"] {
+  color: #b33e46;
+}
+.osir-account-resource .osir-account-badge[data-tone="danger"] {
+  background: #fff2f3;
+  border-color: #f1d2d6;
+}
+.osir-account-resource .osir-account-badge[data-tone="violet"] {
+  color: #7953af;
+  background: #f7f2fe;
+  border-color: #e6daf7;
+}
+.osir-account-resource .osir-platform-badge[data-platform="openai"] {
+  color: #19785e;
+  background: #f1faf6;
+  border-color: #d7ece2;
+}
+.osir-account-resource .osir-platform-badge[data-platform="anthropic"] {
+  color: #a56136;
+  background: #fff7f1;
+  border-color: #f1e0d2;
+}
+.osir-account-resource .osir-platform-badge[data-platform="gemini"],
+.osir-account-resource .osir-platform-badge[data-platform="google"] {
+  color: #346aaa;
+  background: #f2f7ff;
+  border-color: #dae5f5;
+}
+.osir-account-resource .osir-platform-badge[data-platform="antigravity"] {
+  color: #7953af;
+  background: #f7f2fe;
+  border-color: #e6daf7;
+}
+.osir-account-resource .osir-keys-table table {
+  min-width: 740px;
+}
+.osir-account-resource .osir-groups-table table {
+  min-width: 720px;
+}
+.osir-account-resource .osir-keys-table td:nth-child(1) {
+  width: 25%;
+  min-width: 175px;
+}
+.osir-account-resource .osir-keys-table td:nth-child(2) {
+  width: 21%;
+  min-width: 145px;
+}
+.osir-account-resource .osir-keys-table td:nth-child(3) {
+  min-width: 125px;
+}
+.osir-account-resource .osir-keys-table td:nth-child(4) {
+  min-width: 180px;
+}
+.osir-resource-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.osir-resource-name strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.osir-resource-symbol {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  color: #60748f;
+  background: #f3f6fb;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+}
+.osir-account-resource .osir-key-mask {
+  display: block;
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+.osir-key-last-used,
+.osir-key-expiry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.5;
+}
+.osir-key-expiry svg,
+.osir-key-last-used svg {
+  flex-shrink: 0;
+}
+.osir-key-group,
+.osir-group-badges {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.osir-key-group strong {
+  flex-basis: 100%;
+  margin-bottom: 2px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.osir-key-quota {
+  display: grid;
+  gap: 7px;
+}
+.osir-key-quota-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.osir-key-quota-heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #748196;
+  font-size: 12px;
+}
+.osir-key-quota-heading strong {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.osir-key-quota progress {
+  width: 100%;
+  height: 5px;
+  appearance: none;
+  border: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #edf2f8;
+}
+.osir-key-quota progress::-webkit-progress-bar {
+  background: #edf2f8;
+}
+.osir-key-quota progress::-webkit-progress-value {
+  background: var(--osir-accent);
+  border-radius: 4px;
+}
+.osir-key-quota progress::-moz-progress-bar {
+  background: var(--osir-accent);
+  border-radius: 4px;
+}
+.osir-key-use-summary {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+.osir-group-rate {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.osir-group-rate strong {
+  font-weight: 600;
+}
+.osir-group-custom-rate {
+  color: var(--osir-accent-strong);
+}
+.osir-account-subscription {
+  border: 1px solid var(--osir-border);
+  padding: 14px;
+}
+.osir-account-subscription[data-platform="openai"] {
+  border-top-color: var(--osir-border);
+}
+.osir-account-subscription[data-platform="anthropic"] {
+  border-top-color: var(--osir-border);
+}
+.osir-account-subscription[data-platform="gemini"] {
+  border-top-color: var(--osir-border);
+}
+.osir-subscription-heading > svg {
+  flex-shrink: 0;
+}
+.osir-account-subscription h3 {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.osir-subscription-description {
+  margin: 10px 0 0;
+  color: #748196;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.osir-subscription-period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 0 0;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.osir-subscription-period > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #748196;
+}
+.osir-subscription-period strong {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.osir-subscription-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 4px;
+  color: var(--osir-muted);
+  font-size: 11px;
+}
+.osir-subscription-meta .osir-account-badge {
+  padding: 1px 5px;
+  font-size: 10px;
+}
+.osir-subscription-actions {
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--osir-border-subtle);
+  padding-top: 10px;
+}
+.osir-subscription-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+.osir-subscription-details {
+  min-width: 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-subscription-details[open] {
+  flex-basis: 100%;
+}
+.osir-subscription-details summary {
+  cursor: pointer;
+}
+.osir-subscription-details p {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.osir-account-subscription .osir-account-quotas small {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px 8px;
+}
+.osir-account-quotas progress[data-level="normal"]::-webkit-progress-value {
+  background: #38a37d;
+}
+.osir-account-quotas progress[data-level="medium"]::-webkit-progress-value {
+  background: #d69a3a;
+}
+.osir-account-quotas progress[data-level="high"]::-webkit-progress-value {
+  background: #d76b70;
+}
+.osir-account-quotas progress[data-level="normal"]::-moz-progress-bar {
+  background: #38a37d;
+}
+.osir-account-quotas progress[data-level="medium"]::-moz-progress-bar {
+  background: #d69a3a;
+}
+.osir-account-quotas progress[data-level="high"]::-moz-progress-bar {
+  background: #d76b70;
+}
+.osir-subscription-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+@media (max-width: 1020px) {
+  .osir-account-subscription-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .osir-account-wallet {
+    max-width: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 12px;
+  }
+  .osir-account-wallet h3,
+  .osir-account-wallet > strong,
+  .osir-account-wallet p {
+    margin: 0;
+  }
+  .osir-account-wallet > button {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    width: auto;
+  }
+  .osir-account-wallet > p {
+    grid-column: 1 / -1;
+  }
+}
+.osir-account-pages .osir-resource-table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.osir-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.osir-resource-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.osir-account-detail-drawer {
+  color: #20324b;
+  background: #fff;
+  border-color: #e2eaf4;
+  border-radius: 8px 0 0 8px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.osir-account-detail-drawer h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.osir-account-detail-drawer p {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.osir-account-detail-drawer .osir-muted {
+  color: #60748f;
+  font-size: 12px;
+}
+.osir-account-detail-drawer .osir-detail-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e2eaf4;
+}
+.osir-account-detail-drawer h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.osir-detail-values {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) minmax(0, 1fr);
+  gap: 10px 16px;
+  font-size: 13px;
+}
+.osir-detail-values dt {
+  color: #60748f;
+}
+.osir-detail-values dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.osir-account-create-action {
+  display: contents;
+}
+.osir-account-create-action > button {
+  min-width: 108px;
+}

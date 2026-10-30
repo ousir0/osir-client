@@ -1,0 +1,357 @@
+.osir-managed-desktop {
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.osir-desktop-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.osir-desktop-heading > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.osir-managed-desktop .osir-desktop-heading h2 {
+  font-size: 15px;
+  margin-bottom: 2px;
+}
+
+.osir-desktop-heading > button {
+  flex-shrink: 0;
+}
+
+.osir-desktop-overview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.osir-managed-desktop .osir-desktop-current {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.osir-desktop-current > strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--osir-text);
+}
+
+.osir-managed-desktop .osir-desktop-current > p {
+  margin: 0;
+}
+
+.osir-desktop-source,
+.osir-desktop-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--osir-muted);
+}
+
+.osir-desktop-source select,
+.osir-desktop-target select {
+  min-height: 34px;
+  width: 160px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--osir-text);
+  font: inherit;
+}
+.osir-desktop-target select {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.osir-managed-desktop button,
+.osir-desktop-source select {
+  min-height: var(--osir-control-height, 34px);
+  border-radius: 8px;
+}
+
+.osir-desktop-source select:disabled,
+.osir-desktop-target select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.osir-desktop-source select:focus-visible,
+.osir-desktop-target select:focus-visible,
+.osir-desktop-advanced > summary:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+
+.osir-desktop-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.osir-managed-desktop .osir-desktop-release {
+  gap: 3px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--osir-accent-border);
+  border-radius: 8px;
+  background: var(--osir-accent-soft);
+}
+
+.osir-desktop-release strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--osir-text);
+}
+
+.osir-managed-desktop .osir-desktop-operation {
+  padding: 12px;
+  background: var(--osir-bg);
+}
+
+.osir-desktop-advanced {
+  border-top: 1px solid var(--osir-border);
+  padding-top: 10px;
+}
+
+.osir-desktop-advanced > summary {
+  cursor: pointer;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 24px;
+}
+
+.osir-desktop-advanced[open] > summary {
+  margin-bottom: 12px;
+}
+
+.osir-managed-desktop .osir-desktop-information,
+.osir-managed-desktop .osir-desktop-restore {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.osir-managed-desktop .osir-desktop-restore {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--osir-border);
+  border-radius: 0;
+}
+
+.osir-managed-desktop .osir-desktop-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  margin: 12px 0;
+}
+
+.osir-desktop-info-grid > div {
+  min-width: 0;
+}
+
+.osir-desktop-info-grid dt {
+  color: var(--osir-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.osir-desktop-info-grid dd {
+  margin: 3px 0 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.osir-desktop-info-grid code,
+.osir-desktop-version code {
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+
+.osir-managed-desktop .osir-desktop-version {
+  gap: 3px;
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--osir-border);
+  font-size: 12px;
+}
+
+.osir-managed-desktop .osir-desktop-version strong {
+  font-size: 13px;
+  color: var(--osir-text);
+}
+
+.osir-desktop-information > .osir-desktop-actions {
+  margin-top: 12px;
+}
+
+.osir-desktop-restore-context {
+  display: block;
+  margin-top: 3px;
+  color: var(--osir-muted);
+}
+
+.osir-desktop-recovery,
+.osir-managed-desktop > [role="alert"],
+.osir-desktop-feedback[role="alert"] {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #efd0cf;
+  border-radius: 8px;
+  background: #fff6f5;
+  color: #a43030;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.osir-desktop-recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.osir-desktop-recovery p {
+  margin: 0;
+}
+
+.osir-desktop-feedback {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .osir-desktop-overview {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .osir-desktop-heading {
+    flex-wrap: wrap;
+  }
+
+  .osir-managed-desktop .osir-desktop-restore-table table {
+    min-width: 420px;
+  }
+}
+
+.osir-managed-desktop .osir-installer-phases {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.osir-installer-phases li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  color: var(--osir-text);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.osir-installer-phases li[aria-current="step"] {
+  background: var(--osir-accent-soft);
+  border-color: var(--osir-accent-border);
+}
+
+.osir-installer-phase-marker {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  color: var(--osir-muted);
+}
+
+.osir-installer-phases [aria-current="step"] .osir-installer-phase-marker {
+  color: var(--osir-accent);
+  border-color: var(--osir-accent-border);
+}
+
+.osir-installer-phase-state {
+  color: var(--osir-muted);
+  white-space: nowrap;
+}
+
+.osir-installer-phases [aria-current="step"] .osir-installer-phase-state {
+  color: var(--osir-accent);
+}
+
+.osir-managed-desktop .osir-installer-steps {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+}
+
+.osir-installer-steps li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 2px;
+  border: 0;
+  border-radius: 0;
+  text-align: center;
+}
+
+.osir-installer-steps li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 20px;
+  left: calc(50% + 16px);
+  right: calc(-50% + 16px);
+  height: 1px;
+  background: var(--osir-border);
+}
+
+.osir-installer-steps .osir-installer-phase-marker {
+  border-radius: 50%;
+  background: #fff;
+}
+
+.osir-installer-steps li[aria-current="step"] {
+  background: transparent;
+  color: var(--osir-accent);
+}
+
+.osir-installer-steps [aria-current="step"] .osir-installer-phase-marker {
+  background: var(--osir-accent);
+  color: #fff;
+}
+
+.osir-installer-steps [data-state="已完成"] .osir-installer-phase-marker {
+  background: var(--osir-accent-soft);
+  border-color: var(--osir-accent-border);
+  color: var(--osir-accent);
+}
+
+.osir-installer-steps [data-state="失败"] .osir-installer-phase-marker,
+.osir-installer-steps [data-state="失败"] .osir-installer-phase-state {
+  color: var(--osir-danger, #b42318);
+}

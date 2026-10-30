@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OSIR Client Beta",
+  "identifier": "com.osir.client.beta",
+  "build": {
+    "devUrl": null,
+    "beforeDevCommand": null,
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": false,
+    "publisher": "OSIR",
+    "macOS": {
+      "hardenedRuntime": true
+    },
+    "shortDescription": "OSIR desktop client beta",
+    "longDescription": "OSIR desktop beta for account resources and AI tool connections. Built on CC Switch.",
+    "icon": [
+      "icons/osir/beta/32x32.png",
+      "icons/osir/beta/128x128.png",
+      "icons/osir/beta/128x128@2x.png",
+      "icons/osir/beta/icon.icns",
+      "icons/osir/beta/icon.ico"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "osir-client-beta"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
+    }
+  },
+  "mainBinaryName": "osir_client"
+}

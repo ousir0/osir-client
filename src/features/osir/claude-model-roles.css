@@ -1,0 +1,82 @@
+.osir-claude-model-roles {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  color: var(--osir-text, #20324b);
+}
+.osir-claude-model-roles-heading,
+.osir-claude-model-roles-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.osir-claude-model-roles-heading {
+  justify-content: space-between;
+}
+.osir-claude-model-roles-heading > strong {
+  font-size: 13px;
+}
+.osir-claude-model-roles-fields {
+  display: grid;
+  gap: 12px;
+}
+.osir-claude-model-role-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 132px) minmax(0, 1fr) 76px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--osir-border, #dfe6ee);
+  border-radius: var(--osir-radius, 8px);
+  background: var(--osir-surface, #fff);
+  font-size: 13px;
+}
+.osir-claude-model-roles-fields select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--osir-control-height, 34px);
+  padding: 7px 32px 7px 12px;
+  border: 1px solid var(--osir-border, #e2eaf4);
+  border-radius: var(--osir-radius, 8px);
+  background: var(--osir-surface, #fff);
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+}
+.osir-claude-model-roles-fields select:focus-visible {
+  outline: 2px solid var(--osir-accent, #4679a7);
+  outline-offset: 3px;
+}
+.osir-claude-model-roles-fields select:disabled {
+  color: var(--osir-muted, #60748f);
+  cursor: not-allowed;
+}
+.osir-claude-model-roles > p,
+.osir-claude-model-roles-actions > span {
+  margin: 0;
+  color: var(--osir-muted, #60748f);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.osir-claude-model-roles > p[role="alert"] {
+  color: #a34040;
+}
+.osir-claude-model-roles-actions {
+  justify-content: flex-end;
+}
+.osir-claude-model-roles-actions > span {
+  margin-right: auto;
+}
+@media (max-width: 950px) {
+  .osir-claude-model-role-row {
+    grid-template-columns: minmax(0, 1fr) 76px;
+    gap: 8px;
+  }
+  .osir-claude-model-role-row > label {
+    grid-column: 1 / -1;
+  }
+}

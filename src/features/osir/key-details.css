@@ -1,0 +1,65 @@
+.osir-key-details {
+  color: #20324b;
+  background: #fff;
+  border-color: #e2eaf4;
+  border-radius: 8px 0 0 8px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.osir-key-details button {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid #e2eaf4;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+.osir-key-details button:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+.osir-key-details button:disabled {
+  color: #60748f;
+  background: #f7f9fc;
+  cursor: not-allowed;
+}
+.osir-key-details .osir-detail-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e2eaf4;
+}
+.osir-key-details h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.osir-key-details .osir-muted,
+.osir-key-details .osir-key-impact,
+.osir-key-locations small {
+  color: #60748f;
+  font-size: 12px;
+}
+.osir-key-locations {
+  padding: 0;
+  list-style: none;
+}
+.osir-key-locations li {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  margin: 8px 0;
+  border: 1px solid #e2eaf4;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.osir-key-location-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.osir-key-location-actions button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 4px 8px;
+  color: var(--osir-accent);
+}

@@ -1,0 +1,127 @@
+.osir-workbuddy-models {
+  min-width: 0;
+}
+.osir-workbuddy-models header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.osir-workbuddy-models h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.osir-workbuddy-key-label {
+  display: block;
+  font-size: 12px;
+  margin: 12px 0 6px;
+}
+.osir-workbuddy-models select {
+  width: 100%;
+  margin-bottom: 10px;
+}
+.osir-workbuddy-models fieldset {
+  padding: 12px;
+  margin: 10px 0;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  min-width: 0;
+}
+.osir-workbuddy-models legend {
+  padding: 0 5px;
+  font-size: 12px;
+}
+.osir-workbuddy-model-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
+  gap: 8px 14px;
+  max-height: 210px;
+  overflow: auto;
+}
+.osir-workbuddy-model-options label,
+.osir-workbuddy-capabilities label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  min-width: 0;
+}
+.osir-workbuddy-model-options span {
+  overflow-wrap: anywhere;
+}
+.osir-workbuddy-models input[type="checkbox"] {
+  accent-color: var(--osir-accent-strong);
+  flex-shrink: 0;
+}
+.osir-workbuddy-models :focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+.osir-workbuddy-capabilities,
+.osir-workbuddy-catalog-status,
+.osir-workbuddy-actions,
+.osir-workbuddy-pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.osir-workbuddy-catalog-status {
+  justify-content: space-between;
+}
+.osir-workbuddy-catalog-status p {
+  margin: 0;
+}
+.osir-workbuddy-actions span {
+  font-size: 12px;
+}
+.osir-shell .osir-workbuddy-actions button.osir-workbuddy-reload {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--osir-muted);
+}
+.osir-shell
+  .osir-workbuddy-actions
+  button.osir-workbuddy-reload:hover:not(:disabled),
+.osir-shell .osir-workbuddy-actions button.osir-workbuddy-reload:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  color: var(--osir-accent-strong);
+}
+.osir-workbuddy-actions {
+  margin-top: 14px;
+  margin-bottom: 12px;
+}
+.osir-workbuddy-environment {
+  color: var(--osir-text-secondary);
+  font-size: 12px;
+  margin: 10px 0;
+}
+.osir-workbuddy-config-details,
+.osir-workbuddy-install-details {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--osir-border);
+  font-size: 12px;
+}
+.osir-workbuddy-config-details summary,
+.osir-workbuddy-install-details summary {
+  cursor: pointer;
+  color: var(--osir-text-secondary);
+  width: fit-content;
+}
+.osir-workbuddy-pages {
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.osir-workbuddy-models [role="alert"] {
+  color: var(--osir-danger, #b42318);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .osir-workbuddy-models header {
+    flex-wrap: wrap;
+  }
+}

@@ -1,0 +1,1063 @@
+/* Scoped to OSIR management; never restyle the provider workbench. */
+.osir-shell .osir-management button.w-7,
+.osir-shell .osir-management button.w-8 {
+  padding: 0;
+  flex-shrink: 0;
+}
+.osir-shell .osir-management button.w-7 {
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+}
+.osir-shell .osir-management button.w-8 {
+  width: 32px;
+  min-height: 32px;
+  height: 32px;
+}
+.osir-management button svg {
+  flex-shrink: 0;
+}
+.osir-management-extensions .osir-management-heading {
+  padding-bottom: 10px;
+}
+.osir-management-extensions .osir-management-tabs {
+  padding-bottom: 10px;
+}
+.osir-management-extensions .osir-management-content {
+  gap: 8px;
+}
+.osir-management-extensions .osir-management-content > header {
+  background: #fff;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  min-height: 52px;
+  height: auto;
+  padding: 8px 16px;
+  flex-wrap: wrap;
+}
+.osir-shell .osir-management-extensions .osir-management-content > header h1 {
+  font-size: 16px;
+  line-height: 24px;
+}
+.osir-management-extensions .osir-management-content > #main-content > .px-6 {
+  padding-inline: 16px;
+}
+.osir-management-extensions .osir-management-content > #main-content,
+.osir-management-history .osir-management-content > div {
+  background: #fff;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.osir-management-tool-version {
+  margin: 12px 0;
+  color: var(--osir-muted);
+  font-size: 13px;
+}
+.osir-management {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  color: var(--osir-text);
+  background: var(--osir-bg);
+}
+.osir-management-heading {
+  padding: 24px 28px 16px;
+}
+.osir-management-heading h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+}
+.osir-management-heading p,
+.osir-management-card-heading p {
+  margin: 6px 0 0;
+  color: var(--osir-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.osir-management-tabs {
+  border: 0;
+  margin: 0;
+  padding: 0 28px 16px;
+  min-width: 0;
+}
+.osir-management-tabs:disabled {
+  opacity: 0.65;
+}
+.osir-management-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 0 28px 24px;
+  gap: 16px;
+}
+.osir-management-content > * {
+  min-width: 0;
+}
+.osir-main > .osir-management > .osir-management-heading {
+  padding: 0 0 16px;
+}
+.osir-main > .osir-management > .osir-management-tabs,
+.osir-main > .osir-management > .osir-management-content {
+  padding-inline: 0;
+}
+.osir-management-embedded .osir-management-tabs {
+  padding: 0 16px 10px;
+}
+.osir-management-embedded .osir-management-content {
+  padding: 0 16px 16px;
+  gap: 12px;
+}
+.osir-management.osir-management-embedded > .osir-management-notice {
+  margin: 0 16px 10px;
+}
+.osir-shell .osir-management-extensions button.bg-action {
+  color: #fff;
+  background: var(--osir-primary);
+  border-color: var(--osir-primary);
+}
+.osir-shell .osir-management-extensions button.bg-action:hover:not(:disabled) {
+  color: #fff;
+  background: var(--osir-primary-hover);
+  border-color: var(--osir-primary-hover);
+}
+.osir-extensions-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+.osir-extensions-layout > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.osir-extension-panel[data-osir-variant="true"] {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 8px;
+}
+.osir-extension-panel[data-osir-variant="true"] > header {
+  min-height: 56px;
+  height: auto;
+  padding: 10px 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: white;
+}
+.osir-shell .osir-extension-panel[data-osir-variant="true"] > header h1 {
+  font-size: 16px;
+  line-height: 24px;
+}
+.osir-extension-panel[data-osir-variant="true"] #main-content {
+  min-height: 200px;
+  flex: initial;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: white;
+  overflow: hidden;
+}
+.osir-extension-panel[data-osir-variant="true"] #main-content > .px-6 {
+  padding-inline: 16px;
+}
+.osir-extension-mcp[data-osir-variant="true"] [data-testid="mcp-matrix"] {
+  min-width: 0;
+  max-width: 100%;
+  max-height: 340px;
+  overflow: auto;
+  overscroll-behavior-x: contain;
+}
+.osir-extension-mcp[data-osir-variant="true"] #main-content > .px-6 {
+  min-width: 0;
+  max-width: 100%;
+}
+.osir-extension-mcp[data-osir-variant="true"] > header > div:last-child {
+  flex-wrap: wrap;
+}
+.osir-mcp-editor,
+.osir-skills-summary {
+  min-width: 0;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: white;
+  overflow: hidden;
+}
+.osir-mcp-editor-heading,
+.osir-skills-summary > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--osir-border);
+}
+.osir-shell .osir-mcp-editor-heading h2,
+.osir-shell .osir-skills-summary h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.osir-mcp-editor > .overflow-y-auto {
+  max-height: 420px;
+  padding: 16px;
+}
+.osir-mcp-editor > .border-t {
+  position: sticky;
+  bottom: 0;
+  background: white;
+  z-index: 1;
+  padding-inline: 16px;
+}
+.osir-skills-summary {
+  padding-bottom: 10px;
+}
+.osir-skills-import {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 14px 0;
+}
+.osir-skills-summary > p,
+.osir-skills-summary > [role="alert"] {
+  margin: 16px;
+}
+.osir-skills-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 14px;
+  padding: 0 8px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  color: var(--osir-muted);
+}
+.osir-skills-search:focus-within {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+.osir-skills-search input {
+  min-width: 0;
+  width: 100%;
+  height: 32px;
+  padding: 4px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+}
+.osir-skills-summary ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 14px;
+  max-height: 320px;
+  overflow: auto;
+}
+.osir-skills-summary li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--osir-border);
+}
+.osir-skills-summary li > svg {
+  flex-shrink: 0;
+  color: var(--osir-muted);
+}
+.osir-skills-summary li > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.osir-skills-summary li > button {
+  flex-shrink: 0;
+}
+.osir-skills-summary strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.osir-skills-summary li span,
+.osir-extension-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--osir-muted);
+}
+.osir-cli-caption {
+  margin: 6px 0 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.osir-cli-card .osir-management-tool-heading,
+.osir-management-cli > .osir-management-tool-heading {
+  flex-wrap: wrap;
+}
+.osir-cli-identity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.osir-cli-status,
+.osir-extension-panel[data-osir-variant="true"] .osir-extension-configured {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--osir-border);
+  border-radius: 5px;
+  background: var(--osir-bg);
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.osir-cli-status[data-state="installed"] {
+  color: #21724b;
+  background: #f0faf4;
+  border-color: #d2ecdc;
+}
+.osir-cli-status[data-state="warning"] {
+  color: #80591b;
+  background: #fffaf1;
+  border-color: #f1dfb9;
+}
+.osir-cli-status:is(
+  [data-state="update"],
+  [data-state="busy"],
+  [data-state="loading"]
+),
+.osir-extension-panel[data-osir-variant="true"] .osir-extension-configured {
+  color: var(--osir-accent);
+  background: var(--osir-accent-soft);
+  border-color: var(--osir-accent-border);
+}
+.osir-cli-versions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--osir-border-subtle);
+  font-size: 12px;
+}
+.osir-cli-versions dt {
+  color: var(--osir-muted);
+}
+.osir-cli-versions dd {
+  margin: 5px 0 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.osir-cli-installations {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--osir-border-subtle);
+  font-size: 12px;
+}
+.osir-cli-installations summary {
+  cursor: pointer;
+  color: var(--osir-accent);
+}
+.osir-cli-installations summary span {
+  margin-left: 6px;
+  color: var(--osir-muted);
+}
+.osir-cli-installations summary:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 3px;
+}
+.osir-cli-card > :is(.osir-management-feedback, .osir-management-notice) {
+  margin: 12px 0 0;
+}
+.osir-extension-panel[data-osir-variant="true"] .osir-extension-caption {
+  margin: 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.osir-extension-panel[data-osir-variant="true"] .osir-extension-overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 14px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: white;
+  font-size: 12px;
+  color: var(--osir-muted);
+}
+.osir-extension-overview > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.osir-extension-overview svg {
+  color: var(--osir-accent);
+}
+.osir-extension-overview strong {
+  color: var(--osir-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.osir-extension-panel[data-osir-variant="true"] .osir-mcp-toolbar {
+  height: auto;
+  min-height: 48px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  gap: 8px;
+}
+.osir-extension-panel[data-osir-variant="true"] [role="search"] {
+  flex: 1 1 160px;
+  width: 240px;
+  min-width: 160px;
+  max-width: 280px;
+}
+.osir-shell
+  .osir-extension-panel[data-osir-variant="true"]
+  [role="search"]
+  input {
+  height: 32px;
+  padding: 4px 30px;
+  border-color: var(--osir-border);
+  background: var(--osir-surface);
+  font-size: 13px;
+}
+.osir-shell
+  .osir-extension-panel[data-osir-variant="true"]
+  [role="search"]
+  button {
+  width: 24px;
+  min-height: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.osir-shell
+  .osir-extension-panel[data-osir-variant="true"]
+  [role="search"]
+  button:hover:not(:disabled) {
+  background: var(--osir-accent-soft);
+}
+.osir-extension-panel[data-osir-variant="true"] .osir-mcp-overwrite {
+  flex: 1 1 180px;
+  white-space: normal;
+  line-height: 1.6;
+  text-align: right;
+}
+.osir-mcp-editor .osir-mcp-targets {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.osir-extension-panel[data-osir-variant="true"] .osir-skills-view-tabs {
+  height: auto;
+  min-height: 44px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding-bottom: 6px;
+}
+.osir-skills-view-tabs > [role="tablist"] {
+  min-height: 36px;
+}
+.osir-skills-view-tabs > div:last-child {
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+.osir-managed-desktop button.primary:hover:not(:disabled) {
+  background: var(--osir-primary-hover);
+  border-color: var(--osir-primary-hover);
+}
+@media (max-width: 980px) {
+  .osir-extension-panel[data-osir-variant="true"] .osir-mcp-overwrite {
+    text-align: left;
+  }
+  .osir-cli-card {
+    padding: 16px;
+  }
+}
+@media (min-width: 1024px) {
+  .osir-extensions-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  }
+}
+.osir-management-card,
+.osir-managed-desktop {
+  background: #fff;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  padding: 20px;
+}
+.osir-management-card fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.osir-management-backups,
+.osir-management-cli {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.osir-management-notice {
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--osir-accent-border);
+  border-radius: 8px;
+  background: var(--osir-accent-soft);
+  font-size: 13px;
+  line-height: 1.6;
+  color: #36577d;
+}
+.osir-management > .osir-management-notice {
+  margin: 0 28px 12px;
+}
+.osir-managed-desktop {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.osir-desktop-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  gap: 14px;
+}
+.osir-desktop-current,
+.osir-desktop-operation,
+.osir-desktop-information,
+.osir-managed-desktop .osir-desktop-restore {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--osir-border);
+  background: #fff;
+  border-radius: 8px;
+}
+.osir-managed-desktop h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.osir-desktop-current > p,
+.osir-desktop-information > p {
+  margin: 8px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.osir-desktop-version,
+.osir-desktop-release {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 12px 0;
+}
+.osir-desktop-version strong {
+  font-size: 21px;
+  font-weight: 600;
+}
+.osir-desktop-version span,
+.osir-desktop-release span {
+  font-size: 12px;
+  color: var(--osir-muted);
+}
+.osir-desktop-operation .osir-row {
+  margin-top: 14px;
+}
+.osir-desktop-operation .osir-management-feedback {
+  margin: 10px 0 0;
+  padding: 8px;
+}
+.osir-desktop-diagnostics {
+  margin: 8px 0 12px;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-desktop-diagnostics summary {
+  cursor: pointer;
+  color: var(--osir-accent);
+}
+.osir-desktop-diagnostics code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 8px;
+}
+.osir-desktop-diagnostics p {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+.osir-desktop-restore-table {
+  overflow-x: auto;
+}
+.osir-desktop-restore-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.osir-desktop-restore-table th {
+  background: var(--osir-bg);
+  color: var(--osir-muted);
+  font-weight: 500;
+}
+.osir-desktop-restore-table th,
+.osir-desktop-restore-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--osir-border);
+}
+.osir-desktop-restore-table th:last-child,
+.osir-desktop-restore-table td:last-child {
+  text-align: right;
+}
+.osir-managed-desktop .osir-section-title,
+.osir-management-tool-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.osir-managed-desktop h2,
+.osir-management-tool-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.osir-managed-desktop .osir-desktop-installation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--osir-bg);
+}
+.osir-managed-desktop .osir-desktop-installation code {
+  width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-managed-desktop .osir-desktop-installation small {
+  width: 100%;
+  color: var(--osir-muted);
+  line-height: 1.7;
+}
+.osir-managed-desktop .osir-desktop-note,
+.osir-desktop-restore > p {
+  font-size: 12px;
+  color: var(--osir-muted);
+  line-height: 1.7;
+  margin: 0;
+}
+.osir-managed-desktop button,
+.osir-management-backups [role="alert"] > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--osir-text);
+  font-size: 12px;
+}
+.osir-managed-desktop button.primary {
+  background: var(--osir-primary);
+  color: #fff;
+  border-color: var(--osir-primary);
+}
+.osir-managed-desktop button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.osir-managed-desktop button:focus-visible,
+.osir-management-backups button:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+.osir-managed-desktop .osir-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.osir-desktop-restore {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.osir-desktop-restore h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.osir-desktop-restore-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--osir-border);
+  padding: 12px 0;
+  font-size: 13px;
+}
+.osir-management-progress {
+  background: var(--osir-accent-soft);
+  color: var(--osir-accent);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+}
+.osir-management-feedback {
+  padding: 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.osir-management-feedback[role="alert"] {
+  color: #a43030;
+  background: #fff5f5;
+  border-color: #f3d4d4;
+}
+.osir-history-inspection {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.osir-management-card-heading {
+  margin-bottom: 16px;
+}
+.osir-management-card-heading h2 {
+  margin: 0;
+  color: var(--osir-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.osir-history-inspection details {
+  border-top: 1px solid var(--osir-border);
+  padding-top: 12px;
+}
+.osir-history-inspection summary {
+  color: var(--osir-accent);
+  font-weight: 500;
+}
+.osir-management-history .osir-session-reader-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 16px;
+}
+.osir-management-history .osir-session-inspection {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.osir-management-history
+  .osir-session-reader-layout
+  > :not(.osir-session-inspection) {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+@media (max-width: 980px) {
+  .osir-management-heading {
+    padding: 18px 18px 12px;
+  }
+  .osir-management-tabs {
+    padding: 0 18px 12px;
+  }
+  .osir-management-content {
+    padding: 0 18px 18px;
+  }
+  .osir-management-history .osir-session-reader-layout {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .osir-management-history .osir-session-inspection {
+    flex: 0 0 auto;
+    max-height: 240px;
+  }
+}
+
+/* Versions sit below the tool heading and need only a compact page title. */
+.osir-management-versions .osir-management-heading {
+  padding: 10px 18px 8px;
+}
+.osir-shell .osir-management-versions .osir-management-heading h1 {
+  font-size: 18px;
+  line-height: 24px;
+}
+.osir-management-versions .osir-management-heading p {
+  margin-top: 3px;
+}
+.osir-management-versions .osir-management-tabs {
+  padding: 0 18px 10px;
+}
+.osir-management-versions .osir-management-content {
+  padding: 0 18px 18px;
+  gap: 12px;
+}
+
+/* Local database backup page only. Dialog is portalled outside the shell. */
+.osir-management-backups .osir-backup-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.osir-management-backups .osir-backup-card-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.osir-management-backups .osir-backup-card-heading p {
+  margin: 4px 0 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.osir-management-backups .osir-backup-badge {
+  padding: 3px 8px;
+  color: var(--osir-muted);
+  background: var(--osir-bg);
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.osir-management-backups .osir-backup-scope {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.osir-management-backups .osir-backup-scope h3,
+.osir-backup-confirm .osir-backup-scope h3 {
+  margin: 0 0 6px;
+  color: var(--osir-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.osir-management-backups .osir-backup-scope p,
+.osir-backup-confirm .osir-backup-scope p,
+.osir-management-backups .osir-backup-note,
+.osir-backup-confirm .osir-backup-note {
+  margin: 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.osir-management-backups .osir-backup-range > .osir-backup-note,
+.osir-management-backups .osir-backup-records > .osir-backup-note {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: var(--osir-accent-soft);
+  border-radius: 8px;
+}
+.osir-management-backups .osir-backup-policy fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.osir-management-backups .osir-backup-policy label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.osir-management-backups .osir-backup-policy select {
+  min-width: 0;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  color: var(--osir-text);
+  font-size: 13px;
+}
+.osir-management-backups .osir-backup-table-wrap {
+  margin-top: 14px;
+}
+.osir-management-backups .osir-backup-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 12px;
+}
+.osir-management-backups .osir-backup-table th {
+  padding: 10px;
+  background: var(--osir-bg);
+  color: var(--osir-muted);
+  font-weight: 500;
+}
+.osir-management-backups .osir-backup-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--osir-border);
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+.osir-management-backups .osir-backup-table th:nth-child(2) {
+  width: 80px;
+}
+.osir-management-backups .osir-backup-table th:last-child {
+  width: 160px;
+  text-align: right;
+}
+.osir-management-backups .osir-backup-table strong {
+  font-weight: 500;
+}
+.osir-management-backups .osir-backup-table time {
+  display: block;
+  margin-top: 4px;
+  color: var(--osir-muted);
+}
+.osir-management-backups .osir-backup-row-actions,
+.osir-management-backups .osir-backup-transfer-actions,
+.osir-management-backups .osir-backup-rename {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.osir-management-backups .osir-backup-table .osir-backup-row-actions {
+  justify-content: flex-end;
+  gap: 4px;
+}
+.osir-management-backups .osir-backup-rename input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.osir-management-backups .osir-backup-selected {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: var(--osir-bg);
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+}
+.osir-management-backups .osir-backup-selected strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.osir-management-backups .osir-backup-transfer > * + *,
+.osir-management-backups .osir-backup-storage > * + * {
+  margin-top: 12px;
+}
+.osir-management-backups .osir-backup-empty {
+  padding: 24px 12px;
+  border: 1px dashed var(--osir-border);
+  border-radius: 8px;
+  color: var(--osir-muted);
+  text-align: center;
+  font-size: 13px;
+}
+.osir-management-backups button,
+.osir-backup-confirm button {
+  min-height: 34px;
+}
+.osir-management-backups button.osir-backup-primary,
+.osir-backup-confirm button.osir-backup-primary {
+  border-color: var(--osir-primary);
+  background: var(--osir-primary);
+  color: #fff;
+}
+.osir-management-backups button.osir-backup-primary:hover:not(:disabled),
+.osir-backup-confirm button.osir-backup-primary:hover:not(:disabled) {
+  background: var(--osir-primary-hover);
+}
+.osir-backup-confirm {
+  max-width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--osir-text);
+}
+.osir-backup-confirm .osir-backup-confirm-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 24px;
+}
+.osir-backup-confirm .osir-backup-confirm-body > * + * {
+  margin-top: 16px;
+}
+.osir-backup-confirm .osir-backup-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.osir-backup-confirm .osir-backup-source {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: var(--osir-bg);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.osir-backup-confirm .osir-backup-source span {
+  color: var(--osir-muted);
+}
+.osir-backup-confirm .osir-backup-acknowledgement {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-block: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.osir-backup-confirm .osir-backup-acknowledgement input {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.osir-backup-confirm :is(button, input):focus-visible,
+.osir-management-backups :is(input, select):focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+@media (max-width: 980px) {
+  .osir-management-backups .osir-backup-scope {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .osir-management-backups .osir-backup-table th:last-child {
+    width: 145px;
+  }
+}

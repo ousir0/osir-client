@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "channel": "beta",
+  "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNGQkRGMkRGMTM0OThDQUYKUldTdmpFa1QzL0s5UHhEZXRTajFHZVZ4SGhmTWVlVTVvSDMwazFRcmNmYmp0TU9WK2pBZnduT2QK",
+  "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/beta.json",
+  "downloadBaseUrl": "https://osirclaw.com/client-release/",
+  "notes": "OSIR Client 首个正式版本。统一新图标与默认头像，优化历史会话、MCP 与技能、订阅信息和加载效果；修复登录凭据保存及 Claude Code 安装修复入口，补充菜单栏快捷操作。"
+}

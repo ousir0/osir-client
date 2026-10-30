@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "channel": "prod",
+  "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
+  "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
+  "downloadBaseUrl": "https://osirclaw.com/client-release/",
+  "notes": "修复 Codex 已连接图片服务后原生生图工具未启用的问题，支持生成图片和参考图编辑。改善更新提醒：客户端保持打开或切回窗口时也会检查更新，手动检查可重新显示已关闭的提醒。"
+}

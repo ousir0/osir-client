@@ -1,0 +1,195 @@
+.osir-tool-backups {
+  padding: 18px;
+  border: 1px solid #e2eaf4;
+  border-radius: 8px;
+  background: #fff;
+  color: #20324b;
+  font-size: 13px;
+  line-height: 1.65;
+  min-width: 0;
+}
+.osir-tool-backups-heading,
+.osir-tool-backups-toolbar,
+.osir-tool-backups-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.osir-tool-backups-heading {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.osir-tool-backups-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.osir-tool-backups-heading p,
+.osir-tool-backups-note {
+  margin: 4px 0 0;
+  color: #60748f;
+  font-size: 12px;
+}
+.osir-tool-backups-toolbar {
+  margin-bottom: 12px;
+}
+.osir-tool-backups-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.osir-tool-backups-toolbar select {
+  min-height: 34px;
+  padding: 4px 28px 4px 10px;
+  border: 1px solid #e2eaf4;
+  border-radius: 8px;
+  background: #fff;
+  color: #20324b;
+}
+.osir-tool-backups-note,
+.osir-tool-backups-recovery,
+.osir-tool-backups-report {
+  padding: 10px 12px;
+  border: 1px solid #e2eaf4;
+  border-radius: 8px;
+  background: #f7f9fc;
+  overflow-wrap: anywhere;
+}
+.osir-tool-backups-report,
+.osir-tool-backups-recovery {
+  margin-top: 12px;
+}
+.osir-tool-backups-report p,
+.osir-tool-backups-recovery p {
+  margin: 0 0 8px;
+}
+.osir-tool-backups-error {
+  padding: 10px 12px;
+  color: #a43030;
+  background: #fff5f5;
+  border: 1px solid #f3d4d4;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.osir-tool-backups-list {
+  padding: 0;
+  margin: 14px 0 0;
+  list-style: none;
+}
+.osir-tool-backups-list > li {
+  padding: 12px 0;
+  border-top: 1px solid #e2eaf4;
+}
+.osir-tool-backups-row > div {
+  flex: 1;
+  min-width: 150px;
+}
+.osir-tool-backups-row time {
+  display: block;
+  color: #60748f;
+  font-size: 12px;
+}
+.osir-tool-backups details {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.osir-tool-backups summary {
+  cursor: pointer;
+  color: var(--osir-accent);
+}
+.osir-tool-backups-file {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 0;
+}
+.osir-tool-backups-file > code:last-child {
+  flex-basis: 100%;
+  color: #60748f;
+}
+.osir-tool-backups code,
+.osir-tool-backups-dialog code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 11px;
+}
+.osir-tool-backups-empty {
+  padding: 20px 10px;
+  color: #60748f;
+  text-align: center;
+}
+.osir-tool-backups button,
+.osir-tool-backups-dialog button {
+  min-height: 34px;
+}
+.osir-tool-backups button.osir-tool-backups-primary,
+.osir-tool-backups-dialog button.osir-tool-backups-primary {
+  border-color: var(--osir-primary);
+  background: var(--osir-primary);
+  color: #fff;
+}
+.osir-tool-backups button.osir-tool-backups-primary:hover:not(:disabled),
+.osir-tool-backups-dialog
+  button.osir-tool-backups-primary:hover:not(:disabled) {
+  border-color: var(--osir-primary-hover);
+  background: var(--osir-primary-hover);
+}
+.osir-tool-backups-dialog {
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  border: 1px solid #e2eaf4;
+  border-radius: 8px;
+  background: #fff;
+  color: #20324b;
+}
+.osir-tool-backups-body {
+  padding: 0 24px;
+  overflow: auto;
+  min-height: 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.osir-tool-backups-diff {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid #e2eaf4;
+  border-radius: 8px;
+}
+.osir-tool-backups-diff > code {
+  display: block;
+}
+.osir-tool-backups-diff > strong {
+  color: var(--osir-accent);
+}
+.osir-tool-backups-diff dl {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 6px;
+  margin: 8px 0 0;
+}
+.osir-tool-backups-diff dt {
+  color: #60748f;
+}
+.osir-tool-backups-diff dd {
+  margin: 0;
+}
+.osir-tool-backups-diff dd code {
+  display: block;
+}
+.osir-tool-backups-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.osir-tool-backups-ack input {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.osir-tool-backups :is(button, select, summary):focus-visible,
+.osir-tool-backups-dialog :is(button, input):focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}

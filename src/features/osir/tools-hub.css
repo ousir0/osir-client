@@ -1,0 +1,169 @@
+.osir-tools-hub {
+  min-width: 0;
+}
+.osir-tools-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+.osir-tools-filter button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-tools-filter button[aria-pressed="true"] {
+  background: var(--osir-accent-tint);
+  color: var(--osir-accent-strong);
+}
+.osir-tools-list {
+  display: grid;
+  gap: 10px;
+}
+.osir-supported-tool {
+  background: var(--osir-surface);
+  border: 1px solid var(--osir-border);
+  border-radius: var(--osir-radius);
+  overflow: hidden;
+}
+.osir-supported-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  min-width: 0;
+}
+.osir-supported-tool-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  color: var(--osir-accent-strong);
+  background: var(--osir-accent-soft);
+  border-radius: 8px;
+}
+.osir-supported-tool-name {
+  min-width: 0;
+  flex: 1;
+}
+.osir-supported-tool-name h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+.osir-supported-tool-title > .osir-tools-kind {
+  margin-left: 4px;
+}
+.osir-supported-tool-name p {
+  color: var(--osir-muted);
+  font-size: 12px;
+  margin: 5px 0 0;
+}
+.osir-tools-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--osir-muted);
+}
+.osir-supported-tool-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+  align-items: center;
+  align-self: flex-end;
+}
+.osir-supported-tool-actions button {
+  font-size: 12px;
+}
+.osir-tools-state {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--osir-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.osir-tools-state[data-state="installed"] {
+  color: #278368;
+}
+.osir-tools-state[data-state="warning"] {
+  color: #94661e;
+}
+.osir-supported-tool-detail {
+  padding: 16px;
+  border-top: 1px solid var(--osir-border-subtle);
+  background: #fafcfe;
+}
+.osir-supported-tool-detail .osir-management-card {
+  margin-bottom: 0;
+}
+.osir-supported-tool-detail .osir-management-tool-heading h2 {
+  font-size: 14px;
+}
+.osir-tools-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 12px;
+  margin: 0 0 12px;
+  background: var(--osir-accent-soft);
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+}
+.osir-tools-notice span {
+  flex: 1;
+}
+.osir-workbuddy-details p {
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0 0 12px;
+}
+.osir-tools-path {
+  overflow-wrap: anywhere;
+  color: var(--osir-muted);
+}
+.osir-tools-empty {
+  text-align: center;
+  padding: 28px 16px;
+  font-size: 13px;
+  color: var(--osir-muted);
+}
+@media (max-width: 960px) {
+  .osir-supported-tool-row {
+    padding: 13px;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+  .osir-supported-tool-name {
+    flex-basis: 210px;
+  }
+  .osir-tools-kind {
+    display: none;
+  }
+  .osir-supported-tool-name p {
+    font-size: 11px;
+  }
+}
+
+.osir-tools-runtime {
+  font-size: 12px;
+}
+
+.osir-tools-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}

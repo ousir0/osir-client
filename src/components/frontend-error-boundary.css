@@ -1,0 +1,103 @@
+.osir-frontend-error-boundary {
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 24px;
+  background: var(--osir-bg);
+  color: var(--osir-text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+}
+
+.osir-frontend-error-panel {
+  display: grid;
+  width: min(100%, 480px);
+  gap: 22px;
+  padding: 24px;
+  border: 1px solid var(--osir-border);
+  border-radius: var(--osir-radius);
+  background: var(--osir-surface);
+  box-shadow: 0 2px 8px rgb(36 55 73 / 6%);
+}
+
+.osir-frontend-error-copy {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.osir-frontend-error-copy > svg {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  color: #b54747;
+}
+
+.osir-frontend-error-copy h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.osir-frontend-error-copy p {
+  margin: 8px 0 0;
+  color: var(--osir-muted);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.osir-frontend-error-reload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 38px;
+  gap: 8px;
+  border: 1px solid var(--osir-primary);
+  border-radius: var(--osir-radius);
+  background: var(--osir-primary);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.osir-frontend-error-reload:hover {
+  border-color: var(--osir-primary-hover);
+  background: var(--osir-primary-hover);
+}
+
+.osir-frontend-error-reload:focus-visible {
+  outline: 2px solid var(--osir-accent-border);
+  outline-offset: 3px;
+}
+
+.osir-frontend-error-reload svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 520px) {
+  .osir-frontend-error-boundary {
+    padding: 16px;
+  }
+
+  .osir-frontend-error-panel {
+    padding: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .osir-frontend-error-reload {
+    transition: none;
+  }
+}

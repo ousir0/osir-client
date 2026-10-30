@@ -1,0 +1,303 @@
+/* History launcher and its sheet only; the session reader keeps its host layout. */
+.osir-history-entry,
+.osir-history-sheet {
+  color: var(--osir-text);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.osir-history-entry {
+  padding: 16px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: #fff;
+}
+.osir-history-entry h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.osir-history-entry p {
+  margin: 0 0 12px;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-history-entry button,
+.osir-history-sheet button {
+  min-height: 34px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.osir-history-sheet {
+  background: #fff;
+  border-color: var(--osir-border);
+  border-radius: 8px 0 0 8px;
+}
+.osir-history-sheet p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.osir-history-sheet .osir-history-header {
+  padding: 20px 48px 16px 24px;
+  border-bottom: 1px solid var(--osir-border);
+}
+.osir-history-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.osir-history-header p {
+  margin-top: 8px;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-history-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 24px;
+}
+.osir-history-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.osir-history-section + .osir-history-section {
+  padding-top: 16px;
+  border-top: 1px solid var(--osir-border);
+}
+.osir-history-heading,
+.osir-history-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.osir-history-heading h3,
+.osir-history-sheet h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.osir-history-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.osir-history-step {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: var(--osir-accent-soft);
+  color: var(--osir-accent);
+  font-size: 12px;
+}
+.osir-history-result {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: var(--osir-bg);
+  font-size: 12px;
+}
+.osir-history-result-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.osir-history-result-row > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #946417;
+}
+.osir-history-result-row[data-match="true"] > svg {
+  color: #21724b;
+}
+.osir-history-check-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: #fff;
+}
+.osir-history-check-card .osir-history-heading {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.osir-history-check-card button {
+  flex-shrink: 0;
+}
+.osir-history-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--osir-border);
+  border-radius: 5px;
+  background: var(--osir-bg);
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-history-hint,
+.osir-history-sheet small {
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-history-notice,
+.osir-history-backup {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #f1dfb9;
+  border-radius: 8px;
+  background: #fffaf1;
+  color: #80591b;
+  font-size: 12px;
+}
+.osir-history-notice > svg,
+.osir-history-backup > svg {
+  flex: 0 0 16px;
+  margin-top: 2px;
+}
+.osir-history-notice h4,
+.osir-history-backup h4 {
+  margin-bottom: 4px;
+}
+.osir-history-backup {
+  border-color: var(--osir-border);
+  background: var(--osir-bg);
+  color: var(--osir-muted);
+}
+.osir-history-mapping {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+}
+.osir-history-mapping > svg {
+  margin-top: 28px;
+  color: var(--osir-muted);
+}
+.osir-history-route {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.osir-history-route strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.osir-history-route p {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.osir-history-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.osir-history-selector select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--osir-text);
+  font: inherit;
+}
+.osir-history-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+.osir-history-check input {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--osir-accent);
+}
+.osir-history-preview,
+.osir-history-operation {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.osir-history-preview {
+  background: var(--osir-accent-soft);
+}
+.osir-history-preview .osir-history-mapping {
+  padding: 0;
+  border: 0;
+}
+.osir-history-sheet summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.osir-history-sheet details > div {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+.osir-history-message {
+  padding: 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.osir-history-message[role="alert"] {
+  border-color: #efd0cf;
+  background: #fff6f5;
+  color: #a43030;
+}
+.osir-history-sheet .osir-history-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px 24px;
+  border-color: var(--osir-border);
+  background: #fff;
+}
+.osir-history-footer .osir-history-actions {
+  justify-content: flex-end;
+}
+.osir-history-sheet .osir-history-primary,
+.osir-history-entry .osir-history-primary {
+  background: var(--osir-primary);
+  border-color: var(--osir-primary);
+  color: #fff;
+}
+.osir-history-primary:hover:not(:disabled) {
+  background: var(--osir-primary-hover);
+}
+.osir-history-sheet :is(button, select, input):focus-visible,
+.osir-history-entry button:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+.osir-history-sheet[aria-busy="true"] > button[aria-label] {
+  opacity: 0.45;
+}

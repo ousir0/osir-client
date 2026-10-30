@@ -1,0 +1,73 @@
+:is(.osir-shell, .osir-tools-hub, .osir-overview-tools, .osir-desktop-panel)
+  button:is(.osir-tool-restart, .osir-tool-update, .osir-tool-close) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--osir-muted, #6f8092);
+}
+:is(.osir-shell, .osir-tools-hub, .osir-overview-tools, .osir-desktop-panel)
+  button.osir-tool-close {
+  color: #a6b1bd;
+}
+:is(.osir-shell, .osir-tools-hub, .osir-overview-tools, .osir-desktop-panel)
+  button:is(.osir-tool-restart, .osir-tool-update):hover:not(:disabled) {
+  color: var(--osir-accent-strong, #38668f);
+  background: transparent;
+}
+:is(.osir-shell, .osir-tools-hub, .osir-overview-tools, .osir-desktop-panel)
+  button.osir-tool-close:hover:not(:disabled) {
+  color: var(--osir-text, #293b4d);
+  background: transparent;
+}
+:is(.osir-shell, .osir-tools-hub, .osir-overview-tools, .osir-desktop-panel)
+  button:is(
+    .osir-tool-restart,
+    .osir-tool-update,
+    .osir-tool-close
+  ):focus-visible {
+  outline: 2px solid var(--osir-primary, #4679a7);
+  outline-offset: 2px;
+}
+.osir-tool-launch-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+}
+.osir-tool-launch-error {
+  flex-basis: 100%;
+  color: var(--osir-danger, #b42318);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.osir-header:has(.osir-tool-launch-error) {
+  flex-wrap: wrap;
+}
+.osir-header > .osir-actions:has(.osir-tool-launch-error) {
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+.osir-header > .osir-actions > .osir-tool-launch-error {
+  text-align: right;
+}
+.osir-tool-name-line,
+.osir-overview-tool-name,
+.osir-supported-tool-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
