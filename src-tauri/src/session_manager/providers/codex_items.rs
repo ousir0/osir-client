@@ -324,7 +324,7 @@ pub(super) fn status_from_str(status: &str) -> ToolStatus {
         "completed" | "success" | "succeeded" => ToolStatus::Success,
         "failed" | "error" | "declined" | "rejected" => ToolStatus::Error,
         "interrupted" | "cancelled" | "canceled" | "aborted" => ToolStatus::Interrupted,
-        "in_progress" | "pending" | "running" => ToolStatus::Pending,
+        "in_progress" | "inProgress" | "pending" | "running" => ToolStatus::Pending,
         _ => ToolStatus::Unknown,
     }
 }

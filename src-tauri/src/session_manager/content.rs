@@ -19,7 +19,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::model::{ContentRef, ImageRef, ImageSource};
-use super::providers::{hermes, opencode};
+use super::providers::{codex_history, hermes, opencode};
 use super::{canonicalize_existing_path, provider_roots};
 
 /// 单次读取的全文上限
@@ -78,6 +78,9 @@ impl ValidatedSource {
 /// 校验 `sourcePath` 归属，见模块文档。
 pub fn validate_source(provider_id: &str, source_path: &str) -> Result<ValidatedSource, String> {
     let location = match provider_id {
+        "codex" if source_path.starts_with("sqlite:") => {
+            validate_codex_sqlite_source(source_path, &codex_history::database_paths())?
+        }
         "claude-desktop" => {
             let (root, path) = super::providers::claude_desktop::resolve_source(source_path)?;
             SourceLocation::Path { path, root }
@@ -179,6 +182,19 @@ fn validate_sqlite_source(
     let expected = canonicalize_existing_path(expected_db, "session database")?;
     if db != expected {
         return Err("Session database is not the provider's own database".to_string());
+    }
+    Ok(SourceLocation::Sqlite { db, session_id })
+}
+
+fn validate_codex_sqlite_source(raw: &str, expected: &[PathBuf]) -> Result<SourceLocation, String> {
+    let (db, session_id) = codex_history::parse_source(raw).ok_or("会话来源无效")?;
+    let db = db.canonicalize().map_err(|_| "无法读取会话数据库")?;
+    if !expected
+        .iter()
+        .filter_map(|path| path.canonicalize().ok())
+        .any(|path| path == db)
+    {
+        return Err("会话数据库不属于此工具".into());
     }
     Ok(SourceLocation::Sqlite { db, session_id })
 }
@@ -443,6 +459,7 @@ fn sqlite_allowed(provider_id: &str, table: &str, column: &str) -> bool {
         ),
         // Hermes：正文、推理全文、tool_calls JSON（参数按 pointer 取）
         "hermes" => (&["messages"], &["content", "reasoning", "tool_calls"]),
+        "codex" => (&["thread_items"], &["item_json"]),
         _ => (&[], &[]),
     };
     tables.contains(&table) && columns.contains(&column)
@@ -479,13 +496,25 @@ fn read_sqlite_cell(
     )
     .map_err(|_| "无法打开会话数据库".to_string())?;
     // 表名、列名来自上面的白名单，可以安全拼接
-    let sql = format!(
-        "SELECT length(CAST({column} AS BLOB)), {column} FROM {table} WHERE id = ?1 AND session_id = ?2"
-    );
+    let sql = if provider_id == "codex" {
+        // The actual primary key is (thread_id, turn_id, item_id). Bind every
+        // component, including the validated thread, even if IDs are reused.
+        "SELECT length(CAST(item_json AS BLOB)), CASE WHEN length(CAST(item_json AS BLOB)) <= ?4 THEN item_json END FROM thread_items WHERE item_id=?1 AND thread_id=?2 AND turn_id=?3".to_string()
+    } else {
+        format!("SELECT length(CAST({column} AS BLOB)), CASE WHEN length(CAST({column} AS BLOB)) <= ?4 THEN {column} END FROM {table} WHERE id = ?1 AND session_id = ?2 AND ?3 IS NULL")
+    };
+    let (cell_id, turn_id) = if provider_id == "codex" {
+        let (turn, item): (String, String) = serde_json::from_str(id).map_err(|_| STALE)?;
+        (item, Some(turn))
+    } else {
+        (id.to_string(), None)
+    };
     let (size, cell): (Option<i64>, rusqlite::types::Value) = conn
-        .query_row(&sql, rusqlite::params![id, session_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+        .query_row(
+            &sql,
+            rusqlite::params![cell_id, session_id, turn_id, MAX_TEXT_BYTES],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .map_err(|_| STALE.to_string())?;
     if size.unwrap_or(0) as u64 > MAX_TEXT_BYTES {
         return Err(TOO_LARGE_TEXT.to_string());
@@ -1280,6 +1309,32 @@ mod tests {
         assert!(
             resolve_content_ref(&source, &sqlite("part; DROP TABLE part", "p1", "data")).is_err()
         );
+    }
+
+    #[test]
+    fn codex_paginated_sources_accept_only_configured_databases() {
+        let dir = tempdir().unwrap();
+        let own = dir.path().join("thread_history_1.sqlite");
+        let other = dir.path().join("other.sqlite");
+        std::fs::write(&own, "fixture").unwrap();
+        std::fs::write(&other, "fixture").unwrap();
+        let source = codex_history::source(&own, "fixture");
+        assert!(validate_codex_sqlite_source(&source, &[own.clone()]).is_ok());
+        assert!(validate_codex_sqlite_source(
+            &codex_history::source(&other, "fixture"),
+            &[own.clone()]
+        )
+        .is_err());
+        assert!(validate_codex_sqlite_source("sqlite:invalid", &[own.clone()]).is_err());
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("alias.sqlite");
+            std::os::unix::fs::symlink(&other, &link).unwrap();
+            assert!(
+                validate_codex_sqlite_source(&codex_history::source(&link, "fixture"), &[own])
+                    .is_err()
+            );
+        }
     }
 
     #[test]

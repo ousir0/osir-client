@@ -1176,6 +1176,16 @@ impl SkillService {
                         ) {
                             continue;
                         }
+                        if matches!(
+                            app,
+                            AppType::Claude | AppType::Codex | AppType::Gemini | AppType::OpenCode
+                        ) && !skill.apps.is_enabled_for(&app)
+                        {
+                            let native = Self::get_app_skills_dir(&app)?.join(&directory);
+                            if !Self::is_symlink_to_ssot(&native, &ssot_dir) {
+                                continue;
+                            }
+                        }
                         let _ =
                             Self::remove_from_app_preserving(&directory, &app, &preserved_paths);
                     }
@@ -1646,6 +1656,10 @@ impl SkillService {
         let dest = ssot_dir.join(&skill.directory);
         let mut deployments = Vec::new();
         for app in [
+            AppType::Claude,
+            AppType::Codex,
+            AppType::Gemini,
+            AppType::OpenCode,
             AppType::Pi,
             AppType::Omp,
             AppType::Mcode,
@@ -1927,6 +1941,17 @@ impl SkillService {
 
         // 2. 逐个移动 skill 目录
         let skills = db.get_all_installed_skills()?;
+        // A conflicting target must not switch storage for every managed skill.
+        for skill in skills.values() {
+            let Ok(directory) = Self::require_valid_directory(&skill.directory) else {
+                continue;
+            };
+            let source = old_dir.join(&directory);
+            let destination = new_dir.join(&directory);
+            if source.exists() && (destination.exists() || Self::is_symlink(&destination)) {
+                Self::ensure_pi_skill_destination_matches(&source, &destination, &directory)?;
+            }
+        }
         let pi_dir = Self::get_app_skills_dir(&AppType::Pi)?;
         let pi_uses_old_ssot = Self::paths_alias(&old_dir, &pi_dir);
         let mut pi_deployments = Vec::new();
@@ -1973,7 +1998,15 @@ impl SkillService {
                     .ok()
                     .flatten()
             };
-            for app in [AppType::Mcode, AppType::Agy, AppType::Kimi] {
+            for app in [
+                AppType::Mcode,
+                AppType::Agy,
+                AppType::Kimi,
+                AppType::Claude,
+                AppType::Codex,
+                AppType::Gemini,
+                AppType::OpenCode,
+            ] {
                 if skill.apps.is_enabled_for(&app) {
                     let destination = Self::get_app_skills_dir(&app)?.join(&directory);
                     if let Some(deployment) =
@@ -2035,7 +2068,17 @@ impl SkillService {
 
         // 4. 刷新所有应用目录的 symlink（指向新 SSOT）
         for app in AppType::all() {
-            let _ = Self::sync_to_app_unlocked(db, &app);
+            match Self::sync_to_app_unlocked(db, &app) {
+                Ok(failures) => result.errors.extend(failures.into_iter().map(|failure| {
+                    format!(
+                        "{} / {}: {}",
+                        app.as_str(),
+                        failure.directory,
+                        failure.error
+                    )
+                })),
+                Err(error) => result.errors.push(format!("{}: {error}", app.as_str())),
+            }
         }
         for (directory, deployment) in pi_deployments {
             let source = new_dir.join(&directory);
@@ -2240,6 +2283,11 @@ impl SkillService {
                 }
                 return Err(error);
             }
+            return Ok(());
+        }
+
+        if !enabled && !skill.apps.is_enabled_for(app) && !matches!(app, AppType::Pi | AppType::Omp)
+        {
             return Ok(());
         }
 
@@ -2451,7 +2499,7 @@ impl SkillService {
         // 收集所有待扫描的目录及其来源标签
         let scan_sources = Self::local_skill_sources();
 
-        let mut unmanaged: HashMap<String, UnmanagedSkill> = HashMap::new();
+        let mut unmanaged: HashMap<PathBuf, UnmanagedSkill> = HashMap::new();
 
         for (scan_dir, label) in &scan_sources {
             let entries = match fs::read_dir(scan_dir) {
@@ -2480,7 +2528,7 @@ impl SkillService {
                 let (name, description) = Self::read_skill_name_desc(&skill_md, &dir_name);
 
                 unmanaged
-                    .entry(dir_name.clone())
+                    .entry(path.clone())
                     .and_modify(|s| {
                         if !s.found_in.contains(label) {
                             s.found_in.push(label.clone());
@@ -2502,6 +2550,7 @@ impl SkillService {
                 .to_lowercase()
                 .cmp(&right.name.to_lowercase())
                 .then_with(|| left.directory.cmp(&right.directory))
+                .then_with(|| left.path.cmp(&right.path))
         });
         Ok(skills)
     }
@@ -2661,8 +2710,20 @@ impl SkillService {
                     app,
                     AppType::Pi | AppType::Omp | AppType::Mcode | AppType::Agy | AppType::Kimi
                 ) || !apps.is_enabled_for(&app)
-                    || Self::skill_exists_in_app(&dir_name, &app)
                 {
+                    continue;
+                }
+                if Self::skill_exists_in_app(&dir_name, &app) {
+                    // Importing a different source must not claim ownership of
+                    // an existing native skill with the same directory name.
+                    if selection.source_path.is_some() {
+                        if let Err(error) =
+                            Self::preflight_install_destination(&dest, &dir_name, &app)
+                        {
+                            apps.set_enabled_for(&app, false);
+                            not_enabled.push(format!("{dir_name} ({}): {error:#}", app.as_str()));
+                        }
+                    }
                     continue;
                 }
                 if let Err(error) = Self::sync_to_app_dir(&dir_name, &app) {
@@ -2764,12 +2825,6 @@ impl SkillService {
     fn preflight_install_destination(source: &Path, directory: &str, app: &AppType) -> Result<()> {
         let ssot_dir = Self::get_ssot_dir()?;
         let app_dir = Self::get_distinct_app_skills_dir(&ssot_dir, app)?;
-        if !matches!(
-            app,
-            AppType::Pi | AppType::Omp | AppType::Mcode | AppType::Agy | AppType::Kimi
-        ) {
-            return Ok(());
-        }
         let destination = app_dir.join(directory);
         if destination.exists() || Self::is_symlink(&destination) {
             Self::ensure_pi_skill_destination_matches(source, &destination, directory)?;
@@ -2832,6 +2887,20 @@ impl SkillService {
                     expected_target: resolved,
                 }));
             }
+            // Brand migration copies the old management directory and keeps
+            // its files. Retarget only an unchanged legacy managed copy.
+            let legacy = crate::config::get_home_dir().join(".cc-switch/skills");
+            if matches!((resolved.canonicalize(), legacy.canonicalize()),
+                (Ok(target), Ok(root)) if target.starts_with(&root))
+                && matches!(
+                    (Self::compute_pi_deployment_hash(&resolved), Self::compute_pi_deployment_hash(source)),
+                    (Ok(old), Ok(current)) if old == current
+                )
+            {
+                return Ok(Some(PiSkillDeployment::Symlink {
+                    expected_target: resolved,
+                }));
+            }
         } else if destination.is_dir() {
             if let (Ok(destination_hash), Ok(source_hash)) = (
                 Self::compute_pi_deployment_hash(destination),
@@ -2846,7 +2915,7 @@ impl SkillService {
         }
 
         Err(anyhow!(
-            "Pi 中已存在同名但内容不同的 Skill，拒绝覆盖或删除: {directory}"
+            "已存在同名但内容不同的技能，原内容已保留，请先检查: {directory}"
         ))
     }
 
@@ -2941,11 +3010,7 @@ impl SkillService {
 
         let dest = app_dir.join(&directory);
 
-        if matches!(
-            app,
-            AppType::Pi | AppType::Omp | AppType::Mcode | AppType::Agy | AppType::Kimi
-        ) && (dest.exists() || Self::is_symlink(&dest))
-        {
+        if dest.exists() || Self::is_symlink(&dest) {
             Self::ensure_pi_skill_destination_matches(&source, &dest, &directory)?;
         }
 
@@ -3144,13 +3209,8 @@ impl SkillService {
         }
 
         if skill_path.exists() || Self::is_symlink(&skill_path) {
-            if matches!(
-                app,
-                AppType::Pi | AppType::Omp | AppType::Mcode | AppType::Agy | AppType::Kimi
-            ) {
-                let source = ssot_dir.join(&directory);
-                Self::ensure_pi_skill_destination_matches(&source, &skill_path, &directory)?;
-            }
+            let source = ssot_dir.join(&directory);
+            Self::ensure_pi_skill_destination_matches(&source, &skill_path, &directory)?;
             Self::remove_path(&skill_path)?;
             log::debug!("Skill {directory} 已从 {app:?} 删除");
         }
@@ -3229,7 +3289,8 @@ impl SkillService {
                 }
 
                 if let Some(skill) = indexed_skills.get(&dir_name.to_lowercase()) {
-                    if !skill.apps.is_enabled_for(app) {
+                    if !skill.apps.is_enabled_for(app) && Self::is_symlink_to_ssot(&path, &ssot_dir)
+                    {
                         Self::remove_path(&path)?;
                     }
                     continue;
@@ -8240,6 +8301,44 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    #[serial_test::serial]
+    fn local_skill_brand_migration_retargets_only_unchanged_legacy_links() {
+        let home = tempdir().expect("home");
+        let _home = TestHomeGuard::set(home.path());
+        let legacy = home.path().join(".cc-switch/skills/shared");
+        let current = home.path().join(".osir_client/skills/shared");
+        write_skill(&legacy, "shared");
+        write_skill(&current, "shared");
+        let native = home.path().join(".codex/skills/shared");
+        fs::create_dir_all(native.parent().unwrap()).unwrap();
+        SkillService::create_symlink(&legacy, &native).unwrap();
+        let deployment = SkillService::inspect_pi_skill_destination(&current, &native, "shared")
+            .unwrap()
+            .unwrap();
+        SkillService::refresh_pi_skill_destination(&current, &native, "shared", &deployment)
+            .unwrap();
+        assert_eq!(
+            native.canonicalize().unwrap(),
+            current.canonicalize().unwrap()
+        );
+        assert!(legacy.join("SKILL.md").is_file());
+
+        let edited_native = home.path().join(".claude/skills/shared");
+        fs::create_dir_all(edited_native.parent().unwrap()).unwrap();
+        SkillService::create_symlink(&legacy, &edited_native).unwrap();
+        fs::write(legacy.join("prompt.md"), "external edit").unwrap();
+        assert!(
+            SkillService::inspect_pi_skill_destination(&current, &edited_native, "shared").is_err()
+        );
+        assert_eq!(fs::read_link(&edited_native).unwrap(), legacy);
+        assert_eq!(
+            fs::read_to_string(edited_native.join("prompt.md")).unwrap(),
+            "external edit"
+        );
+    }
+
+    #[test]
     #[serial_test::serial]
     fn local_skill_discovery_includes_codex_system_and_both_plugin_caches_without_writing() {
         let home = tempdir().expect("home");
@@ -8313,13 +8412,14 @@ mod tests {
         write_skill(&plugin, "selected Claude plugin copy");
         write_skill(&outside, "outside source");
         let discovered = SkillService::scan_unmanaged(&db).expect("scan same-name sources");
-        let metadata = discovered
+        let copies: Vec<_> = discovered
             .iter()
-            .find(|skill| skill.directory == "shared-tool")
-            .expect("shared skill");
-        assert!(metadata.found_in.contains(&"claude-plugins".to_string()));
-        assert!(metadata.found_in.contains(&"codex-plugins".to_string()));
-        assert_eq!(Path::new(&metadata.path), native);
+            .filter(|skill| skill.directory == "shared-tool")
+            .collect();
+        assert_eq!(copies.len(), 3, "every same-name source is selectable");
+        for path in [&native, &codex_plugin, &plugin] {
+            assert!(copies.iter().any(|skill| Path::new(&skill.path) == path));
+        }
         let rejected = SkillService::import_from_apps(
             &db,
             vec![ImportSkillSelection {

@@ -219,7 +219,9 @@ async fn detect_inventory() -> Vec<OsirToolDetection> {
 async fn refresh_runtime(app: &tauri::AppHandle, records: &mut [OsirToolDetection]) {
     #[cfg(target_os = "macos")]
     macos::refresh_runtime(app, records).await;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    windows::refresh_runtime(app, records).await;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
         for record in records {
@@ -381,12 +383,23 @@ fn cli_file_in_dirs(id: &str, dirs: &[PathBuf]) -> bool {
 #[path = "osir_tools_macos.rs"]
 mod macos;
 
+#[cfg(target_os = "windows")]
+#[path = "osir_tools_windows.rs"]
+pub(crate) mod windows;
+#[cfg(any(target_os = "windows", test))]
+#[path = "osir_tools_windows_support.rs"]
+pub(crate) mod windows_support;
+
 async fn detect_desktop(id: &str) -> OsirToolDetection {
     #[cfg(target_os = "macos")]
     {
         macos::detect(id).await
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        windows::detect(id).await
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         OsirToolDetection::new(id, ToolKind::Desktop)
             .failed(false, "当前平台尚未接入此桌面应用的本地检测")
@@ -416,7 +429,11 @@ pub(crate) async fn request_desktop_session(
     {
         macos::request_desktop_session(app, session_id).await
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        windows::request_desktop_session(app, session_id).await
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (app, session_id);
         Err("当前平台尚未支持准确打开桌面会话，请在原工具中继续".into())
@@ -442,7 +459,9 @@ pub async fn osir_close_tool(
     }
     #[cfg(target_os = "macos")]
     let result = macos::close_desktop(&app, &tool_id, force.unwrap_or(false)).await;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    let result = windows::close_desktop(&app, &tool_id, force.unwrap_or(false)).await;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let result = {
         let _ = (app, force);
         Err("当前平台尚未接入桌面应用关闭，请从系统应用中退出".into())
@@ -523,7 +542,16 @@ pub async fn osir_launch_tool(
         )
         .await
     };
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    let result = {
+        let _ = (state, directory);
+        if target == "desktop" {
+            windows::launch_desktop(&app, &tool_id, restart).await
+        } else {
+            Err("Windows 命令行启动请使用终端入口".into())
+        }
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let result = {
         let _ = (app, state, directory, restart);
         Err("当前平台尚未接入此启动方式，请从系统打开工具".into())
@@ -559,7 +587,13 @@ pub async fn osir_launch_codex_desktop(app: tauri::AppHandle) -> Result<OsirTool
         INVENTORY_CACHE.invalidate().await;
         result
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let result = windows::launch_desktop(&app, "codex", false).await;
+        INVENTORY_CACHE.invalidate().await;
+        result
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
         Err("当前平台尚未接入 Codex Desktop 启动，请从系统应用列表打开".into())

@@ -204,6 +204,10 @@ fn lifecycle_failure_categories_never_return_secret_output() {
             Failure::NativeIncomplete,
         ),
         (
+            "Error: claude native binary not installed.",
+            Failure::NativeIncomplete,
+        ),
+        (
             "Error: Cannot find module optional-binary\nMissing optional dependency",
             Failure::NativeIncomplete,
         ),
@@ -325,6 +329,8 @@ fn official_claude_install_acceptance_uses_production_child_proxy() {
         .args([
             "install",
             "--global",
+            "--ignore-scripts=true",
+            "--omit=optional",
             "--no-audit",
             "--no-fund",
             "--registry=https://registry.npmjs.org",
@@ -338,8 +344,31 @@ fn official_claude_install_acceptance_uses_production_child_proxy() {
         .arg("--globalconfig")
         .arg(&globalconfig)
         .arg("@anthropic-ai/claude-code@2.1.312");
-    // Production helper is the only proxy injection path in this acceptance.
+    // Seed the official broken state; repair uses the production command and
+    // child proxy wrapper, pinned to the same exact version in this test.
     run_lifecycle(&mut install, "claude_install_isolated_acceptance")
+        .unwrap_or_else(|safe_error| panic!("{safe_error}"));
+    let launcher = root_path.join("install/bin/claude");
+    let real = root_path.join("install/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe");
+    assert!(std::fs::read_to_string(&real)
+        .unwrap()
+        .contains("Run the postinstall manually"));
+    assert!(
+        super::super::claude_launcher_error(&launcher, "Exec format error")
+            .starts_with("TOOL_INSTALL_NATIVE_MISSING")
+    );
+    let command = super::super::claude_npm_update_command(
+        &launcher.to_string_lossy(),
+        &real.to_string_lossy(),
+    )
+    .unwrap()
+    .replace(
+        "@anthropic-ai/claude-code@latest",
+        "@anthropic-ai/claude-code@2.1.312",
+    );
+    let mut repair = isolated(std::path::Path::new("/bin/bash"));
+    repair.args(["-c", &command]);
+    run_lifecycle(&mut repair, "claude_repair_isolated_acceptance")
         .unwrap_or_else(|safe_error| panic!("{safe_error}"));
     let mut version = isolated(&root_path.join("install/bin/claude"));
     version.arg("--version");

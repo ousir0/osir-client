@@ -47,6 +47,20 @@ const BUILD_PREFIXES = [
 const USAGE =
   "node scripts/osir-release-cloud.mjs <beta|prod> --operator-config /absolute/private/config.json [--build-directory /absolute/prebuilt-directory] [--publish]";
 
+export function platformInstaller(artifact) {
+  if (
+    !artifact ||
+    artifact.kind !== "installer" ||
+    typeof artifact.file_name !== "string"
+  )
+    return false;
+  if (["darwin-aarch64", "darwin-x86_64"].includes(artifact.platform))
+    return artifact.file_name.endsWith(".dmg");
+  if (["windows-aarch64", "windows-x86_64"].includes(artifact.platform))
+    return artifact.file_name.endsWith("-setup.exe");
+  return false;
+}
+
 function requireThat(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -546,8 +560,8 @@ export async function runCloudRelease(
       plan.artifacts.some((artifact) => artifact.kind === "installer") &&
         plan.artifacts
           .filter((artifact) => artifact.kind === "installer")
-          .every((artifact) => artifact.file_name.endsWith(".dmg")),
-      "Cloud releases require the verified DMG installer before registration.",
+          .every(platformInstaller),
+      "Cloud releases require verified platform installers before registration.",
     );
     return plan;
   };
@@ -902,8 +916,8 @@ export async function runCloudRelease(
         (value) => value.kind === "installer",
       )) {
         requireThat(
-          artifact.file_name.endsWith(".dmg"),
-          "Cloud release requires the verified DMG installer.",
+          platformInstaller(artifact),
+          "Cloud release requires the verified platform installer.",
         );
         const url = `${ORIGIN}/api/v1/osir-client/download/latest/${options.channel}/${artifact.platform}/installer`;
         const response = await fetchImpl(url, {

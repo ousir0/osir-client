@@ -55,8 +55,14 @@ type LocalReport = Pick<
 > & {
   recoveryRequired: boolean;
   updateBlockedReason?: string | null;
+  installMethod?: "microsoft_store";
 };
-type InstallReport = { step: string; build: number | null };
+type InstallReport = {
+  step: string;
+  build: number | null;
+  installed?: boolean;
+};
+type OperationNotice = string | { message: string; handedOff: true };
 type InstallerStatus = {
   operationId: string | null;
   phase: string | null;
@@ -300,7 +306,7 @@ export function CodexDesktopPanel({
     };
   }, [desktop, working, statusRetry]);
   async function run(
-    action: () => Promise<string>,
+    action: () => Promise<OperationNotice>,
     kind: "install" | "other" = "other",
   ) {
     if (working || operationLock.current || nativeStatus.current?.operationId)
@@ -315,9 +321,15 @@ export function CodexDesktopPanel({
     setMessage("");
     try {
       const result = await action();
-      setMessage(result);
-      toast.success(result);
-      if (kind === "install") setInstallOutcome("completed");
+      const notice = typeof result === "string" ? result : result.message;
+      setMessage(notice);
+      if (typeof result !== "string" && result.handedOff) {
+        toast.info(notice);
+        setOperationKind("other");
+      } else {
+        toast.success(notice);
+        if (kind === "install") setInstallOutcome("completed");
+      }
     } catch (error) {
       const detail = connectionError(error);
       // This exact message is emitted by native InstallError::Cancelled. A
@@ -369,6 +381,10 @@ export function CodexDesktopPanel({
     staleTime: 60_000,
   });
   const active = working || !!status?.operationId;
+  const systemInstall = local.data?.installMethod === "microsoft_store";
+  useEffect(() => {
+    if (systemInstall && source === "osir_mirror") setSource("official");
+  }, [systemInstall, source, setSource]);
   const currentPhase =
     !statusUnavailable && status?.operationId ? status.phase : null;
   const canCancel = !!currentPhase && cancellablePhases.has(currentPhase);
@@ -520,6 +536,18 @@ export function CodexDesktopPanel({
     });
     void detection.refetch();
     clearRelease();
+    if (
+      systemInstall &&
+      result.step === "system_install_requested" &&
+      result.installed === false &&
+      result.build === null
+    ) {
+      setInstallConfirmation(null);
+      return {
+        message: "已打开 Microsoft Store，请完成安装或更新后重新检测。",
+        handedOff: true as const,
+      };
+    }
     if (result.step !== "completed")
       throw new Error("安装未完成，请检查本地状态并恢复未完成的安装。");
     setInstallConfirmation(null);
@@ -574,7 +602,11 @@ export function CodexDesktopPanel({
         <SupportedToolIcon id="codex" size={28} decorative />
         <div>
           <h2>Codex Desktop</h2>
-          <p className="osir-desktop-note">检测本机版本，下载或更新 Codex。</p>
+          <p className="osir-desktop-note">
+            {systemInstall
+              ? "检测本机版本，通过 Microsoft Store 安装或更新 Codex。"
+              : "检测本机版本，下载或更新 Codex。"}
+          </p>
         </div>
         <button
           type="button"
@@ -626,12 +658,12 @@ export function CodexDesktopPanel({
             }}
           >
             <option value="auto">自动选择</option>
-            <option value="osir_mirror">OSIR 下载源</option>
+            {!systemInstall && <option value="osir_mirror">OSIR 下载源</option>}
             <option value="official">官方更新源</option>
           </select>
         </label>
       </div>
-      {desktop && (
+      {desktop && !systemInstall && (
         <label className="osir-desktop-target">
           安装位置
           <select
@@ -715,7 +747,11 @@ export function CodexDesktopPanel({
                 }}
               >
                 <Download size={14} aria-hidden="true" />
-                {local.data?.installedBuild ? "更新 Codex" : "下载并安装"}
+                {systemInstall
+                  ? "打开 Microsoft Store"
+                  : local.data?.installedBuild
+                    ? "更新 Codex"
+                    : "下载并安装"}
               </button>
             )}
             <ToolLaunchButton
@@ -887,7 +923,9 @@ export function CodexDesktopPanel({
                         : local.data?.recoveryRequired
                           ? "存在未完成安装，请先恢复"
                           : local.data?.installedBuild
-                            ? `上次校验通过 · 构建 ${local.data.installedBuild}`
+                            ? systemInstall
+                              ? `已检测到系统安装 · 版本 ${selectedVersion || "未知"}`
+                              : `上次校验通过 · 构建 ${local.data.installedBuild}`
                             : "所选目录尚未安装"}
                   </dd>
                 </div>
@@ -943,79 +981,91 @@ export function CodexDesktopPanel({
                 </button>
               </div>
             </section>
-            <section
-              className="osir-desktop-restore"
-              aria-label="历史版本与恢复点"
-            >
-              <h3>历史版本与恢复点</h3>
-              <p className="osir-desktop-note">
-                仅恢复应用版本，不包含会话历史或配置。
-              </p>
-              <div className="osir-desktop-restore-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col">可恢复版本</th>
-                      <th scope="col">来源</th>
-                      <th scope="col">保存时间</th>
-                      <th scope="col">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {restorePoints.map((point) => (
-                      <tr key={point.receiptId}>
-                        <td>
-                          构建 {point.previousBuild}
-                          <span className="osir-desktop-restore-context">
-                            安装构建 {point.targetBuild}
-                          </span>
-                        </td>
-                        <td>更新前应用备份</td>
-                        <td>未提供</td>
-                        <td>
-                          <button
-                            type="button"
-                            disabled={
-                              active ||
-                              confirmationOpen ||
-                              local.isFetching ||
-                              local.isError ||
-                              local.data?.recoveryRequired
-                            }
-                            onClick={() => {
-                              setFailed(false);
-                              setRestorePoint(point);
-                            }}
-                          >
-                            恢复构建 {point.previousBuild}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {!restorePoints.length && (
+            {!systemInstall && (
+              <section
+                className="osir-desktop-restore"
+                aria-label="历史版本与恢复点"
+              >
+                <h3>历史版本与恢复点</h3>
+                <p className="osir-desktop-note">
+                  仅恢复应用版本，不包含会话历史或配置。
+                </p>
+                <div className="osir-desktop-restore-table">
+                  <table>
+                    <thead>
                       <tr>
-                        <td colSpan={4}>
-                          {local.isError
-                            ? "恢复记录暂不可用，请刷新本地状态。"
-                            : local.isFetching
-                              ? "正在读取恢复记录…"
-                              : local.data?.recoveryRequired
-                                ? "请先恢复未完成的安装，再查看恢复点。"
-                                : "暂无已保存且可恢复的版本。"}
-                        </td>
+                        <th scope="col">可恢复版本</th>
+                        <th scope="col">来源</th>
+                        <th scope="col">保存时间</th>
+                        <th scope="col">操作</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                    </thead>
+                    <tbody>
+                      {restorePoints.map((point) => (
+                        <tr key={point.receiptId}>
+                          <td>
+                            构建 {point.previousBuild}
+                            <span className="osir-desktop-restore-context">
+                              安装构建 {point.targetBuild}
+                            </span>
+                          </td>
+                          <td>更新前应用备份</td>
+                          <td>未提供</td>
+                          <td>
+                            <button
+                              type="button"
+                              disabled={
+                                active ||
+                                confirmationOpen ||
+                                local.isFetching ||
+                                local.isError ||
+                                local.data?.recoveryRequired
+                              }
+                              onClick={() => {
+                                setFailed(false);
+                                setRestorePoint(point);
+                              }}
+                            >
+                              恢复构建 {point.previousBuild}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {!restorePoints.length && (
+                        <tr>
+                          <td colSpan={4}>
+                            {local.isError
+                              ? "恢复记录暂不可用，请刷新本地状态。"
+                              : local.isFetching
+                                ? "正在读取恢复记录…"
+                                : local.data?.recoveryRequired
+                                  ? "请先恢复未完成的安装，再查看恢复点。"
+                                  : "暂无已保存且可恢复的版本。"}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
           </details>
           <ConfirmDialog
             className="osir-tool-update-dialog"
             isOpen={installConfirmation !== null}
-            title={local.data?.installedBuild ? "更新 Codex" : "安装 Codex"}
-            message={`将从${installConfirmation ? CODEX_INSTALL_SOURCES[installConfirmation.actualSource] : ""}下载 ${installConfirmation?.version ?? ""}（构建 ${installConfirmation?.build ?? ""}），安装至 ${installConfirmation?.targetPath ?? ""}。请先退出此 Codex；更新前会备份现有版本，并保留会话与配置。${failed && message ? "\n" + message : ""}`}
-            confirmText="确认安装"
+            title={
+              systemInstall
+                ? "打开 Microsoft Store"
+                : local.data?.installedBuild
+                  ? "更新 Codex"
+                  : "安装 Codex"
+            }
+            message={
+              systemInstall
+                ? "安装和更新由 Microsoft Store 完成，完成后请返回重新检测。"
+                : `将从${installConfirmation ? CODEX_INSTALL_SOURCES[installConfirmation.actualSource] : ""}下载 ${installConfirmation?.version ?? ""}（构建 ${installConfirmation?.build ?? ""}），安装至 ${installConfirmation?.targetPath ?? ""}。请先退出此 Codex；更新前会备份现有版本，并保留会话与配置。${failed && message ? "\n" + message : ""}`
+            }
+            confirmText={systemInstall ? "打开商店" : "确认安装"}
             cancelText="取消"
             variant="info"
             pending={active}

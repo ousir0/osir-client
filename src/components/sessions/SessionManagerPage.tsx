@@ -175,6 +175,13 @@ export function SessionManagerPage({
       : undefined,
   );
   const osirVariant = osirHost || Boolean(renderSessionInspection);
+  const canResume = (session: SessionMeta) =>
+    osirVariant &&
+    Boolean(session.sourcePath) &&
+    ["codex", "claude", "opencode", "gemini"].includes(session.providerId) &&
+    (session.providerId === "codex" && session.sourcePath?.startsWith("sqlite:")
+      ? session.resumeTarget === "desktop"
+      : !session.readOnly);
   const sessions = useMemo(() => data ?? [], [data]);
   const { data: settings } = useSettingsQuery();
 
@@ -388,6 +395,12 @@ export function SessionManagerPage({
   );
 
   const handleLaunch = async (session: SessionMeta) => {
+    if (
+      session.providerId === "codex" &&
+      session.sourcePath?.startsWith("sqlite:") &&
+      !canResume(session)
+    )
+      return;
     if (
       osirVariant &&
       session.sourcePath &&
@@ -754,12 +767,7 @@ export function SessionManagerPage({
           isDesktopRecord(session) ||
           session.providerId === "claude-desktop"
         }
-        resumeAvailable={
-          osirVariant &&
-          !session.readOnly &&
-          Boolean(session.sourcePath) &&
-          ["codex", "claude", "opencode", "gemini"].includes(session.providerId)
-        }
+        resumeAvailable={canResume(session)}
         resumePending={resumingKey === key}
         osirVariant={osirVariant}
         bordered={bordered}
@@ -1077,14 +1085,22 @@ export function SessionManagerPage({
   const readerContent = (
     <>
       {osirVariant && resumeNotice}
-      {readerSession?.providerId === "claude-desktop" &&
-        !readerSession.sourcePath && (
-          <div className="shrink-0 px-6 pt-3" role="status">
-            <Notice tone="neutral" title="本机仅保存了会话索引">
-              本地没有可读取的正文，请在 Claude 应用中查看或继续该会话。
-            </Notice>
-          </div>
-        )}
+      {readerSession && !readerSession.sourcePath && (
+        <div className="shrink-0 px-6 pt-3" role="status">
+          <Notice
+            tone="neutral"
+            title={
+              readerSession.providerId === "codex"
+                ? "暂时无法读取此会话正文"
+                : "本机仅保存了会话索引"
+            }
+          >
+            {readerSession.providerId === "codex"
+              ? "请在原 Codex 工具中查看或继续该会话。"
+              : "本地没有可读取的正文，请在原应用中查看或继续该会话。"}
+          </Notice>
+        </div>
+      )}
       {sessionInspection &&
         (inspectionPlacement === "side" ? (
           <aside className="osir-session-inspection" aria-label="续聊检查">
@@ -1115,12 +1131,7 @@ export function SessionManagerPage({
             readerSession.providerId === "claude-desktop"
           }
           resumeAction={
-            osirVariant &&
-            !readerSession.readOnly &&
-            readerSession.sourcePath &&
-            ["codex", "claude", "opencode", "gemini"].includes(
-              readerSession.providerId,
-            ) ? (
+            canResume(readerSession) ? (
               <Button
                 variant="solid"
                 size="regular"

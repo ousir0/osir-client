@@ -59,6 +59,16 @@ pub trait CredentialBackend: Send + Sync {
     fn create(&self, _service: &str, _account: &str, _bytes: &[u8]) -> Result<(), CredentialError> {
         Err(CredentialError::Unavailable)
     }
+    /// A browser login explicitly saves a fresh item and may unlock the store.
+    /// Background token refresh must continue to use the silent write path.
+    fn create_interactive(
+        &self,
+        service: &str,
+        account: &str,
+        bytes: &[u8],
+    ) -> Result<(), CredentialError> {
+        self.create(service, account, bytes)
+    }
     /// Only a direct user action may request the system authorization dialog.
     fn read_interactive(
         &self,
@@ -111,17 +121,15 @@ fn development_keychain(
 #[cfg(target_os = "macos")]
 impl CredentialBackend for NativeKeychain {
     fn create(&self, service: &str, account: &str, bytes: &[u8]) -> Result<(), CredentialError> {
-        native_keychain_access(false, || {
-            let keychain = development_keychain()?
-                .map_or_else(
-                    security_framework::os::macos::keychain::SecKeychain::default,
-                    Ok,
-                )
-                .map_err(keychain_open_error)?;
-            keychain
-                .add_generic_password(service, account, bytes)
-                .map_err(keychain_error)
-        })
+        native_keychain_access(false, || create_native_password(service, account, bytes))
+    }
+    fn create_interactive(
+        &self,
+        service: &str,
+        account: &str,
+        bytes: &[u8],
+    ) -> Result<(), CredentialError> {
+        native_keychain_access(true, || create_native_password(service, account, bytes))
     }
     fn write(&self, service: &str, account: &str, bytes: &[u8]) -> Result<(), CredentialError> {
         native_keychain_access(false, || write_native_password(service, account, bytes))
@@ -156,22 +164,86 @@ impl CredentialBackend for NativeKeychain {
     }
 }
 
-// macOS file-based Keychain ACL prompts are not reliably suppressed by
-// kSecUseAuthenticationUISkip alone. Serialize all OSIR access while the
-// process-wide interaction setting is temporarily disabled; never queue another
-// prompt behind a blocked operation. The guard restores interaction on return.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CredentialAccess {
+    Idle,
+    Silent,
+    Interactive,
+}
+
+#[cfg(any(target_os = "macos", test))]
+struct CredentialAccessGate {
+    state: std::sync::Mutex<CredentialAccess>,
+    changed: std::sync::Condvar,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl CredentialAccessGate {
+    const fn new() -> Self {
+        Self {
+            state: std::sync::Mutex::new(CredentialAccess::Idle),
+            changed: std::sync::Condvar::new(),
+        }
+    }
+
+    fn acquire(
+        &self,
+        interactive: bool,
+        timeout: std::time::Duration,
+    ) -> Result<CredentialAccessGuard<'_>, CredentialError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| CredentialError::Unavailable)?;
+        if *state == CredentialAccess::Silent {
+            (state, _) = self
+                .changed
+                .wait_timeout_while(state, timeout, |state| *state == CredentialAccess::Silent)
+                .map_err(|_| CredentialError::Unavailable)?;
+        }
+        // Never wait behind a system dialog or queue a second interactive action.
+        if *state != CredentialAccess::Idle {
+            return Err(CredentialError::Unavailable);
+        }
+        *state = if interactive {
+            CredentialAccess::Interactive
+        } else {
+            CredentialAccess::Silent
+        };
+        Ok(CredentialAccessGuard(self))
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+struct CredentialAccessGuard<'a>(&'a CredentialAccessGate);
+
+#[cfg(any(target_os = "macos", test))]
+impl Drop for CredentialAccessGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.0.state.lock() {
+            *state = CredentialAccess::Idle;
+            self.0.changed.notify_all();
+        }
+    }
+}
+
+// Keychain interaction is process-wide. Requests may wait behind short silent
+// operations, but an active system dialog never acquires queued followers.
 #[cfg(target_os = "macos")]
 fn native_keychain_access<T>(
     interactive: bool,
     operation: impl FnOnce() -> Result<T, CredentialError>,
 ) -> Result<T, CredentialError> {
     use security_framework::os::macos::keychain::SecKeychain;
-    static ACCESS: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _access = ACCESS.try_lock().map_err(|_| {
-        // Fixed diagnostic only: no item service, account, payload or path.
-        log::warn!("OSIR native credential access deferred: gate_busy");
-        CredentialError::Unavailable
-    })?;
+    static ACCESS: CredentialAccessGate = CredentialAccessGate::new();
+    let _access = ACCESS
+        .acquire(interactive, std::time::Duration::from_secs(2))
+        .map_err(|error| {
+            // Fixed diagnostic only: no item service, account, payload or path.
+            log::warn!("OSIR native credential access deferred: gate_busy");
+            error
+        })?;
     let _silent = if interactive {
         None
     } else {
@@ -258,6 +330,23 @@ fn write_password_item<Item>(
         Some(item) => update(item),
         None => create(),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn create_native_password(
+    service: &str,
+    account: &str,
+    bytes: &[u8],
+) -> Result<(), CredentialError> {
+    let keychain = development_keychain()?
+        .map_or_else(
+            security_framework::os::macos::keychain::SecKeychain::default,
+            Ok,
+        )
+        .map_err(keychain_open_error)?;
+    keychain
+        .add_generic_password(service, account, bytes)
+        .map_err(keychain_error)
 }
 
 #[cfg(target_os = "macos")]
@@ -388,15 +477,27 @@ impl<B: CredentialBackend> CredentialStore<B> {
         self.backend.write(&self.service, &item, &bytes)
     }
     pub(super) fn create(&self, record: &SecretRecord) -> Result<(), CredentialError> {
+        self.create_inner(record, false)
+    }
+    pub(super) fn create_for_user(&self, record: &SecretRecord) -> Result<(), CredentialError> {
+        self.create_inner(record, true)
+    }
+    fn create_inner(
+        &self,
+        record: &SecretRecord,
+        interactive: bool,
+    ) -> Result<(), CredentialError> {
         if record.slot.is_none() {
             return Err(CredentialError::InvalidFormat);
         }
         let bytes = self.encode(record)?;
-        self.backend.create(
-            &self.service,
-            &self.item_at(&record.account_id, record.slot.as_deref())?,
-            &bytes,
-        )
+        let item = self.item_at(&record.account_id, record.slot.as_deref())?;
+        if interactive {
+            self.backend
+                .create_interactive(&self.service, &item, &bytes)
+        } else {
+            self.backend.create(&self.service, &item, &bytes)
+        }
     }
     fn encode(&self, record: &SecretRecord) -> Result<Vec<u8>, CredentialError> {
         self.validate(record, &record.account_id, false)?;
@@ -736,6 +837,58 @@ mod tests {
     use std::{collections::HashMap, sync::Mutex};
 
     #[test]
+    fn credential_gate_queues_operations_behind_short_silent_reads() {
+        use std::{sync::mpsc, time::Duration};
+        for interactive in [false, true] {
+            let gate = CredentialAccessGate::new();
+            let held = gate.acquire(false, Duration::ZERO).unwrap();
+            std::thread::scope(|scope| {
+                let (started, starting) = mpsc::channel();
+                let (finished, result) = mpsc::channel();
+                let gate = &gate;
+                scope.spawn(move || {
+                    started.send(()).unwrap();
+                    let acquired = gate.acquire(interactive, Duration::from_secs(2));
+                    finished.send(acquired.is_ok()).unwrap();
+                });
+                starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                assert!(matches!(
+                    result.recv_timeout(Duration::from_millis(20)),
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                ));
+                drop(held);
+                assert!(result.recv_timeout(Duration::from_secs(1)).unwrap());
+            });
+            assert!(gate.acquire(false, Duration::ZERO).is_ok());
+        }
+    }
+
+    #[test]
+    fn credential_gate_bounds_waits_and_never_queues_system_authorization() {
+        use std::time::Duration;
+        let gate = CredentialAccessGate::new();
+        let held = gate.acquire(false, Duration::ZERO).unwrap();
+        assert!(matches!(
+            gate.acquire(false, Duration::from_millis(5)),
+            Err(CredentialError::Unavailable)
+        ));
+        assert!(matches!(
+            gate.acquire(true, Duration::from_millis(5)),
+            Err(CredentialError::Unavailable)
+        ));
+        drop(held);
+        let held = gate.acquire(true, Duration::ZERO).unwrap();
+        for interactive in [false, true] {
+            assert!(matches!(
+                gate.acquire(interactive, Duration::from_secs(30)),
+                Err(CredentialError::Unavailable)
+            ));
+        }
+        drop(held);
+        assert!(gate.acquire(false, Duration::ZERO).is_ok());
+    }
+
+    #[test]
     fn native_existing_password_update_uses_only_an_item_handle_and_preserves_its_acl() {
         use std::cell::RefCell;
         // The lookup handle deliberately has no password or ACL payload.
@@ -977,6 +1130,42 @@ mod tests {
             store.load("42").unwrap().unwrap().access_token,
             "test-access"
         );
+    }
+    #[test]
+    fn fresh_login_can_unlock_storage_without_reading_or_replacing_existing_items() {
+        struct LockedStore;
+        impl CredentialBackend for LockedStore {
+            fn create(&self, _: &str, _: &str, _: &[u8]) -> Result<(), CredentialError> {
+                Err(CredentialError::InteractionRequired)
+            }
+            fn create_interactive(
+                &self,
+                _: &str,
+                _: &str,
+                _: &[u8],
+            ) -> Result<(), CredentialError> {
+                Ok(())
+            }
+            fn write(&self, _: &str, _: &str, _: &[u8]) -> Result<(), CredentialError> {
+                panic!("fresh login must remain add-only")
+            }
+            fn read(&self, _: &str, _: &str) -> Result<Option<Vec<u8>>, CredentialError> {
+                panic!("fresh login must not inspect old credentials")
+            }
+            fn remove(&self, _: &str, _: &str) -> Result<(), CredentialError> {
+                panic!("fresh login must not delete old credentials")
+            }
+        }
+        let (_, mut record) = fixture();
+        record.slot = Some("d".repeat(32));
+        let store =
+            CredentialStore::with_backend("https://osir.example/", "test.osir.dev", LockedStore)
+                .unwrap();
+        assert_eq!(
+            store.create(&record),
+            Err(CredentialError::InteractionRequired)
+        );
+        store.create_for_user(&record).unwrap();
     }
     #[test]
     fn slot_and_version_are_bound_inside_the_keychain_record() {

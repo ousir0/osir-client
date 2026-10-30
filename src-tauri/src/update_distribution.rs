@@ -14,7 +14,7 @@ pub struct UpdateDistribution {
     reason: Option<&'static str>,
 }
 
-fn public_key(value: &str) -> Option<Vec<u8>> {
+pub(crate) fn public_key(value: &str) -> Option<Vec<u8>> {
     if value.is_empty() || value.len() > 16384 {
         return None;
     }
@@ -54,7 +54,7 @@ fn decoded_path(path: &str) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
-fn valid_endpoint(value: &str) -> bool {
+pub(crate) fn valid_endpoint(value: &str) -> bool {
     if value.is_empty()
         || value.len() > 2048
         || value

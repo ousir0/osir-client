@@ -17,11 +17,12 @@ $manifest = Get-Content -Raw -LiteralPath (Join-Path $artifactDir 'build-manifes
 if ($manifest.target -ne 'x86_64-pc-windows-msvc' -or $manifest.mode -ne 'ci-pending-local-finalization') {
     throw 'Expected a pending Windows x64 artifact.'
 }
+$expectedWindowTitle = if ($manifest.channel -eq 'beta') { 'OSIR Client Beta' } else { 'OSIR Client' }
 $installer = Join-Path $artifactDir $manifest.installerArtifact.name
 $expectedMain = Join-Path $artifactDir $manifest.mainExecutableArtifact.name
-$smokeRoot = Join-Path $env:RUNNER_TEMP ('osir-packaged-smoke-' + [guid]::NewGuid().ToString('N'))
-$installDir = Join-Path $smokeRoot 'installed'
-$isolatedToolHome = Join-Path $smokeRoot 'tool-home'
+$smokeRoot = Join-Path $env:RUNNER_TEMP ('OSIR 安装验收 ' + [guid]::NewGuid().ToString('N'))
+$installDir = Join-Path $smokeRoot '应用目录'
+$isolatedToolHome = Join-Path $smokeRoot '用户数据'
 $isolatedAppData = Join-Path $smokeRoot 'roaming'
 $isolatedLocalAppData = Join-Path $smokeRoot 'local'
 $mainExe = Join-Path $installDir 'osir_client.exe'
@@ -29,6 +30,8 @@ $uninstaller = Join-Path $installDir 'uninstall.exe'
 $ownedLaunch = $null
 $stage = 'preflight'
 $failure = $null
+$rendererPort = 0
+$usedRendererPorts = [Collections.Generic.HashSet[int]]::new()
 $report = [ordered]@{
     schemaVersion = 1
     passed = $false
@@ -39,8 +42,49 @@ $report = [ordered]@{
     gitHead = $manifest.sourceProvenance.git.head
     startedAt = [DateTime]::UtcNow.ToString('o')
     isolation = 'ephemeral-runner-tool-home-and-appdata'
+    unicodeAndSpacePaths = $true
     authenticode = 'unsigned'
     stages = [ordered]@{}
+}
+
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public class OsirRealWindow {
+    public long Handle; public string Title; public string ClassName;
+    public int Left; public int Top; public int Width; public int Height;
+}
+public static class OsirWindows {
+    private delegate bool Callback(IntPtr h, IntPtr p);
+    [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left,Top,Right,Bottom; }
+    [DllImport("user32.dll")] private static extern bool EnumWindows(Callback cb, IntPtr p);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr h, StringBuilder s, int count);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassNameW(IntPtr h, StringBuilder s, int count);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out Rect rect);
+    [DllImport("user32.dll")] private static extern int GetWindowLongW(IntPtr h, int index);
+    public static OsirRealWindow[] ForProcess(int pid) {
+        var result = new List<OsirRealWindow>();
+        EnumWindows((h,p) => {
+            uint owner; GetWindowThreadProcessId(h, out owner);
+            if(owner!=(uint)pid || !IsWindowVisible(h)) return true;
+            var title=new StringBuilder(1024); GetWindowTextW(h,title,title.Capacity);
+            var cls=new StringBuilder(512); GetClassNameW(h,cls,cls.Capacity);
+            Rect r; if(!GetWindowRect(h,out r)) return true;
+            if(title.ToString().EndsWith("-siw") || (GetWindowLongW(h,-20)&0x80)!=0) return true;
+            result.Add(new OsirRealWindow {Handle=h.ToInt64(),Title=title.ToString(),ClassName=cls.ToString(),Left=r.Left,Top=r.Top,Width=r.Right-r.Left,Height=r.Bottom-r.Top});
+            return true;
+        },IntPtr.Zero);
+        return result.ToArray();
+    }
+}
+'@
+
+function Get-RealWindow([int]$ProcessId) {
+    return @([OsirWindows]::ForProcess($ProcessId) | Where-Object { $_.Title -eq $expectedWindowTitle -and $_.Width -ge 900 -and $_.Height -ge 600 }) | Select-Object -First 1
 }
 
 function Assert-Smoke([bool]$Condition, [string]$Message) {
@@ -51,7 +95,7 @@ function Get-Hash([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
-function Start-Isolated([string]$Path, [string]$Arguments = '') {
+function Start-Isolated([string]$Path, [string]$Arguments = '', [bool]$MissingRuntime = $false) {
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Path
     $start.Arguments = $Arguments
@@ -61,6 +105,18 @@ function Start-Isolated([string]$Path, [string]$Arguments = '') {
     $start.Environment['OSIR_TEST_HOME'] = $isolatedToolHome
     $start.Environment['APPDATA'] = $isolatedAppData
     $start.Environment['LOCALAPPDATA'] = $isolatedLocalAppData
+    if ($Path -eq $mainExe -and -not $MissingRuntime) {
+        do {
+            $debugListener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+            $debugListener.Start()
+            $script:rendererPort = $debugListener.LocalEndpoint.Port
+            $debugListener.Stop()
+        } while (-not $script:usedRendererPorts.Add($script:rendererPort))
+        $start.Environment['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = "--remote-debugging-port=$script:rendererPort --remote-debugging-address=127.0.0.1"
+    }
+    if ($MissingRuntime) {
+        $start.Environment['WEBVIEW2_BROWSER_EXECUTABLE_FOLDER'] = Join-Path $smokeRoot 'missing-webview2-runtime'
+    }
     return [System.Diagnostics.Process]::Start($start)
 }
 
@@ -124,6 +180,16 @@ function Wait-Uninstalled {
     Assert-Smoke (-not (Test-Path -LiteralPath $mainExe)) 'Main executable remains after uninstall.'
 }
 
+function Get-WizardPageSignature($Element) {
+    $nodes = $Element.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $values = foreach ($node in $nodes) {
+        if (-not $node.Current.IsOffscreen) {
+            "$($node.Current.ControlType.ProgrammaticName):$($node.Current.AutomationId):$($node.Current.Name)"
+        }
+    }
+    return ($values -join "`n")
+}
+
 try {
     foreach ($path in @($smokeRoot, $isolatedToolHome, $isolatedAppData, $isolatedLocalAppData)) {
         [void](New-Item -ItemType Directory -Path $path)
@@ -134,6 +200,62 @@ try {
     Assert-Smoke ($installerSignature.Status.ToString() -eq 'NotSigned') 'Installer unexpectedly has an Authenticode signature.'
     $report.installerSha256 = Get-Hash $installer
     $report.installerAuthenticodeStatus = $installerSignature.Status.ToString()
+    $stage = 'installerOpen'
+    $interactiveInstaller = Join-Path $smokeRoot 'OSIR Client 安装程序.exe'
+    Copy-Item -LiteralPath $installer -Destination $interactiveInstaller
+    Assert-Smoke ((Get-Hash $interactiveInstaller) -eq $manifest.installerArtifact.sha256) 'Interactive installer copy differs from the verified payload.'
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $ownedLaunch = Start-Isolated $interactiveInstaller
+    $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
+    $wizard = $null
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $ownedLaunch.Refresh()
+        Assert-Smoke (-not $ownedLaunch.HasExited) 'Installer exited before showing its setup wizard.'
+        $wizard = @([OsirWindows]::ForProcess($ownedLaunch.Id) | Where-Object {
+            $_.ClassName -eq '#32770' -and $_.Title.Contains($expectedWindowTitle) -and $_.Width -gt 200 -and $_.Height -gt 150
+        }) | Select-Object -First 1
+        if ($null -ne $wizard) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    Assert-Smoke ($null -ne $wizard) 'Opening the installer did not display a setup wizard.'
+    $timer.Stop()
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    $wizardElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$wizard.Handle)
+    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+    $buttons = $wizardElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+    $enabledButtons = 0
+    foreach ($button in $buttons) { if ($button.Current.IsEnabled -and -not $button.Current.IsOffscreen) { $enabledButtons++ } }
+    Assert-Smoke ($enabledButtons -ge 2) 'Installer wizard has no usable navigation buttons.'
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = [Drawing.Bitmap]::new($wizard.Width, $wizard.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($wizard.Left, $wizard.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save((Join-Path $artifactDir 'windows-installer-window.png'), [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+    $nextCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
+    $next = $wizardElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
+    Assert-Smoke ($null -ne $next -and $next.Current.IsEnabled -and -not $next.Current.IsOffscreen) 'Installer Next action is unavailable.'
+    $beforePage = Get-WizardPageSignature $wizardElement
+    $invoke = $next.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $invoke.Invoke()
+    $pageChanged = $false
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        try { $pageChanged = (Get-WizardPageSignature $wizardElement) -ne $beforePage } catch { $pageChanged = $false }
+        if ($pageChanged) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    Assert-Smoke $pageChanged 'Installer Next action did not advance the wizard.'
+    $report.stages.installerOpen = [ordered]@{
+        passed = $true; windowObserved = $true; usableNavigation = $true
+        nextActionInvoked = $true; nextPageObserved = $true
+        elapsedMilliseconds = $timer.ElapsedMilliseconds
+        execution = 'non-silent-no-arguments'; trustScope = 'CI-local-file-without-internet-zone'
+    }
+    Stop-OwnedApp
+
     $stage = 'install'
     # NSIS requires /D as the last raw argument, without quotation marks even
     # when the destination contains spaces. It consumes the remaining command.
@@ -143,25 +265,86 @@ try {
     $stage = 'launch'
     $ownedLaunch = Start-Isolated $mainExe
     $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
-    $windowFound = $false
+    $realWindow = $null
     while ([DateTime]::UtcNow -lt $deadline) {
         $ownedLaunch.Refresh()
         Assert-Smoke (-not $ownedLaunch.HasExited) 'Installed application exited before displaying its window.'
-        if ($ownedLaunch.MainWindowHandle -ne [IntPtr]::Zero) { $windowFound = $true; break }
+        $realWindow = Get-RealWindow $ownedLaunch.Id
+        if ($null -ne $realWindow) { break }
         Start-Sleep -Milliseconds 250
     }
-    Assert-Smoke $windowFound 'Installed application did not display a main window.'
+    Assert-Smoke ($null -ne $realWindow) 'Installed application did not display a visible OSIR Client window of at least 900x600.'
     # Observe briefly after the window appears; a momentary handle is insufficient.
     Start-Sleep -Seconds 3
     $ownedLaunch.Refresh()
-    Assert-Smoke (-not $ownedLaunch.HasExited -and $ownedLaunch.MainWindowHandle -ne [IntPtr]::Zero) 'Application window closed immediately after launch.'
+    $realWindow = Get-RealWindow $ownedLaunch.Id
+    Assert-Smoke (-not $ownedLaunch.HasExited -and $null -ne $realWindow) 'Application window closed immediately after launch.'
+    # A visible native shell can still contain a blank or unusable WebView.
+    & node (Join-Path $PSScriptRoot 'osir-packaged-renderer-check.mjs') $rendererPort $artifactDir 'launch' $realWindow.Handle
+    Assert-Smoke ($LASTEXITCODE -eq 0) 'Installed renderer or native IPC failed.'
+    $rendererReport = Get-Content -Raw -LiteralPath (Join-Path $artifactDir 'windows-renderer-smoke.json') | ConvertFrom-Json
+    Assert-Smoke ($rendererReport.passed -eq $true) 'Installed renderer did not pass.'
+    $realWindow = Get-RealWindow $ownedLaunch.Id
+    Assert-Smoke ($null -ne $realWindow) 'Native product window disappeared during renderer acceptance.'
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = [Drawing.Bitmap]::new($realWindow.Width, $realWindow.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($realWindow.Left, $realWindow.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save((Join-Path $artifactDir 'windows-app-window.png'), [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
     $report.stages.launch = [ordered]@{
         passed = $true
         processId = $ownedLaunch.Id
         windowObserved = $true
-        windowTitle = $ownedLaunch.MainWindowTitle
+        windowTitle = $realWindow.Title
+        windowClass = $realWindow.ClassName
+        windowWidth = $realWindow.Width
+        windowHeight = $realWindow.Height
+        excludesSingleInstanceToolWindow = $true
         remainedRunning = $true
+        rendererAndNativeIpcPassed = $true
     }
+    Stop-OwnedApp
+
+    $stage = 'reopen'
+    $ownedLaunch = Start-Isolated $mainExe
+    $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
+    $realWindow = $null
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $ownedLaunch.Refresh()
+        Assert-Smoke (-not $ownedLaunch.HasExited) 'Installed application exited on reopen.'
+        $realWindow = Get-RealWindow $ownedLaunch.Id
+        if ($null -ne $realWindow) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    Assert-Smoke ($null -ne $realWindow) 'Installed application did not reopen its product window.'
+    & node (Join-Path $PSScriptRoot 'osir-packaged-renderer-check.mjs') $rendererPort $artifactDir 'reopen' $realWindow.Handle
+    Assert-Smoke ($LASTEXITCODE -eq 0) 'Reopened renderer or native IPC failed.'
+    $report.stages.reopen = [ordered]@{ passed = $true; windowObserved = $true; rendererAndNativeIpcPassed = $true }
+    Stop-OwnedApp
+
+    $stage = 'startupFailure'
+    $ownedLaunch = Start-Isolated $mainExe '' $true
+    $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
+    $errorWindow = $null
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $ownedLaunch.Refresh()
+        Assert-Smoke (-not $ownedLaunch.HasExited) 'Startup failure exited without a visible explanation.'
+        $errorWindow = @([OsirWindows]::ForProcess($ownedLaunch.Id) | Where-Object { $_.Title -eq 'OSIR Client 无法启动' }) | Select-Object -First 1
+        if ($null -ne $errorWindow) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    Assert-Smoke ($null -ne $errorWindow) 'Missing runtime did not display a native startup error.'
+    $errorElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$errorWindow.Handle)
+    $errorText = Get-WizardPageSignature $errorElement
+    $ok = $errorElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
+    Assert-Smoke ($errorText.Contains('安装程序') -and $errorText.Contains('日志') -and $null -ne $ok -and $ok.Current.IsEnabled -and -not $ok.Current.IsOffscreen) 'Startup error does not provide a visible recovery action and log location.'
+    $startupError = Join-Path $isolatedToolHome '.osir_client/startup-error.log'
+    Assert-Smoke (Test-Path -LiteralPath $startupError -PathType Leaf) 'Startup failure diagnostic is missing.'
+    $diagnostic = Get-Content -Raw -LiteralPath $startupError
+    Assert-Smoke ($diagnostic -match 'stage=application-build' -and $diagnostic -match 'category=(webview-runtime|application-initialization)') 'Startup diagnostic is incomplete.'
+    $report.stages.startupFailure = [ordered]@{ passed = $true; nativeErrorVisible = $true; recoveryMessageVisible = $true; diagnosticSaved = $true; kind = 'forced-unavailable-runtime' }
     Stop-OwnedApp
 
     $stage = 'upgrade'
@@ -182,6 +365,14 @@ try {
     Write-Host "::error::[$stage] $($_.Exception.Message)"
 } finally {
     Stop-OwnedApp
+    $startupLogDir = Join-Path $isolatedToolHome '.osir_client/logs'
+    if (Test-Path -LiteralPath $startupLogDir -PathType Container) {
+        Copy-Item -LiteralPath $startupLogDir -Destination (Join-Path $artifactDir 'windows-startup-logs') -Recurse -Force -ErrorAction Continue
+    }
+    $startupError = Join-Path $isolatedToolHome '.osir_client/startup-error.log'
+    if (Test-Path -LiteralPath $startupError -PathType Leaf) {
+        Copy-Item -LiteralPath $startupError -Destination (Join-Path $artifactDir 'windows-startup-error.log') -Force -ErrorAction Continue
+    }
     if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
         try { Invoke-Installer $uninstaller '/S'; Wait-Uninstalled }
         catch { Write-Warning "Smoke cleanup: $($_.Exception.Message)" }
@@ -193,4 +384,4 @@ try {
     if ($null -ne $ownedLaunch) { $ownedLaunch.Dispose() }
 }
 if ($null -ne $failure) { throw $failure }
-Write-Host 'Packaged lifecycle passed: install, real window launch, UPDATE reinstall, uninstall.'
+Write-Host 'Packaged lifecycle passed: install, real renderer/native IPC, reopen, UPDATE reinstall, uninstall.'

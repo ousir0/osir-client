@@ -176,7 +176,9 @@ export function createReleasePlan({
         (plan) => plan.code_signature_verified,
       ),
       notarization: "not-notarized",
-      notes: [...new Set(plans.map((plan) => plan.notes))].join("\n\n"),
+      notes: [
+        ...new Set(plans.flatMap((plan) => plan.notes.split(/\n\s*\n/))),
+      ].join("\n\n"),
     };
   }
   const notarized =

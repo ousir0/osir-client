@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "OSIR Client 首个正式版本。统一新图标与默认头像，优化历史会话、MCP 与技能、订阅信息和加载效果；修复登录凭据保存及 Claude Code 安装修复入口，补充菜单栏快捷操作。"
+  "notes": "修复 Codex 分页历史读取及模型选择，改善 MCP 与技能导入、配置保留和 Claude Code 安装修复；优化并行请求的凭据访问。Windows 安装包内含离线显示组件，启动失败时提供明确提示。"
 }

@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::app_config::{AppType, McpServer};
@@ -20,6 +21,192 @@ pub struct McpAppSyncOutcome {
 }
 
 impl McpService {
+    fn primary_apps() -> [AppType; 4] {
+        [
+            AppType::Claude,
+            AppType::Codex,
+            AppType::Gemini,
+            AppType::OpenCode,
+        ]
+    }
+
+    fn commit_primary_apps<T>(
+        next: Option<&McpServer>,
+        previous: Option<&McpServer>,
+        apps: &[AppType],
+        commit: impl FnOnce() -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let Some((app, remaining)) = apps.split_first() else {
+            return commit();
+        };
+        let enabled = next.is_some_and(|server| server.apps.is_enabled_for(app));
+        if !enabled && !previous.is_some_and(|server| server.apps.is_enabled_for(app)) {
+            return Self::commit_primary_apps(next, previous, remaining, commit);
+        }
+        let server = next.or(previous).expect("managed MCP write");
+        let path = Self::native_path(app)?.expect("primary MCP config");
+        crate::mcode_config::write_and_commit(
+            &path,
+            || {
+                if enabled {
+                    Self::sync_server_to_app_no_config(server, app)
+                } else {
+                    Self::remove_server_from_app_no_state(&server.id, app)
+                }
+            },
+            || Self::commit_primary_apps(next, previous, remaining, commit),
+        )
+    }
+
+    fn native_path(app: &AppType) -> Result<Option<std::path::PathBuf>, AppError> {
+        Ok(match app {
+            AppType::Claude => Some(crate::config::get_claude_mcp_path()),
+            AppType::Codex => Some(crate::codex_config::get_codex_config_path()),
+            AppType::Gemini => Some(crate::gemini_config::get_gemini_settings_path()),
+            AppType::OpenCode => Some(crate::opencode_config::get_opencode_config_path()?),
+            _ => None,
+        })
+    }
+
+    fn native_definition(id: &str, app: &AppType) -> Result<Option<Value>, AppError> {
+        let Some(path) = Self::native_path(app)? else {
+            return Ok(None);
+        };
+        if !path.exists() {
+            return Ok(None);
+        }
+        let spec = match app {
+            AppType::Claude => crate::claude_mcp::read_mcp_servers_map()?.remove(id),
+            AppType::Gemini => crate::gemini_mcp::read_mcp_servers_map()?.remove(id),
+            AppType::OpenCode => crate::opencode_config::get_mcp_servers()?
+                .remove(id)
+                .map(|spec| mcp::convert_from_opencode_format(&spec))
+                .transpose()?,
+            AppType::Codex => {
+                let text = std::fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
+                let root: toml::Value = toml::from_str(&text)
+                    .map_err(|_| AppError::Message("Codex 配置无法读取，请检查后重试。".into()))?;
+                root.get("mcp_servers")
+                    .and_then(|servers| servers.get(id))
+                    .map(serde_json::to_value)
+                    .transpose()
+                    .map_err(|e| AppError::Message(e.to_string()))?
+            }
+            _ => None,
+        };
+        Ok(spec)
+    }
+
+    fn check_native_definition(
+        server: &McpServer,
+        app: &AppType,
+        previous: Option<&Value>,
+    ) -> Result<(), AppError> {
+        if let Some(native) = Self::native_definition(&server.id, app)? {
+            if !Self::same_for_app(&native, &server.server, app)
+                && !previous.is_some_and(|previous| Self::same_for_app(&native, previous, app))
+            {
+                return Err(AppError::Conflict(format!(
+                    "{} 中已有不同的同名 MCP 服务，原配置已保留；请先检查该服务。",
+                    app.as_str()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn same_for_app(left: &Value, right: &Value, app: &AppType) -> bool {
+        if matches!(app, AppType::Gemini) {
+            match (
+                crate::gemini_mcp::native_server_spec("", left),
+                crate::gemini_mcp::native_server_spec("", right),
+            ) {
+                (Ok(left), Ok(right)) => Self::same_definition(&left, &right),
+                _ => false,
+            }
+        } else if matches!(app, AppType::Codex | AppType::OpenCode) {
+            let normalize = |spec: &Value| {
+                let mut spec = spec.clone();
+                if spec.get("url").is_some() {
+                    spec["type"] = Value::String("http".into());
+                }
+                spec
+            };
+            Self::same_definition(&normalize(left), &normalize(right))
+        } else {
+            Self::same_definition(left, right)
+        }
+    }
+
+    fn same_definition(left: &Value, right: &Value) -> bool {
+        fn normalized(spec: &Value) -> Value {
+            let mut value = spec.clone();
+            if let Some(object) = value.as_object_mut() {
+                if !object.contains_key("type") && object.contains_key("command") {
+                    object.insert("type".into(), Value::String("stdio".into()));
+                }
+                if !object.contains_key("type") && object.contains_key("url") {
+                    object.insert("type".into(), Value::String("http".into()));
+                }
+                if let Some(headers) = object.remove("http_headers") {
+                    object.insert("headers".into(), headers);
+                }
+                for field in ["args", "env", "headers"] {
+                    if object.get(field).is_some_and(|value| {
+                        value.as_array().is_some_and(Vec::is_empty)
+                            || value.as_object().is_some_and(serde_json::Map::is_empty)
+                    }) {
+                        object.remove(field);
+                    }
+                }
+            }
+            value
+        }
+        normalized(left) == normalized(right)
+    }
+
+    fn merge_imported_servers(
+        state: &AppState,
+        config: &crate::app_config::MultiAppConfig,
+        app: &AppType,
+    ) -> Result<usize, AppError> {
+        let mut existing = state.db.get_all_mcp_servers()?;
+        let mut count = 0;
+        let mut conflicts = Vec::new();
+        for server in config
+            .mcp
+            .servers
+            .iter()
+            .flat_map(|servers| servers.values())
+        {
+            let saved = if let Some(previous) = existing.get(&server.id) {
+                if !Self::same_for_app(&previous.server, &server.server, app) {
+                    conflicts.push(server.id.clone());
+                    continue;
+                }
+                let mut saved = previous.clone();
+                saved.apps.set_enabled_for(app, true);
+                saved
+            } else {
+                count += 1;
+                let mut imported = server.clone();
+                imported.tags.push("osir-local-import".into());
+                imported
+            };
+            state.db.save_mcp_server(&saved)?;
+            existing.insert(saved.id.clone(), saved);
+        }
+        if conflicts.is_empty() {
+            Ok(count)
+        } else {
+            Err(AppError::Conflict(format!(
+                "已导入 {count} 个服务；{} 中的同名服务配置不同，原配置已保留：{}",
+                app.as_str(),
+                conflicts.join("、")
+            )))
+        }
+    }
+
     /// 获取所有 MCP 服务器（统一结构）
     pub fn get_all_servers(state: &AppState) -> Result<IndexMap<String, McpServer>, AppError> {
         state.db.get_all_mcp_servers()
@@ -33,6 +220,16 @@ impl McpService {
             .as_ref()
             .map(|s| s.apps.clone())
             .unwrap_or_default();
+
+        for app in Self::primary_apps() {
+            if server.apps.is_enabled_for(&app) || prev_apps.is_enabled_for(&app) {
+                Self::check_native_definition(
+                    &server,
+                    &app,
+                    previous.as_ref().map(|saved| &saved.server),
+                )?;
+            }
+        }
 
         // Keep our disabled OMP tombstone in step with edits while the checkbox is off.
         let managed_omp = server.apps.omp
@@ -93,31 +290,27 @@ impl McpService {
                 save_with_agy()
             }
         };
-        if server.apps.mcode || prev_apps.mcode {
-            mcp::mcode::sync_and_commit(
-                &server.id,
-                server.apps.mcode.then_some(&server.server),
-                save_with_pi,
-            )?;
-        } else {
-            save_with_pi()?;
-        }
+        let save = || {
+            if server.apps.mcode || prev_apps.mcode {
+                mcp::mcode::sync_and_commit(
+                    &server.id,
+                    server.apps.mcode.then_some(&server.server),
+                    save_with_pi,
+                )
+            } else {
+                save_with_pi()
+            }
+        };
+        Self::commit_primary_apps(
+            Some(&server),
+            previous.as_ref(),
+            &Self::primary_apps(),
+            save,
+        )?;
 
         // 处理禁用：若旧版本启用但新版本取消，则需要从该应用的 live 配置移除
-        if prev_apps.claude && !server.apps.claude {
-            Self::remove_server_from_app(state, &server.id, &AppType::Claude)?;
-        }
-        if prev_apps.codex && !server.apps.codex {
-            Self::remove_server_from_app(state, &server.id, &AppType::Codex)?;
-        }
-        if prev_apps.gemini && !server.apps.gemini {
-            Self::remove_server_from_app(state, &server.id, &AppType::Gemini)?;
-        }
         if prev_apps.grokbuild && !server.apps.grokbuild {
             Self::remove_server_from_app(state, &server.id, &AppType::GrokBuild)?;
-        }
-        if prev_apps.opencode && !server.apps.opencode {
-            Self::remove_server_from_app(state, &server.id, &AppType::OpenCode)?;
         }
         if prev_apps.hermes && !server.apps.hermes {
             Self::remove_server_from_app(state, &server.id, &AppType::Hermes)?;
@@ -134,6 +327,9 @@ impl McpService {
         let server = state.db.get_all_mcp_servers()?.shift_remove(id);
 
         if let Some(server) = server {
+            for app in server.apps.enabled_apps() {
+                Self::check_native_definition(&server, &app, None)?;
+            }
             let delete_with_kimi = || {
                 if server.apps.kimi {
                     mcp::kimi::sync_and_commit(id, None, || state.db.delete_mcp_server(id))
@@ -166,11 +362,14 @@ impl McpService {
                     delete_with_agy()
                 }
             };
-            if server.apps.mcode {
-                mcp::mcode::sync_and_commit(id, None, delete_with_pi)?;
-            } else {
-                delete_with_pi()?;
-            }
+            let delete = || {
+                if server.apps.mcode {
+                    mcp::mcode::sync_and_commit(id, None, delete_with_pi)
+                } else {
+                    delete_with_pi()
+                }
+            };
+            Self::commit_primary_apps(None, Some(&server), &Self::primary_apps(), delete)?;
             // A false agy flag carries no ownership history. Even an identical disabled
             // native entry may belong to the user; leave it intact without proof of ownership.
             if !server.apps.pi {
@@ -252,15 +451,31 @@ impl McpService {
             }
             return Ok(());
         }
-        if let Some(server) = state
-            .db
-            .update_mcp_server_app_enabled(server_id, &app, enabled)?
-        {
-            // 同步到对应应用
-            if enabled {
-                Self::sync_server_to_app(state, &server, &app)?;
+        if let Some(server) = state.db.get_all_mcp_servers()?.get(server_id).cloned() {
+            if !enabled && !server.apps.is_enabled_for(&app) {
+                return Ok(());
+            }
+            // Persist only after the native operation succeeds, so a parse or
+            // write error does not leave the UI claiming the tool was enabled.
+            Self::check_native_definition(&server, &app, None)?;
+            let write = || {
+                if enabled {
+                    Self::sync_server_to_app(state, &server, &app)
+                } else {
+                    Self::remove_server_from_app(state, server_id, &app)
+                }
+            };
+            let commit = || {
+                state
+                    .db
+                    .update_mcp_server_app_enabled(server_id, &app, enabled)
+                    .map(|_| ())
+            };
+            if let Some(path) = Self::native_path(&app)? {
+                crate::mcode_config::write_and_commit(&path, write, commit)?;
             } else {
-                Self::remove_server_from_app(state, server_id, &app)?;
+                write()?;
+                commit()?;
             }
         }
 
@@ -270,6 +485,9 @@ impl McpService {
     /// 将 MCP 服务器同步到所有启用的应用
     fn sync_server_to_apps(_state: &AppState, server: &McpServer) -> Result<(), AppError> {
         for app in server.apps.enabled_apps() {
+            if Self::primary_apps().contains(&app) {
+                continue;
+            }
             if matches!(
                 app,
                 AppType::Mcode | AppType::Kimi | AppType::Pi | AppType::Agy | AppType::Omp
@@ -288,6 +506,7 @@ impl McpService {
         server: &McpServer,
         app: &AppType,
     ) -> Result<(), AppError> {
+        Self::check_native_definition(server, app, None)?;
         Self::sync_server_to_app_no_config(server, app)
     }
 
@@ -314,11 +533,28 @@ impl McpService {
                 )?;
             }
             AppType::OpenCode => {
-                mcp::sync_single_server_to_opencode(
-                    &Default::default(),
-                    &server.id,
-                    &server.server,
-                )?;
+                let mut spec = mcp::convert_to_opencode_format(&server.server)?;
+                if let Some(Value::Object(native)) =
+                    crate::opencode_config::get_mcp_servers()?.remove(&server.id)
+                {
+                    // The shared MCP editor does not own OpenCode-only options.
+                    let fields = spec.as_object_mut().expect("converted OpenCode MCP");
+                    for (key, value) in native {
+                        if ![
+                            "type",
+                            "command",
+                            "environment",
+                            "url",
+                            "headers",
+                            "enabled",
+                        ]
+                        .contains(&key.as_str())
+                        {
+                            fields.insert(key, value);
+                        }
+                    }
+                }
+                crate::opencode_config::set_mcp_server(&server.id, spec)?;
             }
             AppType::OpenClaw => {
                 // OpenClaw MCP support is still in development (Issue #4834)
@@ -345,6 +581,9 @@ impl McpService {
     ) -> Result<(), AppError> {
         // 从所有曾启用的应用中移除
         for app in server.apps.enabled_apps() {
+            if Self::primary_apps().contains(&app) {
+                continue;
+            }
             if matches!(
                 app,
                 AppType::Mcode | AppType::Kimi | AppType::Pi | AppType::Agy | AppType::Omp
@@ -357,6 +596,10 @@ impl McpService {
     }
 
     fn remove_server_from_app(_state: &AppState, id: &str, app: &AppType) -> Result<(), AppError> {
+        Self::remove_server_from_app_no_state(id, app)
+    }
+
+    fn remove_server_from_app_no_state(id: &str, app: &AppType) -> Result<(), AppError> {
         match app {
             AppType::Claude => mcp::remove_server_from_claude(id)?,
             AppType::ClaudeDesktop => {
@@ -520,11 +763,14 @@ impl McpService {
         for server in servers.values() {
             let result = if server.apps.is_enabled_for(app) {
                 Self::sync_server_to_app(state, server, app)
-            } else if !matches!(
-                app,
-                AppType::Mcode | AppType::Kimi | AppType::Pi | AppType::Agy | AppType::Omp
-            ) {
-                Self::remove_server_from_app(state, &server.id, app)
+            } else if !server.tags.iter().any(|tag| tag == "osir-local-import")
+                && !matches!(
+                    app,
+                    AppType::Mcode | AppType::Kimi | AppType::Pi | AppType::Agy | AppType::Omp
+                )
+            {
+                Self::check_native_definition(server, app, None)
+                    .and_then(|_| Self::remove_server_from_app(state, &server.id, app))
             } else {
                 // MCode / Pi's false flag also covers pre-existing, unmanaged servers.
                 // Only explicit disable/delete operations may remove those entries.
@@ -603,116 +849,23 @@ impl McpService {
 
     /// 从 Claude 导入 MCP（v3.7.0 已更新为统一结构）
     pub fn import_from_claude(state: &AppState) -> Result<usize, AppError> {
-        // 创建临时 MultiAppConfig 用于导入
-        let mut temp_config = crate::app_config::MultiAppConfig::default();
-
-        // 调用原有的导入逻辑（从 mcp.rs）
-        let count = crate::mcp::import_from_claude(&mut temp_config)?;
-
-        let mut new_count = 0;
-
-        // 如果有导入的服务器，保存到数据库
-        if count > 0 {
-            if let Some(servers) = &temp_config.mcp.servers {
-                let mut existing = state.db.get_all_mcp_servers()?;
-                for server in servers.values() {
-                    // 已存在：仅启用 Claude，不覆盖其他字段（与导入模块语义保持一致）
-                    let to_save = if let Some(existing_server) = existing.get(&server.id) {
-                        let mut merged = existing_server.clone();
-                        merged.apps.claude = true;
-                        merged
-                    } else {
-                        // 真正的新服务器
-                        new_count += 1;
-                        server.clone()
-                    };
-
-                    state.db.save_mcp_server(&to_save)?;
-                    existing.insert(to_save.id.clone(), to_save.clone());
-
-                    // 导入是读取已有配置，不应反向写回任何应用的 live 配置。
-                    // 显式编辑、启用/禁用或手动同步时再执行写回。
-                }
-            }
-        }
-
-        Ok(new_count)
+        let mut config = crate::app_config::MultiAppConfig::default();
+        mcp::import_from_claude(&mut config)?;
+        Self::merge_imported_servers(state, &config, &AppType::Claude)
     }
 
     /// 从 Codex 导入 MCP（v3.7.0 已更新为统一结构）
     pub fn import_from_codex(state: &AppState) -> Result<usize, AppError> {
-        // 创建临时 MultiAppConfig 用于导入
-        let mut temp_config = crate::app_config::MultiAppConfig::default();
-
-        // 调用原有的导入逻辑（从 mcp.rs）
-        let count = crate::mcp::import_from_codex(&mut temp_config)?;
-
-        let mut new_count = 0;
-
-        // 如果有导入的服务器，保存到数据库
-        if count > 0 {
-            if let Some(servers) = &temp_config.mcp.servers {
-                let mut existing = state.db.get_all_mcp_servers()?;
-                for server in servers.values() {
-                    // 已存在：仅启用 Codex，不覆盖其他字段（与导入模块语义保持一致）
-                    let to_save = if let Some(existing_server) = existing.get(&server.id) {
-                        let mut merged = existing_server.clone();
-                        merged.apps.codex = true;
-                        merged
-                    } else {
-                        // 真正的新服务器
-                        new_count += 1;
-                        server.clone()
-                    };
-
-                    state.db.save_mcp_server(&to_save)?;
-                    existing.insert(to_save.id.clone(), to_save.clone());
-
-                    // 导入是读取已有配置，不应反向写回任何应用的 live 配置。
-                    // 显式编辑、启用/禁用或手动同步时再执行写回。
-                }
-            }
-        }
-
-        Ok(new_count)
+        let mut config = crate::app_config::MultiAppConfig::default();
+        mcp::import_from_codex(&mut config)?;
+        Self::merge_imported_servers(state, &config, &AppType::Codex)
     }
 
     /// 从 Gemini 导入 MCP（v3.7.0 已更新为统一结构）
     pub fn import_from_gemini(state: &AppState) -> Result<usize, AppError> {
-        // 创建临时 MultiAppConfig 用于导入
-        let mut temp_config = crate::app_config::MultiAppConfig::default();
-
-        // 调用原有的导入逻辑（从 mcp.rs）
-        let count = crate::mcp::import_from_gemini(&mut temp_config)?;
-
-        let mut new_count = 0;
-
-        // 如果有导入的服务器，保存到数据库
-        if count > 0 {
-            if let Some(servers) = &temp_config.mcp.servers {
-                let mut existing = state.db.get_all_mcp_servers()?;
-                for server in servers.values() {
-                    // 已存在：仅启用 Gemini，不覆盖其他字段（与导入模块语义保持一致）
-                    let to_save = if let Some(existing_server) = existing.get(&server.id) {
-                        let mut merged = existing_server.clone();
-                        merged.apps.gemini = true;
-                        merged
-                    } else {
-                        // 真正的新服务器
-                        new_count += 1;
-                        server.clone()
-                    };
-
-                    state.db.save_mcp_server(&to_save)?;
-                    existing.insert(to_save.id.clone(), to_save.clone());
-
-                    // 导入是读取已有配置，不应反向写回任何应用的 live 配置。
-                    // 显式编辑、启用/禁用或手动同步时再执行写回。
-                }
-            }
-        }
-
-        Ok(new_count)
+        let mut config = crate::app_config::MultiAppConfig::default();
+        mcp::import_from_gemini(&mut config)?;
+        Self::merge_imported_servers(state, &config, &AppType::Gemini)
     }
 
     /// 从 Grok Build 的 `[mcp_servers]` 导入 MCP。
@@ -743,40 +896,9 @@ impl McpService {
 
     /// 从 OpenCode 导入 MCP（v3.9.2+ 新增）
     pub fn import_from_opencode(state: &AppState) -> Result<usize, AppError> {
-        // 创建临时 MultiAppConfig 用于导入
-        let mut temp_config = crate::app_config::MultiAppConfig::default();
-
-        // 调用原有的导入逻辑（从 mcp/opencode.rs）
-        let count = crate::mcp::import_from_opencode(&mut temp_config)?;
-
-        let mut new_count = 0;
-
-        // 如果有导入的服务器，保存到数据库
-        if count > 0 {
-            if let Some(servers) = &temp_config.mcp.servers {
-                let mut existing = state.db.get_all_mcp_servers()?;
-                for server in servers.values() {
-                    // 已存在：仅启用 OpenCode，不覆盖其他字段（与导入模块语义保持一致）
-                    let to_save = if let Some(existing_server) = existing.get(&server.id) {
-                        let mut merged = existing_server.clone();
-                        merged.apps.opencode = true;
-                        merged
-                    } else {
-                        // 真正的新服务器
-                        new_count += 1;
-                        server.clone()
-                    };
-
-                    state.db.save_mcp_server(&to_save)?;
-                    existing.insert(to_save.id.clone(), to_save.clone());
-
-                    // 导入是读取已有配置，不应反向写回任何应用的 live 配置。
-                    // 显式编辑、启用/禁用或手动同步时再执行写回。
-                }
-            }
-        }
-
-        Ok(new_count)
+        let mut config = crate::app_config::MultiAppConfig::default();
+        mcp::import_from_opencode(&mut config)?;
+        Self::merge_imported_servers(state, &config, &AppType::OpenCode)
     }
 
     /// 从 Hermes 导入 MCP

@@ -16,6 +16,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { prepareDevSigning } from "./osir-dev-signing.mjs";
 import { buildDmg } from "./osir-dmg.mjs";
+import { assertRendererEvidence } from "./osir-packaged-renderer-check.mjs";
 import {
   inspectArtifact,
   createReleasePlan,
@@ -82,6 +83,7 @@ export async function finalize({ input, output, channel, target }) {
   ensure(
     [
       "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
       "x86_64-pc-windows-msvc",
       "aarch64-pc-windows-msvc",
     ].includes(target),
@@ -116,7 +118,14 @@ export async function finalize({ input, output, channel, target }) {
   requireUpdaterSigner(signerEnv);
   mkdirSync(output, { recursive: true, mode: 0o700 });
   const stem = `OSIR-Client-${channel}-${pending.version}-${target}`;
-  let app, installer, localSigningIdentity, localSigningRequirement;
+  let app,
+    installer,
+    localSigningIdentity,
+    localSigningRequirement,
+    packagedWindowScreenshot,
+    packagedInstallerScreenshot,
+    packagedRendererReport,
+    packagedRendererScreenshots;
   if (windows) {
     ensure(
       pending.peArchitectureVerified === true &&
@@ -148,6 +157,121 @@ export async function finalize({ input, output, channel, target }) {
       digest(smoke).sha256 === pending.packagedLifecycleReport?.sha256,
       "Windows lifecycle report differs from its CI manifest.",
     );
+    const report = JSON.parse(readFileSync(smoke, "utf8"));
+    const launch = report.stages?.launch;
+    ensure(
+      report.passed === true &&
+        report.unicodeAndSpacePaths === true &&
+        report.gitHead === pending.sourceProvenance.git.head &&
+        report.sourceSha256 === pending.sourceProvenance.sourceSha256 &&
+        [
+          "installerOpen",
+          "install",
+          "launch",
+          "reopen",
+          "startupFailure",
+          "upgrade",
+          "uninstall",
+        ].every((stage) => report.stages?.[stage]?.passed === true) &&
+        report.stages.startupFailure.nativeErrorVisible === true &&
+        report.stages.startupFailure.diagnosticSaved === true &&
+        report.stages.installerOpen.windowObserved === true &&
+        report.stages.installerOpen.usableNavigation === true &&
+        report.stages.installerOpen.nextActionInvoked === true &&
+        report.stages.installerOpen.nextPageObserved === true &&
+        report.stages.startupFailure.recoveryMessageVisible === true &&
+        launch?.windowObserved === true &&
+        launch.remainedRunning === true &&
+        launch.rendererAndNativeIpcPassed === true &&
+        report.stages.reopen.rendererAndNativeIpcPassed === true &&
+        launch.excludesSingleInstanceToolWindow === true &&
+        launch.windowTitle ===
+          (channel === "prod" ? "OSIR Client" : "OSIR Client Beta") &&
+        !launch.windowTitle.endsWith("-siw") &&
+        typeof launch.windowClass === "string" &&
+        launch.windowClass.length > 0 &&
+        launch.windowWidth >= 900 &&
+        launch.windowHeight >= 600,
+      "Windows acceptance must observe the visible product window, excluding tool windows.",
+    );
+    const rendererPath = join(input, "windows-renderer-smoke.json");
+    ensure(
+      pending.packagedRendererReport?.name === "windows-renderer-smoke.json" &&
+        digest(rendererPath).sha256 === pending.packagedRendererReport.sha256,
+      "Windows renderer report differs from its CI manifest.",
+    );
+    const renderer = JSON.parse(readFileSync(rendererPath, "utf8"));
+    assertRendererEvidence(renderer, pending);
+    packagedRendererReport = digest(rendererPath);
+    cpSync(rendererPath, join(output, packagedRendererReport.name), {
+      errorOnExist: true,
+      force: false,
+    });
+    const installerScreenshot = join(input, "windows-installer-window.png");
+    packagedInstallerScreenshot = digest(installerScreenshot);
+    ensure(
+      packagedInstallerScreenshot.sha256 ===
+        pending.packagedInstallerScreenshot?.sha256 &&
+        readFileSync(installerScreenshot)
+          .subarray(0, 8)
+          .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+      "Windows installer screenshot is missing or differs from CI evidence.",
+    );
+    cpSync(
+      installerScreenshot,
+      join(output, packagedInstallerScreenshot.name),
+      {
+        errorOnExist: true,
+        force: false,
+      },
+    );
+    packagedRendererScreenshots = [];
+    for (const view of [renderer.launchRun, renderer].flatMap(
+      (run) => run.viewports,
+    )) {
+      const screenshot = join(input, view.screenshot);
+      ensure(
+        readFileSync(screenshot)
+          .subarray(0, 8)
+          .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+        "Windows renderer screenshot is missing or invalid.",
+      );
+      const artifact = digest(screenshot);
+      ensure(
+        pending.packagedRendererScreenshots?.some(
+          (item) =>
+            item.name === artifact.name &&
+            item.sha256 === artifact.sha256 &&
+            item.bytes === artifact.bytes,
+        ),
+        "Windows renderer screenshot differs from its CI manifest.",
+      );
+      cpSync(screenshot, join(output, artifact.name), {
+        errorOnExist: true,
+        force: false,
+      });
+      packagedRendererScreenshots.push(artifact);
+    }
+    const screenshot = join(input, "windows-app-window.png");
+    ensure(
+      readFileSync(screenshot)
+        .subarray(0, 8)
+        .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+      "Windows screenshot is missing or invalid.",
+    );
+    packagedWindowScreenshot = digest(screenshot);
+    cpSync(screenshot, join(output, packagedWindowScreenshot.name), {
+      errorOnExist: true,
+      force: false,
+    });
+    cpSync(smoke, join(output, basename(smoke)), {
+      errorOnExist: true,
+      force: false,
+    });
+    cpSync(executable, join(output, basename(executable)), {
+      errorOnExist: true,
+      force: false,
+    });
     const setup = join(input, pending.installerArtifact.name);
     ensure(
       [0x14c, 0x8664, 0xaa64].includes(peMachine(setup)),
@@ -215,22 +339,26 @@ export async function finalize({ input, output, channel, target }) {
     );
     const binary = join(app, "Contents/MacOS/osir_client");
     ensure(
-      run("/usr/bin/lipo", ["-archs", binary]).trim() === "x86_64",
-      "Intel app architecture mismatch.",
+      run("/usr/bin/lipo", ["-archs", binary]).trim() ===
+        (target.startsWith("aarch64") ? "arm64" : "x86_64"),
+      "Mac app architecture mismatch.",
     );
   }
   const updater = windows ? installer : join(output, stem + ".app.tar.gz");
   if (!windows)
     run("/usr/bin/tar", ["-czf", updater, "-C", output, basename(app)]);
+  const cliSignerEnv = { ...signerEnv };
+  delete cliSignerEnv.TAURI_SIGNING_PRIVATE_KEY;
   run(
     join(ROOT, "node_modules/.bin/tauri"),
-    ["signer", "sign", updater],
-    signerEnv,
+    ["signer", "sign", "--private-key-path", key, updater],
+    cliSignerEnv,
   );
   const signature = readFileSync(updater + ".sig", "utf8").trim();
   const verified = verifyUpdaterArtifact(updater, signature, config.pubkey);
   const metadata = {
     ...pending,
+    finalizerToolSha256: inspectArtifact(fileURLToPath(import.meta.url)).sha256,
     channel,
     target,
     mode: windows
@@ -249,7 +377,14 @@ export async function finalize({ input, output, channel, target }) {
     updaterConfigSha256: configInput.sha256,
     updaterArtifact: verified,
     ...(windows
-      ? { peArchitectureVerified: true, installerArtifact: digest(installer) }
+      ? {
+          peArchitectureVerified: true,
+          installerArtifact: digest(installer),
+          packagedWindowScreenshot,
+          packagedInstallerScreenshot,
+          packagedRendererReport,
+          packagedRendererScreenshots,
+        }
       : { localSigningIdentity, localSigningRequirement }),
   };
   if (!windows)

@@ -78,69 +78,79 @@ pub(super) fn classify(output: &Output) -> Result<(), Failure> {
         "{}\n{}",
         String::from_utf8_lossy(&output.stderr),
         String::from_utf8_lossy(&output.stdout)
-    )
-    .to_ascii_lowercase();
+    );
+    Err(classify_diagnostic(&text))
+}
+
+pub(super) fn native_incomplete(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    [
+        "tool_install_native_missing",
+        "run the postinstall manually",
+        "could not find native binary package",
+        "missing optional dependency",
+        "claude native binary not installed",
+    ]
+    .iter()
+    .any(|term| text.contains(term))
+}
+
+pub(super) fn classify_diagnostic(text: &str) -> Failure {
+    let text = text.to_ascii_lowercase();
     let contains = |terms: &[&str]| terms.iter().any(|term| text.contains(term));
-    Err(
-        if contains(&["enospc", "no space left on device", "disk full"]) {
-            Failure::DiskFull
-        } else if contains(&["eacces", "eperm", "permission denied", "access is denied"]) {
-            Failure::Permission
-        } else if contains(&[
-            "enotfound",
-            "eai_again",
-            "could not resolve host",
-            "could not resolve proxy",
-            "getaddrinfo",
-            "temporary failure in name resolution",
-        ]) {
-            Failure::Dns
-        } else if contains(&[
-            "tool_install_native_missing",
-            "run the postinstall manually",
-            "could not find native binary package",
-            "missing optional dependency",
-        ]) {
-            Failure::NativeIncomplete
-        } else if contains(&[
-            "ebadengine",
-            "unsupported engine",
-            "node: command not found",
-            "node: no such file",
-            "npm: command not found",
-            "npm: no such file",
-            "'node' is not recognized",
-            "'npm' is not recognized",
-            "cannot find module",
-            "requires node",
-            "node.js version",
-        ]) {
-            Failure::Node
-        } else if contains(&["etimedout", "timed out", "timeout"]) {
-            Failure::Timeout
-        } else if contains(&[
-            "econnreset",
-            "econnrefused",
-            "enetunreach",
-            "ehostunreach",
-            "unable to get local issuer",
-            "certificate verify failed",
-            "unable_to_verify_leaf_signature",
-            "fetch failed",
-            "ssl connect error",
-            "failed to connect",
-            "proxy connect",
-            "http error",
-            "curl: (",
-            "404 not found",
-            "502 bad gateway",
-            "503 service unavailable",
-        ]) {
-            Failure::Network
-        } else {
-            Failure::Failed
-        },
-    )
+    if contains(&["enospc", "no space left on device", "disk full"]) {
+        Failure::DiskFull
+    } else if contains(&["eacces", "eperm", "permission denied", "access is denied"]) {
+        Failure::Permission
+    } else if contains(&[
+        "enotfound",
+        "eai_again",
+        "could not resolve host",
+        "could not resolve proxy",
+        "getaddrinfo",
+        "temporary failure in name resolution",
+    ]) {
+        Failure::Dns
+    } else if native_incomplete(&text) {
+        Failure::NativeIncomplete
+    } else if contains(&[
+        "ebadengine",
+        "unsupported engine",
+        "node: command not found",
+        "node: no such file",
+        "npm: command not found",
+        "npm: no such file",
+        "'node' is not recognized",
+        "'npm' is not recognized",
+        "cannot find module",
+        "requires node",
+        "node.js version",
+    ]) {
+        Failure::Node
+    } else if contains(&["etimedout", "timed out", "timeout"]) {
+        Failure::Timeout
+    } else if contains(&[
+        "econnreset",
+        "econnrefused",
+        "enetunreach",
+        "ehostunreach",
+        "unable to get local issuer",
+        "certificate verify failed",
+        "unable_to_verify_leaf_signature",
+        "fetch failed",
+        "ssl connect error",
+        "failed to connect",
+        "proxy connect",
+        "http error",
+        "curl: (",
+        "404 not found",
+        "502 bad gateway",
+        "503 service unavailable",
+    ]) {
+        Failure::Network
+    } else {
+        Failure::Failed
+    }
 }
 
 pub(super) fn io_failure(error: &std::io::Error) -> Failure {

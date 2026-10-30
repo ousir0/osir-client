@@ -798,6 +798,8 @@ pub struct StackTarget {
 /// 带保留前缀的 id 为什么解不出来。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StackMiss {
+    /// 裸模型没有绑定供应商，不能推断为当前默认供应商。
+    IdentityRequired,
     /// 这个应用不在 Stack 模式（路由模式下名单留着，但不发布、也不转发）。
     StackOff,
     /// key 没登记，或 id 切不出 key 和模型。
@@ -813,6 +815,9 @@ impl StackMiss {
     pub fn message(&self, model: &str) -> String {
         let product = crate::osir_identity::product_name();
         match self {
+            Self::IdentityRequired => format!(
+                "模型 {model} 未指定供应商，请在 Codex 模型列表中重新选择后重试 (Model {model} has no provider identity; select it again from the Codex model list and retry)"
+            ),
             Self::StackOff => format!(
                 "聚合的模型 {model} 只能在聚合模式下使用，当前没有开启聚合模式，请在模型列表里重新选择 (Aggregated model {model} only works in Stack mode, which is off; pick a model from the model list again)"
             ),
@@ -849,7 +854,7 @@ pub fn resolve(
     let (key, model_part, one_m) = match decode(app, model) {
         Decoded::Plain => {
             if app == &AppType::Codex && rejects_plain_codex_model(db, store)? {
-                return Ok(Resolved::Miss(StackMiss::Unknown));
+                return Ok(Resolved::Miss(StackMiss::IdentityRequired));
             }
             return Ok(Resolved::Plain);
         }
@@ -1817,9 +1822,12 @@ mod tests {
             );
             assert_eq!(
                 miss(resolve_in(&fx, AppType::Codex, "shared")),
-                StackMiss::Unknown
+                StackMiss::IdentityRequired
             );
         }
+        let message = StackMiss::IdentityRequired.message("gpt-6.1-sol");
+        assert!(message.contains("未指定供应商"));
+        assert!(!message.contains("不存在"));
         assert!(
             !state::stack(&fx.store, "codex")
                 .unwrap()
@@ -1853,7 +1861,7 @@ mod tests {
         );
         assert_eq!(
             miss(resolve_in(&fx, AppType::Codex, "shared")),
-            StackMiss::Unknown
+            StackMiss::IdentityRequired
         );
         assert_eq!(
             hit(resolve_in(&fx, AppType::Codex, "ccs-b/shared")).0,
@@ -1925,7 +1933,7 @@ mod tests {
         );
         assert_eq!(
             miss(resolve(&fx.db, &reopened, &AppType::Codex, "shared").unwrap()),
-            StackMiss::Unknown
+            StackMiss::IdentityRequired
         );
         assert_eq!(
             miss(resolve(&fx.db, &reopened, &AppType::Codex, "ccs-old-key/shared").unwrap()),
@@ -1934,7 +1942,7 @@ mod tests {
         fx.db.delete_provider("codex", &ordinary.id).unwrap();
         assert_eq!(
             miss(resolve(&fx.db, &reopened, &AppType::Codex, "shared").unwrap()),
-            StackMiss::Unknown
+            StackMiss::IdentityRequired
         );
         // Toggling Stack does not erase the marker; ordinary routing stays usable.
         state::update(&reopened, |live| {
@@ -1951,7 +1959,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             miss(resolve(&fx.db, &reopened, &AppType::Codex, "shared").unwrap()),
-            StackMiss::Unknown
+            StackMiss::IdentityRequired
         );
     }
 
@@ -1970,7 +1978,7 @@ mod tests {
         let before = std::fs::read(fx.store.state_path()).unwrap();
         assert_eq!(
             miss(resolve_in(&fx, AppType::Codex, "shared")),
-            StackMiss::Unknown
+            StackMiss::IdentityRequired
         );
         assert_eq!(std::fs::read(fx.store.state_path()).unwrap(), before);
         migrate_codex_identity_locked(&fx.db, &fx.store).unwrap();

@@ -527,10 +527,16 @@ mod usage_export;
 pub async fn osir_codex_desktop_detection(
     state: State<'_, super::osir_installer::OsirInstallerState>,
 ) -> Result<crate::services::osir::codex_desktop::DesktopDetection, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = state;
+        return super::osir_tools::windows::desktop_detection().await;
+    }
     #[cfg(target_os = "macos")]
     let installer = state.manager()?.clone();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = state;
+    #[cfg(not(target_os = "windows"))]
     tokio::task::spawn_blocking(move || {
         let mut detection = crate::services::osir::codex_desktop::detect();
         #[cfg(target_os = "macos")]

@@ -368,6 +368,237 @@ fn identity_proxy_write(
 
 #[test]
 #[serial]
+fn managed_codex_stack_binds_auxiliary_models_without_losing_upstream_identity() {
+    use crate::mode::{stack, state};
+    let home = Home::new();
+    let db = Database::memory().unwrap();
+    let upstream = "vendor/gpt-6.1-sol";
+    let mut providers: Vec<_> = ["a", "b"]
+        .into_iter()
+        .map(|id| {
+            Provider::with_id(
+                id.into(),
+                id.into(),
+                json!({
+                    "auth": {},
+                    "config": format!("model = \"{upstream}\"\nreview_model = \"{upstream}\"\nmodel_provider = \"fixture\"\n[model_providers.fixture]\nname = \"fixture\"\nbase_url = \"http://127.0.0.1:9/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n[memories]\nextract_model = \"{upstream}\"\nconsolidation_model = \"{upstream}\"\n"),
+                    "modelCatalog": {"models":[{"model":upstream}]},
+                }),
+                None,
+            )
+        })
+        .collect();
+    let mut identity = state::StackState::default();
+    identity.enabled = true;
+    // An ordinary provider can inherit the identity policy from a removed OSIR row.
+    identity.managed_identity_required = true;
+    for provider in &providers {
+        stack::allocate_key(&mut identity, provider);
+        identity.members.push(provider.id.clone());
+        db.save_provider("codex", provider).unwrap();
+    }
+    let auth = fs::read(get_codex_auth_path()).unwrap();
+    let store = DeviceStore::for_device();
+    assert!(store.state_path().starts_with(home._dir.path()));
+    for provider in &providers {
+        identity_proxy_write(&db, provider, &identity, &Prepared::default()).unwrap();
+        let config: toml::Value = fs::read_to_string(get_codex_config_path())
+            .unwrap()
+            .parse()
+            .unwrap();
+        let expected = stack::encode(&AppType::Codex, &provider.id, upstream, false);
+        for model in [
+            config["model"].as_str().unwrap(),
+            config["review_model"].as_str().unwrap(),
+            config["memories"]["extract_model"].as_str().unwrap(),
+            config["memories"]["consolidation_model"].as_str().unwrap(),
+        ] {
+            assert_eq!(model, expected);
+            match stack::resolve(&db, &store, &AppType::Codex, model).unwrap() {
+                stack::Resolved::Hit(target) => {
+                    assert_eq!(target.provider.id, provider.id);
+                    assert_eq!(target.upstream_model, upstream);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(fs::read(get_codex_auth_path()).unwrap(), auth);
+        assert_eq!(
+            config["mcp_servers"]["local"]["command"].as_str(),
+            Some("fixture-mcp")
+        );
+    }
+    let pinned = stack::encode(&AppType::Codex, "a", upstream, false);
+    let text = providers[1].settings_config["config"].as_str().unwrap();
+    providers[1].settings_config["config"] = json!(text.replace(
+        &format!("review_model = \"{upstream}\""),
+        &format!("review_model = \"{pinned}\""),
+    ));
+    db.save_provider("codex", &providers[1]).unwrap();
+    identity_proxy_write(&db, &providers[1], &identity, &Prepared::default()).unwrap();
+    let config: toml::Value = fs::read_to_string(get_codex_config_path())
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(config["review_model"].as_str(), Some(pinned.as_str()));
+    match stack::resolve(&db, &store, &AppType::Codex, &pinned).unwrap() {
+        stack::Resolved::Hit(target) => {
+            assert_eq!(target.provider.id, "a");
+            assert_eq!(target.upstream_model, upstream);
+        }
+        other => panic!("{other:?}"),
+    }
+    let before: Vec<_> = [
+        get_codex_config_path(),
+        get_codex_auth_path(),
+        get_codex_model_catalog_path(),
+        store.state_path(),
+    ]
+    .into_iter()
+    .map(|path| {
+        let bytes = fs::read(&path).unwrap();
+        (path, bytes)
+    })
+    .collect();
+    // An ordinary provider's empty catalog falls back to its top-level model.
+    // Withdraw the model, then the membership, then the row independently.
+    for removed in ["published-model", "stack-membership", "provider-row"] {
+        match removed {
+            "published-model" => {
+                providers[0].settings_config["modelCatalog"]["models"] =
+                    json!([{"model": "replacement"}]);
+                db.save_provider("codex", &providers[0]).unwrap();
+            }
+            "stack-membership" => {
+                providers[0].settings_config["modelCatalog"]["models"] =
+                    json!([{"model": upstream}]);
+                db.save_provider("codex", &providers[0]).unwrap();
+                identity.members.retain(|id| id != &providers[0].id);
+                assert!(db.get_provider_by_id("a", "codex").unwrap().is_some());
+            }
+            "provider-row" => {
+                identity.members.push(providers[0].id.clone());
+                db.delete_provider("codex", &providers[0].id).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            identity_proxy_write(&db, &providers[1], &identity, &Prepared::default()).is_err(),
+            "pinned review must reject a removed {removed}"
+        );
+        for (path, bytes) in &before {
+            assert_eq!(&fs::read(path).unwrap(), bytes, "{removed}: {path:?}");
+        }
+    }
+
+    // Restore native configuration through the same writer, without a CLI or vault.
+    let mut official = Provider::with_id(
+        "native-restore".into(),
+        "Native".into(),
+        json!({"auth":{}, "config":"model = \"native-fixture\"\n"}),
+        None,
+    );
+    official.category = Some("official".into());
+    db.save_provider("codex", &official).unwrap();
+    let prepared = Prepared::default();
+    let planned = plan(
+        &db,
+        &Owner::Provider(&providers[1]),
+        &Target::Direct(Some(&official)),
+        &prepared,
+    )
+    .unwrap();
+    run(
+        &db,
+        op::EXIT,
+        planned,
+        &prepared,
+        PendingTarget {
+            state: Some(state::ModeState {
+                mode: Some(state::Mode::Direct),
+                ..Default::default()
+            }),
+            ..PendingTarget::pointer(Some(official.id.clone()))
+        },
+    )
+    .unwrap();
+    let text = fs::read_to_string(get_codex_config_path()).unwrap();
+    let native: toml::Value = text.parse().unwrap();
+    assert_eq!(native["model"].as_str(), Some("native-fixture"));
+    assert!(native.get("review_model").is_none());
+    assert!(native.get("model_catalog_json").is_none());
+    assert!(native
+        .get("memories")
+        .and_then(|m| m.get("extract_model"))
+        .is_none());
+    assert!(native
+        .get("memories")
+        .and_then(|m| m.get("consolidation_model"))
+        .is_none());
+    assert_eq!(
+        native["mcp_servers"]["local"]["command"].as_str(),
+        Some("fixture-mcp")
+    );
+    assert!(text.contains("# user comment"));
+    assert_eq!(fs::read(get_codex_auth_path()).unwrap(), auth);
+    assert_eq!(
+        db.get_current_provider("codex").unwrap().as_deref(),
+        Some(official.id.as_str())
+    );
+    assert!(matches!(
+        stack::resolve(&db, &store, &AppType::Codex, &pinned).unwrap(),
+        stack::Resolved::Miss(stack::StackMiss::StackOff)
+    ));
+    assert!(matches!(
+        stack::resolve(&db, &store, &AppType::Codex, "native-fixture").unwrap(),
+        stack::Resolved::Plain
+    ));
+}
+
+#[test]
+#[serial]
+fn managed_codex_stack_does_not_guess_auxiliary_model_owner_from_other_members() {
+    let _home = Home::new();
+    let db = Database::memory().unwrap();
+    let mut identity = crate::mode::state::StackState::default();
+    identity.enabled = true;
+    identity.managed_identity_required = true;
+    let mut a = grant();
+    let mut b = grant();
+    for (fixture, model) in [(&mut a, "only-a"), (&mut b, "only-b")] {
+        fixture.provider.settings_config["config"] = json!(format!(
+            "model = \"{model}\"\nmodel_provider = \"osir\"\n[model_providers.osir]\nname = \"OSIR\"\nbase_url = \"https://api.osirclaw.com/v1\"\nwire_api = \"responses\"\n"
+        ));
+        fixture.provider.settings_config["modelCatalog"] = json!({"models":[{"model":model}]});
+        crate::mode::stack::allocate_key(&mut identity, &fixture.provider);
+        identity.members.push(fixture.provider.id.clone());
+        db.save_provider("codex", &fixture.provider).unwrap();
+    }
+    for reference in [
+        "review_model = \"only-b\"\n",
+        "[memories]\nextract_model = \"only-b\"\n",
+        "[memories]\nconsolidation_model = \"only-b\"\n",
+    ] {
+        let mut route = a.provider.clone();
+        route.settings_config["config"] = json!(format!(
+            "{reference}{}",
+            a.provider.settings_config["config"].as_str().unwrap(),
+        ));
+        // Memory tables must follow the top-level settings in valid TOML.
+        if reference.starts_with('[') {
+            route.settings_config["config"] = json!(format!(
+                "{}{reference}",
+                a.provider.settings_config["config"].as_str().unwrap(),
+            ));
+        }
+        let before = fs::read(get_codex_config_path()).unwrap();
+        assert!(identity_proxy_write(&db, &route, &identity, &Prepared::default()).is_err());
+        assert_eq!(fs::read(get_codex_config_path()).unwrap(), before);
+    }
+}
+
+#[test]
+#[serial]
 fn managed_mixed_stack_writer_keeps_ordinary_default_encoded_after_removal() {
     use crate::mode::{stack, state};
     let _home = Home::new();
@@ -467,7 +698,7 @@ fn managed_official_default_writer_publishes_native_rows_and_preserves_login() {
     let prepared = Prepared {
         native: Some(NativeRows::Bundled {
             rows: vec![
-                json!({"slug":"native-fixture", "display_name":"Native fixture", "priority":1, "context_window":12345}),
+                json!({"slug":"native-fixture", "display_name":"Native fixture", "priority":1, "context_window":12345, "auto_review_model_override":"unpublished-native-reviewer"}),
             ],
         }),
         ..Default::default()
@@ -488,6 +719,11 @@ fn managed_official_default_writer_publishes_native_rows_and_preserves_login() {
     let catalog: Value =
         serde_json::from_slice(&fs::read(get_codex_model_catalog_path()).unwrap()).unwrap();
     assert_eq!(catalog["models"][0]["context_window"], 12345);
+    assert!(catalog["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row.get("auto_review_model_override").is_none()));
     assert!(state::stack(&DeviceStore::for_device(), "codex")
         .unwrap()
         .codex_official_catalogs

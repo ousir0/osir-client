@@ -430,7 +430,12 @@ export function CliManagement({
             <dl className="osir-cli-versions">
               <div>
                 <dt>当前版本</dt>
-                <dd>{loading ? "检测中…" : info?.version || "—"}</dd>
+                <dd>
+                  {loading
+                    ? "检测中…"
+                    : info?.version ||
+                      (needsRepair || info?.error ? "无法读取" : "—")}
+                </dd>
               </div>
               <div>
                 <dt>可用版本</dt>

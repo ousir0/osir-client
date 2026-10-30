@@ -3,6 +3,7 @@ mod blocks;
 pub mod claude;
 pub mod claude_desktop;
 pub mod codex;
+pub(crate) mod codex_history;
 mod codex_items;
 pub mod gemini;
 pub mod grokbuild;

@@ -1,6 +1,6 @@
 {
   "name": "osir_client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OSIR API desktop client for Codex, Claude Code, OpenCode and Gemini CLI",
   "type": "module",
   "scripts": {

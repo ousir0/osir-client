@@ -728,7 +728,7 @@ const UnifiedMcpPanel: React.FC<UnifiedMcpPanelProps> = ({
           )}
           {osirVariant && hasServers && (
             <p className="osir-extension-description">
-              按工具启用外部服务；同步会覆盖工具内的同名配置，已配置不代表服务正在运行。
+              按工具启用外部服务；遇到不同的同名配置时会保留原配置并提示冲突。已配置不代表服务正在运行。
             </p>
           )}
           {showList && (

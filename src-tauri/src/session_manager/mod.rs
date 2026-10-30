@@ -117,7 +117,28 @@ pub fn scan_sessions_scoped(
         .into_iter()
         .map(|mut session| {
             let resume_target = match session.provider_id.as_str() {
-                "codex" => {
+                "codex"
+                    if session
+                        .source_path
+                        .as_deref()
+                        .is_some_and(|path| path.starts_with("sqlite:")) =>
+                {
+                    // SQLite remains undeletable. A Desktop target is advertised
+                    // only after the same provenance checks used by resume IPC.
+                    session
+                        .source_path
+                        .as_deref()
+                        .is_some_and(|path| {
+                            resume::prepare("codex", &session.session_id, path, false).is_ok()
+                        })
+                        .then_some("desktop")
+                }
+                "codex"
+                    if session
+                        .source_path
+                        .as_deref()
+                        .is_some_and(|path| !path.starts_with("sqlite:")) =>
+                {
                     let desktop = session
                         .source_path
                         .as_deref()
@@ -131,7 +152,13 @@ pub fn scan_sessions_scoped(
                 _ => None,
             };
             SessionListEntry {
-                read_only: sources::is_read_only(&session.provider_id),
+                read_only: session.source_path.is_none()
+                    || (session.provider_id == "codex"
+                        && session
+                            .source_path
+                            .as_deref()
+                            .is_some_and(|path| path.starts_with("sqlite:")))
+                    || sources::is_read_only(&session.provider_id),
                 resume_target,
                 session,
             }
@@ -188,6 +215,9 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
 }
 
 pub fn load_messages(provider_id: &str, source_path: &str) -> Result<Vec<SessionMessage>, String> {
+    if provider_id == "codex" && source_path.starts_with("sqlite:") {
+        return providers::codex_history::load_messages(source_path);
+    }
     if provider_id == "mcode" {
         return mcode::load_messages(source_path);
     }
@@ -260,6 +290,9 @@ fn delete_session_source(
     source_path: &str,
 ) -> Result<bool, String> {
     sources::ensure_writable(provider_id)?;
+    if provider_id == "codex" && source_path.starts_with("sqlite:") {
+        return Err("请在 Codex 中删除此会话，以保留完整的会话记录".into());
+    }
     if provider_id == "kimi" {
         return Err(
             "Delete this session in Kimi Code to keep its session index and history consistent"

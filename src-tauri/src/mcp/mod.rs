@@ -39,6 +39,7 @@ pub use grokbuild::{
 };
 pub use hermes::{import_from_hermes, remove_server_from_hermes, sync_single_server_to_hermes};
 pub use omp::{remove_server_from_omp, sync_single_server_to_omp};
+pub(crate) use opencode::convert_to_opencode_format;
 pub use opencode::{
     convert_from_opencode_format, import_from_opencode, remove_server_from_opencode,
     sync_single_server_to_opencode,

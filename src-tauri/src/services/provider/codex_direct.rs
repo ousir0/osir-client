@@ -797,6 +797,20 @@ pub(crate) fn plan(
                 catalog,
                 identity_state.is_some(),
             )?;
+            if let Some(identity) = &identity_state {
+                bind_stack_model_references(provider, identity, &mut top, &mut nested, catalog)?;
+            }
+        }
+        // Per-provider/native overrides contain upstream IDs. Only the device's
+        // explicit aggregate selection may choose a reviewer across providers.
+        if identity_state.is_some() {
+            if let Some(rows) = catalog.get_mut("models").and_then(Value::as_array_mut) {
+                for row in rows {
+                    if let Some(row) = row.as_object_mut() {
+                        row.remove("auto_review_model_override");
+                    }
+                }
+            }
         }
         // 聚合下的自动审批模型用聚合设置里的（卡上的只在直连、路由下用），不在合并目录里就
         // 不写，用 Codex 的默认。
@@ -881,6 +895,58 @@ pub(crate) fn plan(
             .map(str::to_string),
         contract,
     })
+}
+
+fn bind_stack_model_references(
+    route: &Provider,
+    identity: &crate::mode::state::StackState,
+    top: &mut [(String, TomlValue)],
+    nested: &mut [(Vec<String>, TomlValue)],
+    catalog: &Value,
+) -> Result<(), AppError> {
+    let key = identity
+        .key_of(&route.id)
+        .ok_or_else(|| AppError::Config("Missing Stack route key".into()))?;
+    let rows = catalog
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AppError::Config("Missing Stack catalog".into()))?;
+    let bind = |value: &mut TomlValue| -> Result<(), AppError> {
+        let model = value.as_str().filter(|m| !m.is_empty()).ok_or_else(|| {
+            AppError::Config("请选择该连接模型列表中的审核和记忆模型后重试".into())
+        })?;
+        let selected = match crate::mode::stack::decode(&AppType::Codex, model) {
+            crate::mode::stack::Decoded::Plain => {
+                crate::mode::stack::encode(&AppType::Codex, key, model, false)
+            }
+            crate::mode::stack::Decoded::Stack { .. } => model.to_string(),
+            _ => String::new(),
+        };
+        if !rows
+            .iter()
+            .any(|row| row["slug"].as_str() == Some(selected.as_str()))
+        {
+            return Err(AppError::Config(
+                "审核或记忆模型已不在该连接的模型列表中，请重新选择后重试".into(),
+            ));
+        }
+        *value = TomlValue::from(selected);
+        Ok(())
+    };
+    for (field, value) in top {
+        if field == "review_model" {
+            bind(value)?;
+        }
+    }
+    for (path, value) in nested {
+        if path.len() == 2
+            && path[0] == "memories"
+            && matches!(path[1].as_str(), "extract_model" | "consolidation_model")
+        {
+            bind(value)?;
+        }
+    }
+    Ok(())
 }
 
 /// 能不能加进 Stack：配置要能解析。之后才坏掉的成员在目录里跳过（见 [`stack_catalog`]）。

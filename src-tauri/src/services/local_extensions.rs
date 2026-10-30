@@ -161,6 +161,14 @@ fn read_config(path: &Path, toml: bool) -> Result<Option<Value>, &'static str> {
     if toml {
         let value = text.parse::<toml::Value>().map_err(|_| "invalid")?;
         serde_json::to_value(value).map(Some).map_err(|_| "invalid")
+    } else if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| matches!(name, "opencode.json" | "opencode.jsonc"))
+    {
+        crate::jsonc_document::JsoncDocument::parse(text)
+            .map(|document| Some(document.value().clone()))
+            .map_err(|_| "invalid")
     } else {
         serde_json::from_str(text).map(Some).map_err(|_| "invalid")
     }
@@ -238,7 +246,13 @@ fn sources(home: &Path, roots: &[(String, PathBuf)]) -> (Vec<Source>, Vec<PathBu
             "opencode" => ("opencode.json", "mcp", false),
             _ => continue,
         };
-        let mut paths = vec![root.join(file)];
+        let mut paths = vec![
+            if app == "opencode" && root.join("opencode.jsonc").exists() {
+                root.join("opencode.jsonc")
+            } else {
+                root.join(file)
+            },
+        ];
         if app == "claude" && root.file_name().is_some_and(|name| name == ".claude") {
             if let Some(parent) = root.parent() {
                 paths.push(parent.join(".claude.json"));
@@ -301,7 +315,11 @@ fn sources(home: &Path, roots: &[(String, PathBuf)]) -> (Vec<Source>, Vec<PathBu
             ("gemini", ".gemini/settings.json", "mcpServers", false),
             ("opencode", "opencode.json", "mcp", false),
         ] {
-            let path = project.join(suffix);
+            let path = if app == "opencode" && project.join("opencode.jsonc").exists() {
+                project.join("opencode.jsonc")
+            } else {
+                project.join(suffix)
+            };
             if seen.insert(path.clone()) {
                 sources.push(Source {
                     app: app.into(),
@@ -527,6 +545,38 @@ fn scan_sources(sources: &[Source], managed: &HashSet<String>) -> LocalExtension
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn opencode_jsonc_inventory_import_uses_the_active_file_and_preserves_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join(".config/opencode");
+        fs::create_dir_all(&root).unwrap();
+        let original =
+            "{ // keep fixture comment\n mcp: {active: {type:'local', command:['fixture'],},},}\n";
+        fs::write(root.join("opencode.jsonc"), original).unwrap();
+        fs::write(
+            root.join("opencode.json"),
+            r#"{"mcp":{"inactive":{"type":"local","command":["unused"]}}}"#,
+        )
+        .unwrap();
+        let (sources, _) = sources(temp.path(), &vec![("opencode".into(), root.clone())]);
+        let inventory = scan_sources(&sources, &HashSet::new());
+        assert_eq!(inventory.mcp.len(), 1);
+        assert_eq!(inventory.mcp[0].name, "active");
+        let db = crate::database::Database::memory().unwrap();
+        import_from_sources(&db, &inventory.mcp[0].id, &sources).unwrap();
+        assert_eq!(
+            db.get_all_mcp_servers().unwrap()["active"].server["command"],
+            "fixture"
+        );
+        assert!(db.get_all_mcp_servers().unwrap()["active"]
+            .apps
+            .enabled_apps()
+            .is_empty());
+        assert_eq!(
+            fs::read_to_string(root.join("opencode.jsonc")).unwrap(),
+            original
+        );
+    }
     #[test]
     fn native_inventory_finds_global_project_and_desktop_servers_without_exposing_configuration() {
         let temp = tempfile::tempdir().unwrap();

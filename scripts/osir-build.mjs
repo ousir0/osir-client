@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Packaging only: never launch an app, change HOME, or provision a Keychain.
+// Packaging only: never start the UI, change HOME, or provision a Keychain.
+// Built executables run only their read-only release diagnostics entry point.
 import {
   accessSync,
   closeSync,
@@ -21,9 +22,10 @@ import {
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { arch } from "node:os";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDmg } from "./osir-dmg.mjs";
+import { verifyReleaseDiagnostics } from "./osir-release-diagnostics.mjs";
 import {
   readDevSigningConfig,
   prepareDevSigning,
@@ -62,7 +64,7 @@ const channels = {
   ],
 };
 const help = [
-  "OSIR macOS packaging (never launches an app)",
+  "OSIR macOS packaging (read-only native diagnostics; never starts the UI)",
   "  node scripts/osir-build.mjs --check",
   "  node scripts/osir-build.mjs <dev|beta|prod> --local-unsigned [--dry-run|--check]",
   "  node scripts/osir-build.mjs <beta|prod> --release [--dry-run|--check]",
@@ -143,10 +145,15 @@ const inputFiles = [
   "scripts/osir-build-windows.mjs",
   "scripts/osir-build-macos-ci.mjs",
   "scripts/osir-pe-verify.mjs",
+  "scripts/osir-nsis-payload.mjs",
   "scripts/osir-ci-artifact.mjs",
   "scripts/osir-windows-packaged-smoke.ps1",
+  "scripts/osir-packaged-renderer-check.mjs",
+  "scripts/osir-packaged-renderer-check.test.mjs",
   "scripts/osir-source-snapshot.mjs",
   "scripts/osir-platform-build.test.mjs",
+  "scripts/osir-release-diagnostics.mjs",
+  "scripts/osir-release-diagnostics.test.mjs",
   ".github/workflows/osir-windows-release.yml",
   "scripts/osir-dev-signing.mjs",
   "scripts/osir-icons.py",
@@ -158,6 +165,8 @@ const inputFiles = [
   "scripts/osir-release-local.mjs",
   "scripts/osir-release-finalize.mjs",
   "scripts/osir-release-cloud.mjs",
+  "scripts/osir-release-backup.mjs",
+  "scripts/osir-release-backup.test.mjs",
   "config/osir-updater-beta.json",
   "config/osir-updater-prod.json",
   "components.json",
@@ -640,12 +649,13 @@ function releasePreflight() {
   return useApi ? "app-store-connect-api" : "apple-id-app-password";
 }
 
-function checkedTool(command, args, label) {
+function checkedTool(command, args, label, env = process.env) {
   const result = spawnSync(command, args, {
     cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 180000,
+    env,
   });
   requireThat(
     !result.error && result.status === 0,
@@ -1147,15 +1157,24 @@ async function main() {
           ["-czf", sourceUpdater, "-C", bundleRoot, basename(sourceApp)],
           "Archive finalized stable-signed app",
         );
+        const cliSignerEnv = { ...env };
+        const signingKey = env.TAURI_SIGNING_PRIVATE_KEY;
+        const signingArgs = [];
+        if (isAbsolute(signingKey)) {
+          delete cliSignerEnv.TAURI_SIGNING_PRIVATE_KEY;
+          signingArgs.push("--private-key-path", signingKey);
+        }
         checkedTool(
           process.execPath,
           [
             join(root, "node_modules/@tauri-apps/cli/tauri.js"),
             "signer",
             "sign",
+            ...signingArgs,
             sourceUpdater,
           ],
           "Sign finalized updater payload",
+          cliSignerEnv,
         );
       }
     }
@@ -1176,6 +1195,15 @@ async function main() {
         "Local ad-hoc signing (no certificate)",
       );
     const binaryArchs = verifyApp(app, config, target, release);
+    const releaseDiagnostics = verifyReleaseDiagnostics(
+      join(app, "Contents/MacOS/osir_client"),
+      {
+        config,
+        updatesEnabled: Boolean(updater),
+        bundleType: "app",
+        releaseBuild: options.channel !== "dev",
+      },
+    );
     let localSigningRequirement;
     if (selfSigned) {
       const required = `identifier "${config.identifier}" and certificate leaf = H"${localIdentity.identity}"`;
@@ -1301,6 +1329,8 @@ async function main() {
             : {}),
           renderer: "embedded",
           updaterEnabled: Boolean(updater),
+          embeddedUpdaterPublicConfigVerified: true,
+          releaseDiagnostics,
           ...(updater
             ? {
                 updaterConfigured: true,

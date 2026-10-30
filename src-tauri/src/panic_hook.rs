@@ -88,6 +88,63 @@ pub fn get_log_dir() -> PathBuf {
     get_app_config_dir().join("logs")
 }
 
+fn startup_failure_reason(detail: &str) -> (&'static str, &'static str) {
+    let detail = detail.to_ascii_lowercase();
+    if detail.contains("webview2") || detail.contains("webview runtime") {
+        (
+            "webview-runtime",
+            "无法加载显示组件。请重新运行 OSIR Client 安装程序修复后重试。",
+        )
+    } else {
+        (
+            "application-initialization",
+            "客户端未能完成启动。请重新运行安装程序；若仍无法打开，请将以下日志提供给技术支持。",
+        )
+    }
+}
+
+/// A Windows GUI executable has no visible stderr before Tauri is available.
+/// Never persist the arbitrary backend error: it can include private metadata.
+pub fn report_startup_failure(stage: &'static str, detail: &str) {
+    let (category, message) = startup_failure_reason(detail);
+    let path = get_app_config_dir().join("startup-error.log");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let diagnostic = format!(
+        "OSIR Client startup failed\nversion={APP_VERSION}\nos={}\narch={}\nstage={stage}\ncategory={category}\n",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+    let saved = fs::write(&path, diagnostic).is_ok();
+    eprintln!("OSIR Client startup failed: stage={stage}; category={category}");
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+        let text = if saved {
+            format!("{message}\n\n日志：{}", path.display())
+        } else {
+            format!("{message}\n\n无法保存启动日志，请检查用户目录的可写权限。")
+        };
+        let text: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+        let title: Vec<u16> = "OSIR Client 无法启动"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        // Both UTF-16 buffers live until the synchronous dialog returns.
+        unsafe {
+            MessageBoxW(
+                std::ptr::null_mut(),
+                text.as_ptr(),
+                title.as_ptr(),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (message, saved);
+}
+
 /// 安全获取环境信息（不会 panic）
 fn get_system_info() -> String {
     let os = std::env::consts::OS;
@@ -243,6 +300,26 @@ Stack Trace (Backtrace)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_failure_classification_never_repeats_backend_details() {
+        for detail in [
+            "WebView2 runtime unavailable: synthetic-sensitive-value",
+            "database open failed: synthetic-sensitive-value",
+        ] {
+            let (category, message) = startup_failure_reason(detail);
+            assert!(!category.contains("synthetic-sensitive-value"));
+            assert!(!message.contains("synthetic-sensitive-value"));
+        }
+        assert_eq!(
+            startup_failure_reason("WebView2 unavailable").0,
+            "webview-runtime"
+        );
+        assert_eq!(
+            startup_failure_reason("setup failed").0,
+            "application-initialization"
+        );
+    }
 
     #[test]
     fn test_crash_log_path() {

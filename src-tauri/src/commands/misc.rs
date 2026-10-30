@@ -1754,6 +1754,46 @@ fn extract_version(raw: &str) -> String {
         .unwrap_or_else(|| raw.to_string())
 }
 
+fn claude_version_probe(success: bool, stdout: &str, stderr: &str) -> ShellProbe {
+    let diagnostic = format!("{stdout}\n{stderr}");
+    let failure = tool_lifecycle_support::classify_diagnostic(&diagnostic);
+    if !success || tool_lifecycle_support::native_incomplete(&diagnostic) {
+        return ShellProbe::FoundButFailed(failure.message());
+    }
+    // Accept a version line, never a path, warning, or an empty successful stub.
+    for line in stdout.lines().chain(stderr.lines()) {
+        let line = line.trim();
+        let line = line.strip_prefix('v').unwrap_or(line);
+        if let Some(version) = VERSION_RE.find(line).filter(|version| version.start() == 0) {
+            let suffix = line[version.end()..].trim();
+            if suffix.is_empty() || suffix == "(Claude Code)" {
+                return ShellProbe::Found(version.as_str().to_string());
+            }
+        }
+    }
+    ShellProbe::FoundButFailed(tool_lifecycle_support::Failure::Failed.message())
+}
+
+fn claude_launcher_error(path: &Path, error: &str) -> String {
+    use std::io::Read;
+    // The official stub has no shebang, so direct execution can fail before
+    // producing diagnostics. Inspect only its bounded, public launcher text.
+    let incomplete = std::fs::File::open(path).ok().is_some_and(|file| {
+        if !file.metadata().is_ok_and(|metadata| metadata.len() <= 4096) {
+            return false;
+        }
+        let mut text = String::new();
+        file.take(4096).read_to_string(&mut text).is_ok()
+            && text.contains("claude native binary not installed")
+            && text.contains("postinstall")
+    });
+    if incomplete {
+        tool_lifecycle_support::Failure::NativeIncomplete.message()
+    } else {
+        tool_lifecycle_support::classify_diagnostic(error).message()
+    }
+}
+
 /// 工具未安装时的统一错误文案；WSL 路径会再拼上 `[WSL:{distro}] ` 前缀。
 const NOT_INSTALLED: &str = "not installed or not executable";
 
@@ -1790,7 +1830,11 @@ fn try_get_version(tool: &str) -> ShellProbe {
         let flag = default_flag_for_shell(&shell);
         let mut cmd = Command::new(shell);
         cmd.arg(flag)
-            .arg(format!("{tool} --version"))
+            .arg(if tool == "claude" {
+                version_probe_payload(tool)
+            } else {
+                format!("{tool} --version")
+            })
             // 与 `resolve_path_default` 相同：交互式 shell（-lic）不能读到继承来的
             // stdin，也不能因持有控制终端被 SIGTTIN 停住（从终端启动时整个应用卡死）。
             .stdin(Stdio::null())
@@ -1809,6 +1853,17 @@ fn try_get_version(tool: &str) -> ShellProbe {
         Ok(out) => {
             let stdout = decode_command_output(&out.stdout).trim().to_string();
             let stderr = decode_command_output(&out.stderr).trim().to_string();
+            let stdout = if tool == "claude" {
+                after_version_sentinel(&stdout)
+            } else {
+                &stdout
+            };
+            if tool == "claude"
+                && !(out.status.code() == Some(127) && is_shell_command_missing(&stderr, tool))
+            {
+                return claude_version_probe(out.status.success(), stdout, &stderr);
+            }
+            let stdout = stdout.to_string();
             if out.status.success() {
                 let raw = if stdout.is_empty() { &stderr } else { &stdout };
                 if raw.is_empty() {
@@ -2034,6 +2089,11 @@ fn try_get_version_wsl(
             let stderr = decode_command_output(&out.stderr).trim().to_string();
             // 启动文件的输出都在哨兵之前，只看它之后（#7347）
             let payload_out = after_version_sentinel(&stdout).to_string();
+            if tool == "claude"
+                && !is_shell_command_missing(&format!("{payload_out}\n{stderr}"), tool)
+            {
+                return claude_version_probe(out.status.success(), &payload_out, &stderr);
+            }
             if out.status.success() {
                 let raw = if payload_out.is_empty() {
                     &stderr
@@ -2869,6 +2929,9 @@ fn probe_path_default_version(tool: &str) -> ShellProbe {
         Ok(out) => {
             let stdout = decode_command_output(&out.stdout).trim().to_string();
             let stderr = decode_command_output(&out.stderr).trim().to_string();
+            if tool == "claude" {
+                return claude_version_probe(out.status.success(), &stdout, &stderr);
+            }
             if out.status.success() {
                 let raw = if stdout.is_empty() { &stderr } else { &stdout };
                 if raw.is_empty() {
@@ -2884,6 +2947,9 @@ fn probe_path_default_version(tool: &str) -> ShellProbe {
                     ShellProbe::FoundButFailed(last_lines(err.trim(), 4))
                 }
             }
+        }
+        Err(error) if tool == "claude" => {
+            ShellProbe::FoundButFailed(claude_launcher_error(&path_default, &error.to_string()))
         }
         Err(_) => ShellProbe::NotFound(NOT_INSTALLED.to_string()),
     }
@@ -2931,6 +2997,16 @@ fn scan_cli_version(tool: &str) -> ShellProbe {
             if let Ok(out) = output {
                 let stdout = decode_command_output(&out.stdout).trim().to_string();
                 let stderr = decode_command_output(&out.stderr).trim().to_string();
+                if tool == "claude" {
+                    match claude_version_probe(out.status.success(), &stdout, &stderr) {
+                        ShellProbe::Found(version) => return ShellProbe::Found(version),
+                        ShellProbe::FoundButFailed(error) => {
+                            exec_diagnostic.get_or_insert(error);
+                        }
+                        ShellProbe::NotFound(_) => {}
+                    }
+                    continue;
+                }
                 if out.status.success() {
                     let raw = if stdout.is_empty() { &stderr } else { &stdout };
                     if !raw.is_empty() {
@@ -2942,6 +3018,12 @@ fn scan_cli_version(tool: &str) -> ShellProbe {
                     if !detail.is_empty() {
                         exec_diagnostic = Some(last_lines(detail, 4));
                     }
+                }
+            } else if tool == "claude" {
+                if let Err(error) = output {
+                    exec_diagnostic.get_or_insert_with(|| {
+                        claude_launcher_error(&tool_path, &error.to_string())
+                    });
                 }
             }
         }
@@ -3321,6 +3403,16 @@ fn enumerate_tool_installations(tool: &str) -> Vec<ToolInstallation> {
             let output = run_probe_version_command(&tool_path, &new_path);
 
             let (version, runnable, error, exited_with_error) = match output {
+                Ok(out) if tool == "claude" => {
+                    let stdout = decode_command_output(&out.stdout);
+                    let stderr = decode_command_output(&out.stderr);
+                    match claude_version_probe(out.status.success(), &stdout, &stderr) {
+                        ShellProbe::Found(version) => (Some(version), true, None, false),
+                        ShellProbe::FoundButFailed(error) | ShellProbe::NotFound(error) => {
+                            (None, false, Some(error), !out.status.success())
+                        }
+                    }
+                }
                 Ok(out) if out.status.success() => {
                     let stdout = decode_command_output(&out.stdout).trim().to_string();
                     let stderr = decode_command_output(&out.stderr).trim().to_string();
@@ -3339,6 +3431,12 @@ fn enumerate_tool_installations(tool: &str) -> Vec<ToolInstallation> {
                     };
                     (None, false, error, true)
                 }
+                Err(e) if tool == "claude" => (
+                    None,
+                    false,
+                    Some(claude_launcher_error(&tool_path, &e)),
+                    false,
+                ),
                 Err(e) => (None, false, Some(e), false),
             };
 
@@ -3698,47 +3796,11 @@ fn claude_npm_update_command(bin_path: &str, real_target: &str) -> Option<String
     let prefix = claude_npm_prefix(bin_path, real_target)?;
     // fnm's multishell launcher and user-created aliases may be symlinks outside
     // the canonical prefix. The real package owns the destination and runtime.
-    let dir = format!("{prefix}/bin");
-    let pkg = "@anthropic-ai/claude-code";
-    let extra = npm_install_extra_args("claude");
     let launcher = shell_single_quote(bin_path);
     let prefix = shell_single_quote(prefix);
-    let npm = shell_single_quote(&format!("{dir}/npm"));
-    let dir = shell_single_quote(&dir);
     Some(format!(
-        r#"(
-export PATH={dir}:"$PATH"
-export npm_config_allow_scripts={pkg} npm_config_ignore_scripts=false npm_config_include=optional
-export npm_config_prefix={prefix}
-osir_claude_npm={npm}
-if [ ! -x "$osir_claude_npm" ]; then
-  osir_claude_npm="$(command -v npm)" || exit 127
-fi
-"$osir_claude_npm" i -g {pkg}@latest --prefix {prefix}{extra} || exit $?
-osir_claude_repair=false
-osir_claude_native_missing=false
-osir_claude_verify() {{
-  osir_claude_probe=$({launcher} --version 2>&1) || return 1
-  [[ "$osir_claude_probe" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([[:space:]]|[-+.]|$) ]]
-}}
-if osir_claude_verify; then exit 0; fi
-case "$osir_claude_probe" in
-  *"Run the postinstall manually"*|*"Could not find native binary package"*|*"Missing optional dependency"*|*"TOOL_INSTALL_NATIVE_MISSING"*) osir_claude_repair=true; osir_claude_native_missing=true;;
-esac
-if [ ! -e {launcher} ]; then osir_claude_repair=true; osir_claude_native_missing=true; fi
-if [ "$osir_claude_repair" = true ]; then
-  "$osir_claude_npm" uninstall -g {pkg} --prefix {prefix} || exit $?
-  "$osir_claude_npm" i -g {pkg}@latest --prefix {prefix}{extra} || exit $?
-  if osir_claude_verify; then exit 0; fi
-  osir_claude_native_missing=true
-fi
-if [ "$osir_claude_native_missing" = true ]; then
-  printf '%s\n' TOOL_INSTALL_NATIVE_MISSING >&2
-else
-  printf '%s\n' TOOL_INSTALL_FAILED >&2
-fi
-exit 1
-)"#
+        "(\nosir_claude_launcher={launcher}\nosir_claude_prefix={prefix}\nosir_claude_package=@anthropic-ai/claude-code@latest\n{}\n)",
+        include_str!("claude_npm_update.sh")
     ))
 }
 
@@ -6567,6 +6629,91 @@ pub async fn set_window_theme(window: tauri::Window, theme: String) -> Result<()
 #[cfg(test)]
 mod tests {
     #[test]
+    fn claude_launcher_error_recognizes_the_official_stub_without_exposing_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let launcher = temp.path().join("claude");
+        std::fs::write(
+            &launcher,
+            "echo 'Error: claude native binary not installed.' >&2\necho 'Run the postinstall manually' >&2\nexit 1\n",
+        )
+        .unwrap();
+        assert!(
+            claude_launcher_error(&launcher, "Exec format error fixture-secret")
+                .starts_with("TOOL_INSTALL_NATIVE_MISSING")
+        );
+        std::fs::write(&launcher, "unrelated fixture-secret").unwrap();
+        assert_eq!(
+            claude_launcher_error(&launcher, "permission denied fixture-secret"),
+            tool_lifecycle_support::Failure::Permission.message()
+        );
+        std::fs::write(&launcher, vec![b'x'; 8192]).unwrap();
+        assert_eq!(
+            claude_launcher_error(&launcher, "Exec format error fixture-secret"),
+            tool_lifecycle_support::Failure::Failed.message()
+        );
+    }
+
+    #[test]
+    fn claude_probe_rejects_successful_stubs_and_redacts_failed_output() {
+        for (success, stdout, stderr, category) in [
+            (true, "", "", "TOOL_INSTALL_FAILED"),
+            (
+                true,
+                "Run the postinstall manually",
+                "",
+                "TOOL_INSTALL_NATIVE_MISSING",
+            ),
+            (
+                true,
+                "2.1.312 (Claude Code)",
+                "Run the postinstall manually",
+                "TOOL_INSTALL_NATIVE_MISSING",
+            ),
+            (
+                false,
+                "",
+                "Error: claude native binary not installed.",
+                "TOOL_INSTALL_NATIVE_MISSING",
+            ),
+            (false, "", "EACCES private-path", "TOOL_INSTALL_PERMISSION"),
+            (false, "", "requires Node private-path", "TOOL_INSTALL_NODE"),
+            (
+                true,
+                "warning /private/path/2.1.312/install.cjs",
+                "",
+                "TOOL_INSTALL_FAILED",
+            ),
+        ] {
+            let stderr = format!("{stderr}\nAuthorization: Bearer fixture-secret");
+            match claude_version_probe(success, stdout, &stderr) {
+                ShellProbe::FoundButFailed(error) => {
+                    assert!(error.starts_with(category), "{error}");
+                    assert!(!error.contains("private-path"));
+                    assert!(!error.contains("fixture-secret"));
+                }
+                _ => panic!("invalid Claude output must be a broken installation"),
+            }
+        }
+    }
+
+    #[test]
+    fn claude_probe_accepts_only_actual_version_lines_after_the_shell_sentinel() {
+        for (stdout, stderr) in [
+            ("2.1.312 (Claude Code)", ""),
+            ("", "2.1.312 (Claude Code)"),
+            ("v2.1.312", ""),
+        ] {
+            assert!(
+                matches!(claude_version_probe(true, stdout, stderr), ShellProbe::Found(version) if version == "2.1.312")
+            );
+        }
+        let output = format!("Node 26.13.0\n{VERSION_PROBE_SENTINEL}\n2.1.312 (Claude Code)");
+        assert!(
+            matches!(claude_version_probe(true, after_version_sentinel(&output), ""), ShellProbe::Found(version) if version == "2.1.312")
+        );
+    }
+
+    #[test]
     fn upstream_updates_reject_osir_distributions() {
         for identifier in [
             "com.osir.client",
@@ -9153,11 +9300,12 @@ mod tests {
                 ));
                 let command = installs_anchored_command("claude", &[install]).unwrap();
                 let prefix = dir.trim_end_matches("/bin");
-                assert!(command.contains(&format!("export PATH='{dir}':\"$PATH\"")));
-                assert!(command.contains(&format!("osir_claude_npm='{dir}/npm'")));
-                assert!(command.contains(&format!("--prefix '{prefix}'")));
+                assert!(command.contains(&format!("osir_claude_prefix='{prefix}'")));
+                assert!(command.contains("export PATH=\"$osir_claude_prefix/bin:$PATH\""));
+                assert!(command.contains("osir_claude_npm=\"$osir_claude_prefix/bin/npm\""));
                 assert!(command.contains("--ignore-scripts=false --include=optional --allow-scripts=@anthropic-ai/claude-code"));
-                assert!(command.contains(&format!("'{path}' --version")));
+                assert!(command.contains(&format!("osir_claude_launcher='{path}'")));
+                assert!(command.contains("\"$osir_claude_launcher\" --version"));
                 assert!(!command.contains(&format!("{path} update")));
             }
         }
@@ -9182,7 +9330,7 @@ mod tests {
             ] {
                 let command = anchored_command_from_paths("claude", path, real).unwrap();
                 let prefix = parent_dir(&parent_dir(path));
-                assert!(command.contains(&format!("--prefix '{prefix}'")));
+                assert!(command.contains(&format!("osir_claude_prefix='{prefix}'")));
                 assert!(command.contains("osir_claude_npm=\"$(command -v npm)\""));
                 assert!(!command.contains(&format!("{path} update")));
             }
@@ -9196,9 +9344,8 @@ mod tests {
                 "/srv/node-runtime/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
             )
             .unwrap();
-            assert!(command.contains("export PATH='/srv/node-runtime/bin':\"$PATH\""));
-            assert!(command.contains("--prefix '/srv/node-runtime'"));
-            assert!(command.contains("'/Users/me/.local/bin/claude' --version"));
+            assert!(command.contains("osir_claude_prefix='/srv/node-runtime'"));
+            assert!(command.contains("osir_claude_launcher='/Users/me/.local/bin/claude'"));
         }
 
         #[test]

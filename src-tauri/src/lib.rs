@@ -44,6 +44,7 @@ mod prompt;
 mod prompt_files;
 mod provider;
 mod proxy;
+mod release_diagnostics;
 mod services;
 mod session_manager;
 mod settings;
@@ -399,12 +400,31 @@ fn raise_open_file_limit() {
     }
 }
 
+// A single macro expansion supplies both normal startup and release diagnostics.
+// Constructing this context does not build an app, initialize plugins or run setup.
+fn compiled_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
+/// Called before any startup side effect. Only exact diagnostics invocation can
+/// construct the read-only report; malformed attempts never fall through to UI.
+pub fn run_release_diagnostics(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<i32> {
+    release_diagnostics::dispatch(args, || {
+        let context = compiled_context();
+        release_diagnostics::report(
+            context.config(),
+            &context.package_info().version.to_string(),
+            tauri::utils::platform::bundle_type().map(|kind| kind.to_string()),
+        )
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let context = tauri::generate_context!();
+    let context = compiled_context();
     if let Err(error) = distribution::initialize(&context.config().identifier) {
-        eprintln!("客户端隔离目录初始化失败: {error}");
-        return;
+        panic_hook::report_startup_failure("directory-initialization", &error.to_string());
+        std::process::exit(1);
     }
     // 设置 panic hook，在应用崩溃时记录日志到 <app_config_dir>/crash.log（默认 ~/.cc-switch/crash.log）
     panic_hook::setup_panic_hook();
@@ -2039,9 +2059,13 @@ pub fn run() {
             commands::is_lightweight_mode,
         ]);
 
-    let app = builder
-        .build(context)
-        .expect("error while running tauri application");
+    let app = match builder.build(context) {
+        Ok(app) => app,
+        Err(error) => {
+            panic_hook::report_startup_failure("application-build", &error.to_string());
+            std::process::exit(1);
+        }
+    };
 
     app.run(|app_handle, event| {
         // 处理退出请求（所有平台）

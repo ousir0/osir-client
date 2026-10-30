@@ -586,16 +586,27 @@ impl<B: CredentialBackend + 'static> AuthManager<B> {
                     return Err(SessionError::Superseded);
                 }
                 // Fail closed across a crash or ambiguous Keychain write.
-                journal.write_slot(Some(&record.account_id), record.slot.as_deref(), false)?;
+                journal
+                    .write_slot(Some(&record.account_id), record.slot.as_deref(), false)
+                    .map_err(|error| {
+                        log::warn!(
+                            "OSIR account save failed: stage=journal_prepare reason={error:?}"
+                        );
+                        error
+                    })?;
             }
             if state.lock().unwrap().generation != generation {
                 return Err(SessionError::Superseded);
             }
-            if create {
-                credentials.create(&record)?;
+            let saved = if create {
+                credentials.create_for_user(&record)
             } else {
-                credentials.store(&record)?;
-            }
+                credentials.store(&record)
+            };
+            saved.map_err(|error| {
+                log::warn!("OSIR account save failed: stage=credential_write reason={error:?}");
+                error
+            })?;
             // spawn_blocking continues even if its caller is cancelled. Clean up
             // its late write under the same gate used by logout deletion.
             let current = state.lock().unwrap();
@@ -755,7 +766,13 @@ impl<B: CredentialBackend + 'static> AuthManager<B> {
                 // Activation and logout serialize under state; only after durable
                 // credentials exist. A failed journal write cannot publish login.
                 self.journal
-                    .write_slot(Some(&record.account_id), record.slot.as_deref(), true)?;
+                    .write_slot(Some(&record.account_id), record.slot.as_deref(), true)
+                    .map_err(|error| {
+                        log::warn!(
+                            "OSIR account save failed: stage=journal_activate reason={error:?}"
+                        );
+                        error
+                    })?;
                 state.cleanup_account = Some(record.account_id.clone());
                 state.cleanup_slot = record.slot.clone();
                 state.record = Some(record.clone());
@@ -2083,6 +2100,7 @@ assert Handler.index == 11 and not Handler.failed
         reads: Arc<std::sync::atomic::AtomicUsize>,
         writes: Arc<std::sync::atomic::AtomicUsize>,
         creates: Arc<std::sync::atomic::AtomicUsize>,
+        interactive_creates: Arc<std::sync::atomic::AtomicUsize>,
         interactive_writes: Arc<std::sync::atomic::AtomicUsize>,
         interactive_reads: Arc<std::sync::atomic::AtomicUsize>,
         read_error: Arc<Mutex<Option<CredentialError>>>,
@@ -2093,6 +2111,16 @@ assert Handler.index == 11 and not Handler.failed
         require_interaction: bool,
     }
     impl CredentialBackend for Memory {
+        fn create_interactive(
+            &self,
+            service: &str,
+            account: &str,
+            bytes: &[u8],
+        ) -> Result<(), CredentialError> {
+            self.interactive_creates
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.create(service, account, bytes)
+        }
         fn create(
             &self,
             service: &str,
@@ -2237,6 +2265,26 @@ assert Handler.index == 11 and not Handler.failed
         manager
     }
     #[tokio::test]
+    async fn browser_login_save_allows_authorization_but_token_refresh_remains_silent() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let directory = tempfile::tempdir().unwrap();
+        let backend = Memory::default();
+        let manager = persistent_manager(directory.path(), backend.clone());
+        let mut fresh = record();
+        fresh.slot = Some("e".repeat(32));
+        manager.save(Arc::new(fresh), 0, true).await.unwrap();
+        let mut refreshed = record();
+        refreshed.slot = Some("e".repeat(32));
+        refreshed.refresh_token = "synthetic-successor".into();
+        manager.save(Arc::new(refreshed), 0, false).await.unwrap();
+        assert_eq!(backend.interactive_creates.load(SeqCst), 1);
+        assert_eq!(backend.creates.load(SeqCst), 1);
+        assert_eq!(backend.writes.load(SeqCst), 2);
+        assert_eq!(backend.interactive_writes.load(SeqCst), 0);
+        assert_eq!(backend.interactive_reads.load(SeqCst), 0);
+        assert_eq!(backend.items.lock().unwrap().len(), 1);
+    }
+    #[tokio::test]
     async fn fresh_login_does_not_read_update_or_delete_a_locked_legacy_item() {
         use super::super::request_budget::RequestClass;
         use std::sync::atomic::Ordering::SeqCst;
@@ -2266,6 +2314,7 @@ assert Handler.index == 11 and not Handler.failed
             assert_eq!(backend.items.lock().unwrap()[&key], bytes);
         }
         assert_eq!(backend.creates.load(SeqCst), 1);
+        assert_eq!(backend.interactive_creates.load(SeqCst), 1);
         assert_eq!(backend.reads.load(SeqCst), 0);
         assert_eq!(backend.interactive_reads.load(SeqCst), 0);
         assert_eq!(backend.interactive_writes.load(SeqCst), 0);

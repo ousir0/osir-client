@@ -10,11 +10,13 @@ export function defaultConnectionModel(
   models: readonly string[],
   current = "",
 ): string {
-  if (models.includes(current)) return current;
   const conversation = models.filter(
-    (id) => !/image|embedding|rerank|tts|whisper|dall-e/i.test(id),
+    (id) =>
+      id.trim() !== "" &&
+      !/image|embedding|rerank|tts|whisper|dall-e/i.test(normalized(id)),
   );
-  const available = conversation.length ? conversation : [...models];
+  if (conversation.includes(current)) return current;
+  const available = conversation;
   const preferred = available.find((id) => {
     const name = normalized(id);
     return tool === "claude" || tool === "claude-desktop"

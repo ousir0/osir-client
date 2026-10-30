@@ -40,6 +40,20 @@ export function SkillImportDialog({
   const { t } = useTranslation();
   const osirVariant = useContext(ExtensionThemeContext);
   const [query, setQuery] = useState("");
+  const groups = useMemo(() => {
+    const groups = new Map<string, UnmanagedSkill[]>();
+    for (const skill of skills) {
+      const copies = groups.get(skill.directory) ?? [];
+      if (!copies.some((copy) => copy.path === skill.path)) copies.push(skill);
+      groups.set(skill.directory, copies);
+    }
+    return groups;
+  }, [skills]);
+  const [sources, setSources] = useState<Record<string, string>>({});
+  const chosenSkills = [...groups.values()].map(
+    (copies) =>
+      copies.find((copy) => copy.path === sources[copy.directory]) ?? copies[0],
+  );
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(skills.map((skill) => skill.directory)),
   );
@@ -76,12 +90,19 @@ export function SkillImportDialog({
   };
 
   const normalized = query.trim().toLowerCase();
-  const visible = skills.filter(
+  const visible = chosenSkills.filter(
     (skill) =>
       !normalized ||
-      [skill.name, skill.directory, ...skill.foundIn.map(foundLabel)].some(
-        (value) => value.toLowerCase().includes(normalized),
-      ),
+      groups
+        .get(skill.directory)!
+        .some((copy) =>
+          [
+            copy.name,
+            copy.directory,
+            copy.path,
+            ...copy.foundIn.map(foundLabel),
+          ].some((value) => value.toLowerCase().includes(normalized)),
+        ),
   );
 
   const toggle = (directory: string, checked: boolean) =>
@@ -96,7 +117,7 @@ export function SkillImportDialog({
     // 默认勾的应用只给在那里发现过的 Skill；另外勾的应用给全部
     const extra = [...apps].filter((app) => !defaultApps.has(app));
     onImport(
-      skills
+      chosenSkills
         .filter((skill) => selected.has(skill.directory))
         .map((skill) => {
           const chosen = new Set<AppId>(extra);
@@ -200,28 +221,50 @@ export function SkillImportDialog({
                   toggle(skill.directory, event.target.checked)
                 }
               />
-              <label htmlFor={id} className="flex min-w-0 flex-1 flex-col">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate text-body font-medium">
-                    {skill.name}
-                  </span>
-                  {showDir && (
-                    <span className="truncate font-mono text-caption text-fg-3">
-                      {skill.directory}
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <label htmlFor={id} className="flex min-w-0 flex-col">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate text-body font-medium">
+                      {skill.name}
                     </span>
-                  )}
-                </span>
-                <span
-                  className="truncate text-caption text-fg-2"
-                  title={skill.path}
-                >
-                  {t("skillsPage.import.foundIn", {
-                    places: skill.foundIn
-                      .map(foundLabel)
-                      .join(t("mcpPage.listSeparator")),
-                  })}
-                </span>
-              </label>
+                    {showDir && (
+                      <span className="truncate font-mono text-caption text-fg-3">
+                        {skill.directory}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className="truncate text-caption text-fg-2"
+                    title={skill.path}
+                  >
+                    {t("skillsPage.import.foundIn", {
+                      places: skill.foundIn
+                        .map(foundLabel)
+                        .join(t("mcpPage.listSeparator")),
+                    })}
+                  </span>
+                </label>
+                {(groups.get(skill.directory)?.length ?? 0) > 1 && (
+                  <select
+                    aria-label={`${skill.directory} 的来源`}
+                    className="h-8 w-full min-w-0 rounded-md border border-border bg-surface px-2 text-caption"
+                    value={skill.path}
+                    disabled={isImporting}
+                    onChange={(event) =>
+                      setSources((previous) => ({
+                        ...previous,
+                        [skill.directory]: event.target.value,
+                      }))
+                    }
+                  >
+                    {groups.get(skill.directory)!.map((copy) => (
+                      <option key={copy.path} value={copy.path}>
+                        {copy.foundIn.map(foundLabel).join("、")} · {copy.path}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </li>
           );
         })}

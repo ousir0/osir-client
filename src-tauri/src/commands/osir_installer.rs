@@ -4,19 +4,28 @@ use crate::services::osir::desktop_install::{
     coordinator::{InstallCoordinator, InstallError, RestorePoint},
     release::Source,
 };
+#[cfg(target_os = "windows")]
+#[path = "osir_tools_windows_installer.rs"]
+mod windows_installer;
 use serde::Deserialize;
 use serde_json::Value;
 use tauri::State;
+#[cfg(target_os = "windows")]
+use windows_installer::Installer;
 
 pub struct OsirInstallerState {
     #[cfg(target_os = "macos")]
     coordinator: Result<InstallCoordinator, InstallError>,
+    #[cfg(target_os = "windows")]
+    windows: Installer,
 }
 impl OsirInstallerState {
     pub fn new() -> Self {
         Self {
             #[cfg(target_os = "macos")]
             coordinator: InstallCoordinator::new(),
+            #[cfg(target_os = "windows")]
+            windows: Installer::default(),
         }
     }
     #[cfg(target_os = "macos")]
@@ -72,7 +81,7 @@ fn safe(error: InstallError) -> String {
 fn json<T: serde::Serialize>(value: T) -> Result<Value, String> {
     serde_json::to_value(value).map_err(|_| "无法编码安装器状态".into())
 }
-const UNSUPPORTED: &str = "Codex Desktop 原生安装目前仅支持 macOS";
+const UNSUPPORTED: &str = "当前平台尚未接入 Codex Desktop 安装";
 
 #[tauri::command]
 pub async fn osir_codex_install_check(
@@ -93,6 +102,11 @@ pub async fn osir_codex_install_check(
         );
     }
     #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        return state.windows.check(source, target_path).await;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (state, source, target_path);
         Err(UNSUPPORTED.into())
@@ -100,6 +114,7 @@ pub async fn osir_codex_install_check(
 }
 #[tauri::command]
 pub async fn osir_codex_install_start(
+    app: tauri::AppHandle,
     state: State<'_, OsirInstallerState>,
     source: InstallSource,
     expected_build: u64,
@@ -109,6 +124,7 @@ pub async fn osir_codex_install_start(
 ) -> Result<Value, String> {
     #[cfg(target_os = "macos")]
     {
+        let _ = app;
         if target_path.is_some() && expected_source.is_none() {
             return Err("版本或安装状态已改变，请重新检查".into());
         }
@@ -127,8 +143,24 @@ pub async fn osir_codex_install_start(
         );
     }
     #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        return state
+            .windows
+            .install(
+                &app,
+                source,
+                expected_build,
+                target_path,
+                expected_installed_build,
+                expected_source,
+            )
+            .await;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (
+            app,
             state,
             source,
             expected_build,
@@ -146,6 +178,11 @@ pub fn osir_codex_install_status(state: State<'_, OsirInstallerState>) -> Result
         return json(state.manager()?.status().map_err(safe)?);
     }
     #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        return Ok(state.windows.status());
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = state;
         Err(UNSUPPORTED.into())
@@ -161,6 +198,12 @@ pub fn osir_codex_install_cancel(
         return json(state.manager()?.cancel(&operation_id).map_err(safe)?);
     }
     #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = operation_id;
+        return Ok(state.windows.cancel());
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (state, operation_id);
         Err(UNSUPPORTED.into())
@@ -189,7 +232,10 @@ pub async fn osir_codex_install_restore(
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (state, expected, target_path);
-        Err(UNSUPPORTED.into())
+        Err(
+            "此平台未提供 Codex 应用备份恢复，请使用 Windows 应用设置或 Microsoft Store 修复安装"
+                .into(),
+        )
     }
 }
 #[tauri::command]
@@ -210,6 +256,14 @@ pub async fn osir_codex_install_recover(
         );
     }
     #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (state, target_path);
+        return Err(
+            "Windows 安装恢复由系统管理，请重新检测版本，或使用 Microsoft Store 修复安装".into(),
+        );
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (state, target_path);
         Err(UNSUPPORTED.into())
@@ -253,7 +307,14 @@ pub async fn osir_codex_install_local(
                 .map_err(safe)?,
         );
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        return state
+            .windows
+            .local(&app, &action, target_path.as_deref())
+            .await;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (app, state, action, target_path);
         Err(UNSUPPORTED.into())

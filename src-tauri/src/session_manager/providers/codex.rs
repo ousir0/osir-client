@@ -55,7 +55,9 @@ struct SessionIndexEntry {
 
 pub fn scan_sessions() -> Vec<SessionMeta> {
     let roots = session_roots();
-    scan_sessions_in_roots(&roots)
+    let mut sessions = scan_sessions_in_roots(&roots);
+    append_index_sessions(&mut sessions, &state_db_paths(), false);
+    sessions
 }
 
 pub fn session_roots() -> Vec<PathBuf> {
@@ -64,7 +66,115 @@ pub fn session_roots() -> Vec<PathBuf> {
 
 pub fn scan_desktop_sessions() -> Vec<SessionMeta> {
     let titles = load_thread_titles();
-    scan_desktop_sessions_in_roots(&session_roots(), &titles)
+    let mut sessions = scan_desktop_sessions_in_roots(&session_roots(), &titles);
+    append_index_sessions(&mut sessions, &state_db_paths(), true);
+    sessions
+}
+
+/// New Codex versions keep paginated ThreadItems independently of rollouts.
+/// Prefer that store for paginated threads, including metadata-only rollouts.
+fn append_index_sessions(
+    sessions: &mut Vec<SessionMeta>,
+    db_paths: &[PathBuf],
+    desktop_only: bool,
+) {
+    let mut known: HashSet<String> = sessions.iter().map(|s| s.session_id.clone()).collect();
+    for db_path in db_paths {
+        let history_db = super::codex_history::database_for_state(db_path);
+        let readable = super::codex_history::indexed_threads(&history_db);
+        let Ok(conn) =
+            Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        else {
+            continue;
+        };
+        let _ = conn.busy_timeout(Duration::from_millis(300));
+        let Ok(mut column_stmt) = conn.prepare("PRAGMA table_info(threads)") else {
+            continue;
+        };
+        let Ok(columns) = column_stmt.query_map([], |row| row.get::<_, String>(1)) else {
+            continue;
+        };
+        let columns: HashSet<String> = columns.flatten().collect();
+        let originator = if columns.contains("originator") {
+            "originator"
+        } else {
+            "NULL"
+        };
+        let history_mode = if columns.contains("history_mode") {
+            "history_mode"
+        } else {
+            "NULL"
+        };
+        let sql = format!("SELECT id, substr(title,1,320), cwd, created_at, updated_at, source, {originator}, {history_mode} FROM threads");
+        let Ok(mut stmt) = conn.prepare(&sql) else {
+            continue;
+        };
+        let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+            ))
+        }) else {
+            continue;
+        };
+        for (id, title, cwd, created, updated, source, originator, history_mode) in rows.flatten() {
+            let source = serde_json::from_str::<Value>(&source).unwrap_or(Value::String(source));
+            if is_subagent_source(Some(&source))
+                || (desktop_only && !is_desktop_origin(originator.as_deref(), Some(&source)))
+            {
+                continue;
+            }
+            let body_source = (history_mode.as_deref() == Some("paginated")
+                && readable.contains(&id))
+            .then(|| super::codex_history::source(&history_db, &id));
+            if !known.insert(id.clone()) {
+                if let Some(body_source) = body_source {
+                    if let Some(existing) = sessions.iter_mut().find(|s| s.session_id == id) {
+                        existing.source_path = Some(body_source);
+                        existing.resume_command = None;
+                        existing.summary = None;
+                        existing.project_dir = (!cwd.trim().is_empty()).then(|| cwd.clone());
+                        if !title.trim().is_empty() {
+                            existing.title = Some(truncate_summary(title.trim(), TITLE_MAX_CHARS));
+                        }
+                    }
+                }
+                continue;
+            }
+            let timestamp = |value: i64| {
+                if value > 1_000_000_000_000 {
+                    value
+                } else {
+                    value.saturating_mul(1000)
+                }
+            };
+            sessions.push(SessionMeta {
+                provider_id: PROVIDER_ID.into(),
+                session_id: id,
+                title: (!title.trim().is_empty())
+                    .then(|| truncate_summary(title.trim(), TITLE_MAX_CHARS)),
+                summary: body_source.is_none().then(|| {
+                    if history_mode.as_deref() == Some("paginated") {
+                        "暂时无法读取此会话正文，请在原工具中查看。"
+                    } else {
+                        "本地会话正文已不可用，请在原工具中查看。"
+                    }
+                    .into()
+                }),
+                project_dir: (!cwd.trim().is_empty()).then_some(cwd),
+                created_at: Some(timestamp(created)),
+                last_active_at: Some(timestamp(updated)),
+                source_path: body_source,
+                resume_command: None,
+            });
+        }
+    }
 }
 
 fn scan_desktop_sessions_in_roots(
@@ -99,15 +209,18 @@ fn scan_desktop_sessions_in_roots(
 }
 
 fn is_desktop_metadata(payload: &Value) -> bool {
-    let source = payload.get("source");
+    is_desktop_origin(
+        payload.get("originator").and_then(Value::as_str),
+        payload.get("source"),
+    )
+}
+
+pub(crate) fn is_desktop_origin(originator: Option<&str>, source: Option<&Value>) -> bool {
     if is_subagent_source(source) || matches!(source.and_then(Value::as_str), Some("cli" | "exec"))
     {
         return false;
     }
-    let originator = payload
-        .get("originator")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let originator = originator.unwrap_or("");
     ["Codex Desktop", "codex_desktop", "codex-desktop"]
         .iter()
         .any(|desktop| originator.eq_ignore_ascii_case(desktop))
@@ -157,12 +270,19 @@ static DESKTOP_PARSE_CACHE: LazyLock<FileParseCache> = LazyLock::new(FileParseCa
 
 fn load_thread_titles() -> HashMap<String, String> {
     let config_dir = crate::session_manager::sources::codex_home();
+    load_thread_titles_from_paths(
+        &config_dir.join(CODEX_SESSION_INDEX_FILENAME),
+        &state_db_paths(),
+    )
+}
+
+pub(super) fn state_db_paths() -> Vec<PathBuf> {
+    let config_dir = crate::session_manager::sources::codex_home();
     let config_text = std::fs::read_to_string(config_dir.join("config.toml")).unwrap_or_default();
-    let db_paths: Vec<PathBuf> = codex_state_db_paths(&config_dir, &config_text)
+    codex_state_db_paths(&config_dir, &config_text)
         .into_iter()
         .filter(|path| codex_state_db_is_lockable(path))
-        .collect();
-    load_thread_titles_from_paths(&config_dir.join(CODEX_SESSION_INDEX_FILENAME), &db_paths)
+        .collect()
 }
 
 fn load_thread_titles_from_paths(
@@ -2149,7 +2269,7 @@ fn parse_session_lines(
 fn is_subagent_source(source: Option<&Value>) -> bool {
     source
         .and_then(|value| value.as_object())
-        .map(|source| source.contains_key("subagent"))
+        .map(|source| source.contains_key("subagent") || source.contains_key("subAgent"))
         .unwrap_or(false)
 }
 
@@ -2290,6 +2410,116 @@ mod tests {
         assert!(is_desktop_metadata(
             &serde_json::json!({"originator": "Codex Desktop", "source": "vscode"})
         ));
+    }
+
+    #[test]
+    fn state_index_keeps_paginated_and_missing_rollouts_without_fabricating_actions() {
+        if crate::config::sqlite_unsupported_in_temp_dir() {
+            return;
+        }
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("state.sqlite");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE threads(id TEXT,title TEXT,cwd TEXT,created_at INTEGER,updated_at INTEGER,source TEXT,originator TEXT,history_mode TEXT);").unwrap();
+        for (id, source, origin, mode) in [
+            ("already-scanned", "cli", "codex_cli_rs", "legacy"),
+            ("paginated", "vscode", "Codex Desktop", "paginated"),
+            ("missing", "cli", "codex_cli_rs", "legacy"),
+            (
+                "agent",
+                "{\"subagent\":\"review\"}",
+                "Codex Desktop",
+                "paginated",
+            ),
+        ] {
+            conn.execute("INSERT INTO threads VALUES(?1,'Fixture title','/fixture/project',1793318400,1793318401,?2,?3,?4)", (id, source, origin, mode)).unwrap();
+        }
+        drop(conn);
+        let existing = SessionMeta {
+            provider_id: "codex".into(),
+            session_id: "already-scanned".into(),
+            title: None,
+            summary: None,
+            project_dir: None,
+            created_at: None,
+            last_active_at: None,
+            source_path: Some("/fixture/sessions/real.jsonl".into()),
+            resume_command: Some("codex resume already-scanned".into()),
+        };
+        let mut sessions = vec![existing];
+        append_index_sessions(&mut sessions, &[path.clone(), path.clone()], false);
+        assert_eq!(sessions.len(), 3);
+        assert!(sessions[0].source_path.is_some());
+        for session in &sessions[1..] {
+            assert_eq!(session.project_dir.as_deref(), Some("/fixture/project"));
+            assert_eq!(session.created_at, Some(1793318400000));
+            assert!(session.source_path.is_none());
+            assert!(session.resume_command.is_none());
+        }
+        let mut desktop = Vec::new();
+        append_index_sessions(&mut desktop, &[path], true);
+        assert_eq!(desktop.len(), 1);
+        assert_eq!(desktop[0].session_id, "paginated");
+    }
+
+    #[test]
+    fn state_index_paginated_body_replaces_metadata_only_rollout() {
+        if crate::config::sqlite_unsupported_in_temp_dir() {
+            return;
+        }
+        let temp = tempdir().unwrap();
+        let state = temp.path().join("state_5.sqlite");
+        let conn = Connection::open(&state).unwrap();
+        conn.execute_batch("CREATE TABLE threads(id TEXT,title TEXT,cwd TEXT,created_at INTEGER,updated_at INTEGER,source TEXT,originator TEXT,history_mode TEXT); INSERT INTO threads VALUES('fixture','Synthetic title','/fixture/project with spaces',1793318400,1793318400,'vscode','Codex Desktop','paginated'); INSERT INTO threads VALUES('no-rollout','Second synthetic','/fixture/second',1793318400,1793318400,'cli','codex_cli_rs','paginated');").unwrap();
+        let history = super::super::codex_history::database_for_state(&state);
+        let conn = Connection::open(&history).unwrap();
+        conn.execute_batch(include_str!(
+            "../../../../tests/fixtures/sessions/codex-paginated-schema.sql"
+        ))
+        .unwrap();
+        for id in ["fixture", "no-rollout"] {
+            conn.execute("INSERT INTO thread_items(thread_id,turn_id,item_id,rollout_ordinal,created_at_ms,item_json) VALUES(?1,'turn','item',1,1793318400000,'{}')",[id]).unwrap();
+        }
+        let mut sessions = vec![SessionMeta {
+            provider_id: "codex".into(),
+            session_id: "fixture".into(),
+            title: None,
+            summary: None,
+            project_dir: Some("/fixture/project with spaces".into()),
+            created_at: None,
+            last_active_at: None,
+            source_path: Some("/fixture/sessions/header-only.jsonl".into()),
+            resume_command: Some("codex resume fixture".into()),
+        }];
+        append_index_sessions(&mut sessions, &[state], false);
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().all(|s| s
+            .source_path
+            .as_deref()
+            .is_some_and(|p| p.starts_with("sqlite:"))
+            && s.resume_command.is_none()
+            && s.summary.is_none()));
+        assert_eq!(
+            sessions[0].project_dir.as_deref(),
+            Some("/fixture/project with spaces")
+        );
+        assert_eq!(sessions[1].project_dir.as_deref(), Some("/fixture/second"));
+    }
+
+    #[test]
+    fn state_index_accepts_legacy_schema_without_origin_or_history_mode() {
+        if crate::config::sqlite_unsupported_in_temp_dir() {
+            return;
+        }
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("state.sqlite");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE threads(id TEXT,title TEXT,cwd TEXT,created_at INTEGER,updated_at INTEGER,source TEXT); INSERT INTO threads VALUES('fixture','Title','/fixture/project',1793318400,1793318401,'cli');").unwrap();
+        drop(conn);
+        let mut sessions = Vec::new();
+        append_index_sessions(&mut sessions, &[path], false);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "fixture");
     }
 
     #[test]
