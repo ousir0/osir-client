@@ -68,6 +68,9 @@ public static class OsirWindows {
     [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr h);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, Callback cb, IntPtr p);
     [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr h);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr h, uint message, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] private static extern IntPtr SendMessageTimeoutW(IntPtr h, uint message, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr h, StringBuilder s, int count);
@@ -94,14 +97,21 @@ public static class OsirWindows {
         }
         return false;
     }
-    public static bool AcknowledgeTaskDialog(long parent, int pid) {
-        var handle=new IntPtr(parent);
-        uint owner; GetWindowThreadProcessId(handle, out owner);
-        var cls=new StringBuilder(512); GetClassNameW(handle,cls,cls.Capacity);
-        if(owner!=(uint)pid || cls.ToString()!="#32770" || !IsWindowVisible(handle) || !IsWindowEnabled(handle)) return false;
-        IntPtr result;
-        // TDM_CLICK_BUTTON with IDOK; modern TaskDialog uses DirectUI children.
-        return SendMessageTimeoutW(handle,0x0466,new IntPtr(1),IntPtr.Zero,2,5000,out result)!=IntPtr.Zero;
+    public static bool Activate(long parent, int pid) {
+        var h=new IntPtr(parent);
+        uint owner; GetWindowThreadProcessId(h,out owner);
+        if(owner!=(uint)pid || !IsWindowVisible(h)) return false;
+        SetForegroundWindow(h);
+        return GetForegroundWindow()==h;
+    }
+    public static bool QueuePrimary(long parent, int pid) {
+        uint owner; GetWindowThreadProcessId(new IntPtr(parent),out owner);
+        if(owner!=(uint)pid) return false;
+        foreach(var control in Controls(parent)) {
+            if(control.Id==1 && control.ClassName=="Button" && control.Visible && control.Enabled)
+                return PostMessageW(new IntPtr(control.Handle),0x00F5,IntPtr.Zero,IntPtr.Zero);
+        }
+        return false;
     }
     public static OsirRealWindow[] ForProcess(int pid) {
         var result = new List<OsirRealWindow>();
@@ -258,11 +268,10 @@ try {
     $timer.Stop()
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
-    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
     $nextCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
     $navigationDeadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
     $enabledButtons = 0
-    $next = $null
+    $nativeNext = $null
     # Some runner UIA providers expose Win32 buttons as Pane. Verify their real
     # HWND class and state, then require an actual page transition after clicking.
     while ([DateTime]::UtcNow -lt $navigationDeadline) {
@@ -277,10 +286,9 @@ try {
                 $nativeButtons = @([OsirWindows]::Controls($wizard.Handle) | Where-Object { $_.ClassName -eq 'Button' -and $_.Visible -and $_.Enabled })
                 $enabledButtons = $nativeButtons.Count
                 $nativeNext = $nativeButtons | Where-Object { $_.Id -eq 1 } | Select-Object -First 1
-                $next = $wizardElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
                 if ($enabledButtons -ge 2 -and $null -ne $nativeNext) { break }
             }
-        } catch { $next = $null }
+        } catch { $nativeNext = $null }
         Start-Sleep -Milliseconds 250
     }
     Add-Type -AssemblyName System.Drawing
@@ -299,6 +307,7 @@ try {
     Assert-Smoke ($enabledButtons -ge 2) 'Installer wizard has no usable navigation buttons after waiting for initialization.'
     Assert-Smoke ($null -ne $nativeNext) 'Installer Next action is unavailable.'
     $beforePage = Get-WizardPageSignature $wizardElement
+    Assert-Smoke ([OsirWindows]::Activate($wizard.Handle, $ownedLaunch.Id)) 'Installer setup wizard could not become active.'
     Assert-Smoke ([OsirWindows]::ClickPrimary($wizard.Handle, $ownedLaunch.Id)) 'Installer Next button could not be clicked.'
     $pageChanged = $false
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -389,42 +398,60 @@ try {
     $ownedLaunch = Start-Isolated $mainExe '' $true
     $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
     $errorWindow = $null
-    $runtimeDialogObserved = $false
     while ([DateTime]::UtcNow -lt $deadline) {
         $ownedLaunch.Refresh()
         Assert-Smoke (-not $ownedLaunch.HasExited) 'Startup failure exited without a visible explanation.'
         $failureWindows = @([OsirWindows]::ForProcess($ownedLaunch.Id))
         $errorWindow = $failureWindows | Where-Object { $_.Title -eq 'OSIR Client 无法启动' } | Select-Object -First 1
         if ($null -ne $errorWindow) { break }
-        # Tauri 2 displays its own runtime-missing modal before returning the
-        # build error to our handler. Acknowledge only that exact owned dialog.
-        $runtimeDialog = $failureWindows | Where-Object { $_.Title -eq 'Error' -and $_.ClassName -eq '#32770' } | Select-Object -First 1
-        if ($null -ne $runtimeDialog) {
-            $runtimeElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$runtimeDialog.Handle)
-            $runtimeText = Get-WizardPageSignature $runtimeElement
-            if ($runtimeText.Contains('Could not find the WebView2 Runtime.')) {
-                $runtimeText | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-runtime-error-controls.txt') -Encoding utf8NoBOM
-                $runtimeOkCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandButton_1')
-                $runtimeOk = $runtimeElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $runtimeOkCondition)
-                Assert-Smoke ($null -ne $runtimeOk -and $runtimeOk.Current.Name -eq 'OK' -and $runtimeOk.Current.IsEnabled -and -not $runtimeOk.Current.IsOffscreen) 'Runtime error OK action was unavailable.'
-                Assert-Smoke ([OsirWindows]::AcknowledgeTaskDialog($runtimeDialog.Handle, $ownedLaunch.Id)) 'Runtime error acknowledgment was unavailable.'
-                $runtimeDialogObserved = $true
-            }
-        }
         Start-Sleep -Milliseconds 250
     }
-    if ($null -eq $errorWindow) { Write-Host ($failureWindows | ConvertTo-Json -Depth 4) }
+    if ($null -eq $errorWindow) {
+        Write-Host ($failureWindows | ConvertTo-Json -Depth 4)
+        foreach ($window in $failureWindows) {
+            $element = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$window.Handle)
+            Write-Host (Get-WizardPageSignature $element)
+        }
+    }
     Assert-Smoke ($null -ne $errorWindow) 'Missing runtime did not display a native startup error.'
     $errorElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$errorWindow.Handle)
-    $errorText = Get-WizardPageSignature $errorElement
-    $ok = $errorElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
-    Assert-Smoke ($errorText.Contains('安装程序') -and $errorText.Contains('日志') -and $null -ne $ok -and $ok.Current.IsEnabled -and -not $ok.Current.IsOffscreen) 'Startup error does not provide a visible recovery action and log location.'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $ownedLaunch.Refresh()
+        Assert-Smoke (-not $ownedLaunch.HasExited) 'Startup error exited before confirmation.'
+        $errorText = Get-WizardPageSignature $errorElement
+        $errorControls = @([OsirWindows]::Controls($errorWindow.Handle))
+        $nativeErrorText = ($errorControls | Where-Object { $_.Visible } | ForEach-Object { $_.Text }) -join "`n"
+        $ok = $errorControls | Where-Object { $_.Id -eq 1 -and $_.ClassName -eq 'Button' -and $_.Visible -and $_.Enabled } | Select-Object -First 1
+        $recoveryReady = $nativeErrorText.Contains('安装程序') -and $nativeErrorText.Contains('日志') -and $null -ne $ok
+        if ($recoveryReady) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $errorText | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-startup-error-controls.txt') -Encoding utf8NoBOM
+    $errorControls | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-startup-error-native-controls.json') -Encoding utf8NoBOM
+    Assert-Smoke $recoveryReady 'Startup error does not provide a visible recovery action and log location.'
     $startupError = Join-Path $isolatedToolHome '.osir_client/startup-error.log'
     Assert-Smoke (Test-Path -LiteralPath $startupError -PathType Leaf) 'Startup failure diagnostic is missing.'
     $diagnostic = Get-Content -Raw -LiteralPath $startupError
-    Assert-Smoke ($diagnostic -match 'stage=application-build' -and $diagnostic -match 'category=(webview-runtime|application-initialization)') 'Startup diagnostic is incomplete.'
+    Assert-Smoke ($diagnostic -match 'stage=webview-runtime' -and $diagnostic -match 'category=webview-runtime') 'Startup diagnostic is incomplete.'
     $errorText | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-startup-error-controls.txt') -Encoding utf8NoBOM
-    $report.stages.startupFailure = [ordered]@{ passed = $true; nativeErrorVisible = $true; recoveryMessageVisible = $true; diagnosticSaved = $true; upstreamRuntimeDialogObserved = $runtimeDialogObserved; kind = 'forced-unavailable-runtime' }
+    $bitmap = [Drawing.Bitmap]::new($errorWindow.Width, $errorWindow.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($errorWindow.Left, $errorWindow.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save((Join-Path $artifactDir 'windows-startup-error-window.png'), [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+    Assert-Smoke ([OsirWindows]::Activate($errorWindow.Handle, $ownedLaunch.Id)) 'Startup error could not become active.'
+    Assert-Smoke ([OsirWindows]::QueuePrimary($errorWindow.Handle, $ownedLaunch.Id)) 'Startup error confirmation could not be clicked.'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $deadline -and -not $ownedLaunch.HasExited) {
+        $ownedLaunch.Refresh()
+        $remaining = @([OsirWindows]::ForProcess($ownedLaunch.Id))
+        Assert-Smoke (-not ($remaining | Where-Object { $_.Title -eq 'Error' -or $_.Title -eq $expectedWindowTitle })) 'Dismissed startup error continued into runtime or product UI.'
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-Smoke ($ownedLaunch.WaitForExit(1000) -and $ownedLaunch.ExitCode -eq 1) 'Startup error confirmation did not terminate with exit code 1.'
+    $report.stages.startupFailure = [ordered]@{ passed = $true; nativeErrorVisible = $true; recoveryMessageVisible = $true; diagnosticSaved = $true; preflightRuntimeCheck = $true; confirmationInvoked = $true; exitCode = 1; kind = 'forced-unavailable-runtime' }
     Stop-OwnedApp
 
     $stage = 'upgrade'
