@@ -113,6 +113,15 @@ public static class OsirWindows {
         }
         return false;
     }
+    public static bool QueueButton(long parent, int pid, long button) {
+        uint owner; GetWindowThreadProcessId(new IntPtr(parent),out owner);
+        if(owner!=(uint)pid) return false;
+        foreach(var control in Controls(parent)) {
+            if(control.Handle==button && control.ClassName=="Button" && control.Visible && control.Enabled)
+                return PostMessageW(new IntPtr(button),0x00F5,IntPtr.Zero,IntPtr.Zero);
+        }
+        return false;
+    }
     public static OsirRealWindow[] ForProcess(int pid) {
         var result = new List<OsirRealWindow>();
         EnumWindows((h,p) => {
@@ -422,7 +431,8 @@ try {
         $errorText = Get-WizardPageSignature $errorElement
         $errorControls = @([OsirWindows]::Controls($errorWindow.Handle))
         $nativeErrorText = ($errorControls | Where-Object { $_.Visible } | ForEach-Object { $_.Text }) -join "`n"
-        $ok = $errorControls | Where-Object { $_.Id -eq 1 -and $_.ClassName -eq 'Button' -and $_.Visible -and $_.Enabled } | Select-Object -First 1
+        $confirmationButtons = @($errorControls | Where-Object { $_.ClassName -eq 'Button' -and $_.Visible -and $_.Enabled })
+        $ok = if ($confirmationButtons.Count -eq 1) { $confirmationButtons[0] } else { $null }
         $recoveryReady = $nativeErrorText.Contains('安装程序') -and $nativeErrorText.Contains('日志') -and $null -ne $ok
         if ($recoveryReady) { break }
         Start-Sleep -Milliseconds 100
@@ -442,7 +452,7 @@ try {
         $bitmap.Save((Join-Path $artifactDir 'windows-startup-error-window.png'), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
     Assert-Smoke ([OsirWindows]::Activate($errorWindow.Handle, $ownedLaunch.Id)) 'Startup error could not become active.'
-    Assert-Smoke ([OsirWindows]::QueuePrimary($errorWindow.Handle, $ownedLaunch.Id)) 'Startup error confirmation could not be clicked.'
+    Assert-Smoke ([OsirWindows]::QueueButton($errorWindow.Handle, $ownedLaunch.Id, $ok.Handle)) 'Startup error confirmation could not be clicked.'
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline -and -not $ownedLaunch.HasExited) {
         $ownedLaunch.Refresh()
