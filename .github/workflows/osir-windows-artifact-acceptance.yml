@@ -1,0 +1,55 @@
+name: OSIR 0.1.1 existing Windows installer acceptance
+on:
+  push:
+    branches: [codex/accept-0.1.1-wizard]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  acceptance:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CI: 'true'
+      SOURCE_RUN_ID: '41019368201'
+      SOURCE_ARTIFACT_NAME: osir-ci-0.1.1-prod-windows-x64-41019368201-1
+      EXPECTED_INSTALLER_SHA256: 12d295cc07bd805cef670c7ccd9d5e0e3f432375f868f8f0f834f2b19c84c058
+      EXPECTED_MAIN_SHA256: 0af3839936498257c5ae78aaef7de481cb8b14de633529fcd502db83da30cfae
+    steps:
+      - name: Keep source LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          "OSIR_ARTIFACT_DIRECTORY=$(Join-Path $env:RUNNER_TEMP 'osir-existing-011')" >> $env:GITHUB_ENV
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Download fixed existing artifact without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name $env:SOURCE_ARTIFACT_NAME --dir $env:OSIR_ARTIFACT_DIRECTORY
+          if ($LASTEXITCODE -ne 0) { throw 'Original artifact download failed' }
+          node scripts/osir-existing-011-acceptance.mjs prepare
+          if ($LASTEXITCODE -ne 0) { throw 'Original artifact validation failed' }
+      - name: Observe usable wizard, install, render, reopen, failure, UPDATE and uninstall
+        run: '& ./scripts/osir-windows-packaged-smoke.ps1 -ArtifactDirectory $env:OSIR_ARTIFACT_DIRECTORY'
+      - name: Bind complete evidence without altering application provenance
+        run: node scripts/osir-existing-011-acceptance.mjs accept
+      - name: Upload original installer and evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: osir-accepted-0.1.1-windows-x64-${{ github.run_id }}
+          path: ${{ env.OSIR_ARTIFACT_DIRECTORY }}/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
