@@ -84,7 +84,7 @@ public static class OsirWindows {
         },IntPtr.Zero);
         return result.ToArray();
     }
-    public static bool ClickNext(long parent, int pid) {
+    public static bool ClickPrimary(long parent, int pid) {
         uint owner; GetWindowThreadProcessId(new IntPtr(parent), out owner);
         if(owner!=(uint)pid) return false;
         foreach(var control in Controls(parent)) {
@@ -290,7 +290,7 @@ try {
     Assert-Smoke ($enabledButtons -ge 2) 'Installer wizard has no usable navigation buttons after waiting for initialization.'
     Assert-Smoke ($null -ne $nativeNext) 'Installer Next action is unavailable.'
     $beforePage = Get-WizardPageSignature $wizardElement
-    Assert-Smoke ([OsirWindows]::ClickNext($wizard.Handle, $ownedLaunch.Id)) 'Installer Next button could not be clicked.'
+    Assert-Smoke ([OsirWindows]::ClickPrimary($wizard.Handle, $ownedLaunch.Id)) 'Installer Next button could not be clicked.'
     $pageChanged = $false
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -380,13 +380,28 @@ try {
     $ownedLaunch = Start-Isolated $mainExe '' $true
     $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
     $errorWindow = $null
+    $runtimeDialogObserved = $false
     while ([DateTime]::UtcNow -lt $deadline) {
         $ownedLaunch.Refresh()
         Assert-Smoke (-not $ownedLaunch.HasExited) 'Startup failure exited without a visible explanation.'
-        $errorWindow = @([OsirWindows]::ForProcess($ownedLaunch.Id) | Where-Object { $_.Title -eq 'OSIR Client 无法启动' }) | Select-Object -First 1
+        $failureWindows = @([OsirWindows]::ForProcess($ownedLaunch.Id))
+        $errorWindow = $failureWindows | Where-Object { $_.Title -eq 'OSIR Client 无法启动' } | Select-Object -First 1
         if ($null -ne $errorWindow) { break }
+        # Tauri 2 displays its own runtime-missing modal before returning the
+        # build error to our handler. Acknowledge only that exact owned dialog.
+        $runtimeDialog = $failureWindows | Where-Object { $_.Title -eq 'Error' -and $_.ClassName -eq '#32770' } | Select-Object -First 1
+        if ($null -ne $runtimeDialog) {
+            $runtimeElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$runtimeDialog.Handle)
+            $runtimeText = Get-WizardPageSignature $runtimeElement
+            if ($runtimeText.Contains('Could not find the WebView2 Runtime.')) {
+                $runtimeText | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-runtime-error-controls.txt') -Encoding utf8NoBOM
+                Assert-Smoke ([OsirWindows]::ClickPrimary($runtimeDialog.Handle, $ownedLaunch.Id)) 'Runtime error acknowledgment was unavailable.'
+                $runtimeDialogObserved = $true
+            }
+        }
         Start-Sleep -Milliseconds 250
     }
+    if ($null -eq $errorWindow) { Write-Host ($failureWindows | ConvertTo-Json -Depth 4) }
     Assert-Smoke ($null -ne $errorWindow) 'Missing runtime did not display a native startup error.'
     $errorElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$errorWindow.Handle)
     $errorText = Get-WizardPageSignature $errorElement
@@ -396,7 +411,8 @@ try {
     Assert-Smoke (Test-Path -LiteralPath $startupError -PathType Leaf) 'Startup failure diagnostic is missing.'
     $diagnostic = Get-Content -Raw -LiteralPath $startupError
     Assert-Smoke ($diagnostic -match 'stage=application-build' -and $diagnostic -match 'category=(webview-runtime|application-initialization)') 'Startup diagnostic is incomplete.'
-    $report.stages.startupFailure = [ordered]@{ passed = $true; nativeErrorVisible = $true; recoveryMessageVisible = $true; diagnosticSaved = $true; kind = 'forced-unavailable-runtime' }
+    $errorText | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-startup-error-controls.txt') -Encoding utf8NoBOM
+    $report.stages.startupFailure = [ordered]@{ passed = $true; nativeErrorVisible = $true; recoveryMessageVisible = $true; diagnosticSaved = $true; upstreamRuntimeDialogObserved = $runtimeDialogObserved; kind = 'forced-unavailable-runtime' }
     Stop-OwnedApp
 
     $stage = 'upgrade'
