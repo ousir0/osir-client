@@ -94,6 +94,15 @@ public static class OsirWindows {
         }
         return false;
     }
+    public static bool AcknowledgeTaskDialog(long parent, int pid) {
+        var handle=new IntPtr(parent);
+        uint owner; GetWindowThreadProcessId(handle, out owner);
+        var cls=new StringBuilder(512); GetClassNameW(handle,cls,cls.Capacity);
+        if(owner!=(uint)pid || cls.ToString()!="#32770" || !IsWindowVisible(handle) || !IsWindowEnabled(handle)) return false;
+        IntPtr result;
+        // TDM_CLICK_BUTTON with IDOK; modern TaskDialog uses DirectUI children.
+        return SendMessageTimeoutW(handle,0x0466,new IntPtr(1),IntPtr.Zero,2,5000,out result)!=IntPtr.Zero;
+    }
     public static OsirRealWindow[] ForProcess(int pid) {
         var result = new List<OsirRealWindow>();
         EnumWindows((h,p) => {
@@ -395,7 +404,10 @@ try {
             $runtimeText = Get-WizardPageSignature $runtimeElement
             if ($runtimeText.Contains('Could not find the WebView2 Runtime.')) {
                 $runtimeText | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-runtime-error-controls.txt') -Encoding utf8NoBOM
-                Assert-Smoke ([OsirWindows]::ClickPrimary($runtimeDialog.Handle, $ownedLaunch.Id)) 'Runtime error acknowledgment was unavailable.'
+                $runtimeOkCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'CommandButton_1')
+                $runtimeOk = $runtimeElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $runtimeOkCondition)
+                Assert-Smoke ($null -ne $runtimeOk -and $runtimeOk.Current.Name -eq 'OK' -and $runtimeOk.Current.IsEnabled -and -not $runtimeOk.Current.IsOffscreen) 'Runtime error OK action was unavailable.'
+                Assert-Smoke ([OsirWindows]::AcknowledgeTaskDialog($runtimeDialog.Handle, $ownedLaunch.Id)) 'Runtime error acknowledgment was unavailable.'
                 $runtimeDialogObserved = $true
             }
         }
