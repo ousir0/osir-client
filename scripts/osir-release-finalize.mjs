@@ -175,6 +175,8 @@ export async function finalize({ input, output, channel, target }) {
         ].every((stage) => report.stages?.[stage]?.passed === true) &&
         report.stages.startupFailure.nativeErrorVisible === true &&
         report.stages.startupFailure.diagnosticSaved === true &&
+        report.stages.startupFailure.confirmationInvoked === true &&
+        report.stages.startupFailure.exitCode === 1 &&
         report.stages.installerOpen.windowObserved === true &&
         report.stages.installerOpen.usableNavigation === true &&
         report.stages.installerOpen.nextActionInvoked === true &&

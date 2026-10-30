@@ -56,16 +56,63 @@ public class OsirRealWindow {
     public long Handle; public string Title; public string ClassName;
     public int Left; public int Top; public int Width; public int Height;
 }
+public class OsirNativeControl {
+    public long Handle; public int Id; public string ClassName; public string Text;
+    public bool Visible; public bool Enabled;
+}
 public static class OsirWindows {
     private delegate bool Callback(IntPtr h, IntPtr p);
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left,Top,Right,Bottom; }
     [DllImport("user32.dll")] private static extern bool EnumWindows(Callback cb, IntPtr p);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr h);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, Callback cb, IntPtr p);
+    [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr h);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr h, uint message, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] private static extern IntPtr SendMessageTimeoutW(IntPtr h, uint message, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr h, StringBuilder s, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassNameW(IntPtr h, StringBuilder s, int count);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out Rect rect);
     [DllImport("user32.dll")] private static extern int GetWindowLongW(IntPtr h, int index);
+    public static OsirNativeControl[] Controls(long parent) {
+        var result = new List<OsirNativeControl>();
+        EnumChildWindows(new IntPtr(parent), (h,p) => {
+            var text=new StringBuilder(4096); GetWindowTextW(h,text,text.Capacity);
+            var cls=new StringBuilder(512); GetClassNameW(h,cls,cls.Capacity);
+            result.Add(new OsirNativeControl {Handle=h.ToInt64(),Id=GetDlgCtrlID(h),ClassName=cls.ToString(),Text=text.ToString(),Visible=IsWindowVisible(h),Enabled=IsWindowEnabled(h)});
+            return true;
+        },IntPtr.Zero);
+        return result.ToArray();
+    }
+    public static bool ClickPrimary(long parent, int pid) {
+        uint owner; GetWindowThreadProcessId(new IntPtr(parent), out owner);
+        if(owner!=(uint)pid) return false;
+        foreach(var control in Controls(parent)) {
+            if(control.Id!=1 || control.ClassName!="Button" || !control.Visible || !control.Enabled) continue;
+            IntPtr result;
+            return SendMessageTimeoutW(new IntPtr(control.Handle),0x00F5,IntPtr.Zero,IntPtr.Zero,2,5000,out result)!=IntPtr.Zero;
+        }
+        return false;
+    }
+    public static bool Activate(long parent, int pid) {
+        var h=new IntPtr(parent);
+        uint owner; GetWindowThreadProcessId(h,out owner);
+        if(owner!=(uint)pid || !IsWindowVisible(h)) return false;
+        SetForegroundWindow(h);
+        return GetForegroundWindow()==h;
+    }
+    public static bool QueuePrimary(long parent, int pid) {
+        uint owner; GetWindowThreadProcessId(new IntPtr(parent),out owner);
+        if(owner!=(uint)pid) return false;
+        foreach(var control in Controls(parent)) {
+            if(control.Id==1 && control.ClassName=="Button" && control.Visible && control.Enabled)
+                return PostMessageW(new IntPtr(control.Handle),0x00F5,IntPtr.Zero,IntPtr.Zero);
+        }
+        return false;
+    }
     public static OsirRealWindow[] ForProcess(int pid) {
         var result = new List<OsirRealWindow>();
         EnumWindows((h,p) => {
@@ -221,25 +268,47 @@ try {
     $timer.Stop()
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
-    $wizardElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$wizard.Handle)
-    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
-    $buttons = $wizardElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+    $nextCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
+    $navigationDeadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
     $enabledButtons = 0
-    foreach ($button in $buttons) { if ($button.Current.IsEnabled -and -not $button.Current.IsOffscreen) { $enabledButtons++ } }
-    Assert-Smoke ($enabledButtons -ge 2) 'Installer wizard has no usable navigation buttons.'
+    $nativeNext = $null
+    # Some runner UIA providers expose Win32 buttons as Pane. Verify their real
+    # HWND class and state, then require an actual page transition after clicking.
+    while ([DateTime]::UtcNow -lt $navigationDeadline) {
+        $ownedLaunch.Refresh()
+        Assert-Smoke (-not $ownedLaunch.HasExited) 'Installer exited while preparing its setup wizard.'
+        $wizard = @([OsirWindows]::ForProcess($ownedLaunch.Id) | Where-Object {
+            $_.ClassName -eq '#32770' -and $_.Title.Contains($expectedWindowTitle) -and $_.Width -gt 200 -and $_.Height -gt 150
+        }) | Select-Object -First 1
+        try {
+            if ($null -ne $wizard) {
+                $wizardElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$wizard.Handle)
+                $nativeButtons = @([OsirWindows]::Controls($wizard.Handle) | Where-Object { $_.ClassName -eq 'Button' -and $_.Visible -and $_.Enabled })
+                $enabledButtons = $nativeButtons.Count
+                $nativeNext = $nativeButtons | Where-Object { $_.Id -eq 1 } | Select-Object -First 1
+                if ($enabledButtons -ge 2 -and $null -ne $nativeNext) { break }
+            }
+        } catch { $nativeNext = $null }
+        Start-Sleep -Milliseconds 250
+    }
     Add-Type -AssemblyName System.Drawing
+    Assert-Smoke ($null -ne $wizard) 'Installer setup wizard disappeared.'
     $bitmap = [Drawing.Bitmap]::new($wizard.Width, $wizard.Height)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
         $graphics.CopyFromScreen($wizard.Left, $wizard.Top, 0, 0, $bitmap.Size)
         $bitmap.Save((Join-Path $artifactDir 'windows-installer-window.png'), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
-    $nextCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
-    $next = $wizardElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
-    Assert-Smoke ($null -ne $next -and $next.Current.IsEnabled -and -not $next.Current.IsOffscreen) 'Installer Next action is unavailable.'
+    Get-WizardPageSignature $wizardElement | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-installer-controls.txt') -Encoding utf8NoBOM
+    $nativeControls = [OsirWindows]::Controls($wizard.Handle) | ConvertTo-Json -Depth 4
+    $nativeControls | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-installer-native-controls.json') -Encoding utf8NoBOM
+    Write-Host (Get-WizardPageSignature $wizardElement)
+    Write-Host $nativeControls
+    Assert-Smoke ($enabledButtons -ge 2) 'Installer wizard has no usable navigation buttons after waiting for initialization.'
+    Assert-Smoke ($null -ne $nativeNext) 'Installer Next action is unavailable.'
     $beforePage = Get-WizardPageSignature $wizardElement
-    $invoke = $next.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    $invoke.Invoke()
+    Assert-Smoke ([OsirWindows]::Activate($wizard.Handle, $ownedLaunch.Id)) 'Installer setup wizard could not become active.'
+    Assert-Smoke ([OsirWindows]::ClickPrimary($wizard.Handle, $ownedLaunch.Id)) 'Installer Next button could not be clicked.'
     $pageChanged = $false
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -251,6 +320,7 @@ try {
     $report.stages.installerOpen = [ordered]@{
         passed = $true; windowObserved = $true; usableNavigation = $true
         nextActionInvoked = $true; nextPageObserved = $true
+        navigationObservedWith = 'owned-process-Win32-Button-class-id-visible-enabled'; pageTransitionObservedWith = 'UIAutomation-content'
         elapsedMilliseconds = $timer.ElapsedMilliseconds
         execution = 'non-silent-no-arguments'; trustScope = 'CI-local-file-without-internet-zone'
     }
@@ -331,9 +401,17 @@ try {
     while ([DateTime]::UtcNow -lt $deadline) {
         $ownedLaunch.Refresh()
         Assert-Smoke (-not $ownedLaunch.HasExited) 'Startup failure exited without a visible explanation.'
-        $errorWindow = @([OsirWindows]::ForProcess($ownedLaunch.Id) | Where-Object { $_.Title -eq 'OSIR Client 无法启动' }) | Select-Object -First 1
+        $failureWindows = @([OsirWindows]::ForProcess($ownedLaunch.Id))
+        $errorWindow = $failureWindows | Where-Object { $_.Title -eq 'OSIR Client 无法启动' } | Select-Object -First 1
         if ($null -ne $errorWindow) { break }
         Start-Sleep -Milliseconds 250
+    }
+    if ($null -eq $errorWindow) {
+        Write-Host ($failureWindows | ConvertTo-Json -Depth 4)
+        foreach ($window in $failureWindows) {
+            $element = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$window.Handle)
+            Write-Host (Get-WizardPageSignature $element)
+        }
     }
     Assert-Smoke ($null -ne $errorWindow) 'Missing runtime did not display a native startup error.'
     $errorElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$errorWindow.Handle)
@@ -343,8 +421,25 @@ try {
     $startupError = Join-Path $isolatedToolHome '.osir_client/startup-error.log'
     Assert-Smoke (Test-Path -LiteralPath $startupError -PathType Leaf) 'Startup failure diagnostic is missing.'
     $diagnostic = Get-Content -Raw -LiteralPath $startupError
-    Assert-Smoke ($diagnostic -match 'stage=application-build' -and $diagnostic -match 'category=(webview-runtime|application-initialization)') 'Startup diagnostic is incomplete.'
-    $report.stages.startupFailure = [ordered]@{ passed = $true; nativeErrorVisible = $true; recoveryMessageVisible = $true; diagnosticSaved = $true; kind = 'forced-unavailable-runtime' }
+    Assert-Smoke ($diagnostic -match 'stage=webview-runtime' -and $diagnostic -match 'category=webview-runtime') 'Startup diagnostic is incomplete.'
+    $errorText | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-startup-error-controls.txt') -Encoding utf8NoBOM
+    $bitmap = [Drawing.Bitmap]::new($errorWindow.Width, $errorWindow.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($errorWindow.Left, $errorWindow.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save((Join-Path $artifactDir 'windows-startup-error-window.png'), [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+    Assert-Smoke ([OsirWindows]::Activate($errorWindow.Handle, $ownedLaunch.Id)) 'Startup error could not become active.'
+    Assert-Smoke ([OsirWindows]::QueuePrimary($errorWindow.Handle, $ownedLaunch.Id)) 'Startup error confirmation could not be clicked.'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $deadline -and -not $ownedLaunch.HasExited) {
+        $ownedLaunch.Refresh()
+        $remaining = @([OsirWindows]::ForProcess($ownedLaunch.Id))
+        Assert-Smoke (-not ($remaining | Where-Object { $_.Title -eq 'Error' -or $_.Title -eq $expectedWindowTitle })) 'Dismissed startup error continued into runtime or product UI.'
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-Smoke ($ownedLaunch.WaitForExit(1000) -and $ownedLaunch.ExitCode -eq 1) 'Startup error confirmation did not terminate with exit code 1.'
+    $report.stages.startupFailure = [ordered]@{ passed = $true; nativeErrorVisible = $true; recoveryMessageVisible = $true; diagnosticSaved = $true; preflightRuntimeCheck = $true; confirmationInvoked = $true; exitCode = 1; kind = 'forced-unavailable-runtime' }
     Stop-OwnedApp
 
     $stage = 'upgrade'

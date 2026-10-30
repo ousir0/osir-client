@@ -115,6 +115,8 @@ export function acceptWindowsSmoke(directory) {
     assert.equal(report.stages[stage].passed, true, `Incomplete ${stage}`);
   assert.equal(report.stages.startupFailure.nativeErrorVisible, true);
   assert.equal(report.stages.startupFailure.diagnosticSaved, true);
+  assert.equal(report.stages.startupFailure.confirmationInvoked, true);
+  assert.equal(report.stages.startupFailure.exitCode, 1);
   assert.equal(report.stages.installerOpen.windowObserved, true);
   assert.equal(report.stages.installerOpen.usableNavigation, true);
   assert.equal(report.stages.installerOpen.nextActionInvoked, true);

@@ -429,6 +429,14 @@ pub fn run() {
     // 设置 panic hook，在应用崩溃时记录日志到 <app_config_dir>/crash.log（默认 ~/.cc-switch/crash.log）
     panic_hook::setup_panic_hook();
 
+    // Tauri can show its own modal before returning a missing-runtime error.
+    // Detect this before window creation so recovery and diagnostics stay ours.
+    #[cfg(target_os = "windows")]
+    if tauri::webview_version().is_err() {
+        panic_hook::report_startup_failure("webview-runtime", "WebView2 runtime unavailable");
+        std::process::exit(1);
+    }
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
