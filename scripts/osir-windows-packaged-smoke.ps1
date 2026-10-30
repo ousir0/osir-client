@@ -56,16 +56,44 @@ public class OsirRealWindow {
     public long Handle; public string Title; public string ClassName;
     public int Left; public int Top; public int Width; public int Height;
 }
+public class OsirNativeControl {
+    public long Handle; public int Id; public string ClassName; public string Text;
+    public bool Visible; public bool Enabled;
+}
 public static class OsirWindows {
     private delegate bool Callback(IntPtr h, IntPtr p);
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left,Top,Right,Bottom; }
     [DllImport("user32.dll")] private static extern bool EnumWindows(Callback cb, IntPtr p);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr h);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, Callback cb, IntPtr p);
+    [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr h);
+    [DllImport("user32.dll")] private static extern IntPtr SendMessageTimeoutW(IntPtr h, uint message, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr h, StringBuilder s, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassNameW(IntPtr h, StringBuilder s, int count);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out Rect rect);
     [DllImport("user32.dll")] private static extern int GetWindowLongW(IntPtr h, int index);
+    public static OsirNativeControl[] Controls(long parent) {
+        var result = new List<OsirNativeControl>();
+        EnumChildWindows(new IntPtr(parent), (h,p) => {
+            var text=new StringBuilder(4096); GetWindowTextW(h,text,text.Capacity);
+            var cls=new StringBuilder(512); GetClassNameW(h,cls,cls.Capacity);
+            result.Add(new OsirNativeControl {Handle=h.ToInt64(),Id=GetDlgCtrlID(h),ClassName=cls.ToString(),Text=text.ToString(),Visible=IsWindowVisible(h),Enabled=IsWindowEnabled(h)});
+            return true;
+        },IntPtr.Zero);
+        return result.ToArray();
+    }
+    public static bool ClickNext(long parent, int pid) {
+        uint owner; GetWindowThreadProcessId(new IntPtr(parent), out owner);
+        if(owner!=(uint)pid) return false;
+        foreach(var control in Controls(parent)) {
+            if(control.Id!=1 || control.ClassName!="Button" || !control.Visible || !control.Enabled) continue;
+            IntPtr result;
+            return SendMessageTimeoutW(new IntPtr(control.Handle),0x00F5,IntPtr.Zero,IntPtr.Zero,2,5000,out result)!=IntPtr.Zero;
+        }
+        return false;
+    }
     public static OsirRealWindow[] ForProcess(int pid) {
         var result = new List<OsirRealWindow>();
         EnumWindows((h,p) => {
@@ -226,7 +254,8 @@ try {
     $navigationDeadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
     $enabledButtons = 0
     $next = $null
-    # NSIS exposes its extraction dialog before the welcome page is ready.
+    # Some runner UIA providers expose Win32 buttons as Pane. Verify their real
+    # HWND class and state, then require an actual page transition after clicking.
     while ([DateTime]::UtcNow -lt $navigationDeadline) {
         $ownedLaunch.Refresh()
         Assert-Smoke (-not $ownedLaunch.HasExited) 'Installer exited while preparing its setup wizard.'
@@ -236,11 +265,11 @@ try {
         try {
             if ($null -ne $wizard) {
                 $wizardElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$wizard.Handle)
-                $buttons = $wizardElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
-                $enabledButtons = 0
-                foreach ($button in $buttons) { if ($button.Current.IsEnabled -and -not $button.Current.IsOffscreen) { $enabledButtons++ } }
+                $nativeButtons = @([OsirWindows]::Controls($wizard.Handle) | Where-Object { $_.ClassName -eq 'Button' -and $_.Visible -and $_.Enabled })
+                $enabledButtons = $nativeButtons.Count
+                $nativeNext = $nativeButtons | Where-Object { $_.Id -eq 1 } | Select-Object -First 1
                 $next = $wizardElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
-                if ($enabledButtons -ge 2 -and $null -ne $next -and $next.Current.IsEnabled -and -not $next.Current.IsOffscreen) { break }
+                if ($enabledButtons -ge 2 -and $null -ne $nativeNext) { break }
             }
         } catch { $next = $null }
         Start-Sleep -Milliseconds 250
@@ -254,11 +283,14 @@ try {
         $bitmap.Save((Join-Path $artifactDir 'windows-installer-window.png'), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
     Get-WizardPageSignature $wizardElement | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-installer-controls.txt') -Encoding utf8NoBOM
+    $nativeControls = [OsirWindows]::Controls($wizard.Handle) | ConvertTo-Json -Depth 4
+    $nativeControls | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-installer-native-controls.json') -Encoding utf8NoBOM
+    Write-Host (Get-WizardPageSignature $wizardElement)
+    Write-Host $nativeControls
     Assert-Smoke ($enabledButtons -ge 2) 'Installer wizard has no usable navigation buttons after waiting for initialization.'
-    Assert-Smoke ($null -ne $next -and $next.Current.IsEnabled -and -not $next.Current.IsOffscreen) 'Installer Next action is unavailable.'
+    Assert-Smoke ($null -ne $nativeNext) 'Installer Next action is unavailable.'
     $beforePage = Get-WizardPageSignature $wizardElement
-    $invoke = $next.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    $invoke.Invoke()
+    Assert-Smoke ([OsirWindows]::ClickNext($wizard.Handle, $ownedLaunch.Id)) 'Installer Next button could not be clicked.'
     $pageChanged = $false
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -270,6 +302,7 @@ try {
     $report.stages.installerOpen = [ordered]@{
         passed = $true; windowObserved = $true; usableNavigation = $true
         nextActionInvoked = $true; nextPageObserved = $true
+        navigationObservedWith = 'owned-process-Win32-Button-class-id-visible-enabled'; pageTransitionObservedWith = 'UIAutomation-content'
         elapsedMilliseconds = $timer.ElapsedMilliseconds
         execution = 'non-silent-no-arguments'; trustScope = 'CI-local-file-without-internet-zone'
     }
