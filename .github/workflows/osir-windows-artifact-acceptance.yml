@@ -15,10 +15,10 @@ jobs:
         shell: pwsh
     env:
       CI: 'true'
-      SOURCE_RUN_ID: '41030186148'
-      SOURCE_ARTIFACT_NAME: osir-ci-0.1.1-prod-windows-x64-41030186148-1
-      EXPECTED_INSTALLER_SHA256: 1c9dc25b2e1d40eec511bbefa99343dd26ea73fd3df1c865734dc41ac785b254
-      EXPECTED_MAIN_SHA256: 83d33b772e1c414ba6e5927478d737280df36f3d77b559a9f5c9593a757e371e
+      SOURCE_RUN_ID: '41019368201'
+      SOURCE_ARTIFACT_NAME: osir-ci-0.1.1-prod-windows-x64-41019368201-1
+      EXPECTED_INSTALLER_SHA256: 12d295cc07bd805cef670c7ccd9d5e0e3f432375f868f8f0f834f2b19c84c058
+      EXPECTED_MAIN_SHA256: 0af3839936498257c5ae78aaef7de481cb8b14de633529fcd502db83da30cfae
     steps:
       - name: Keep source LF
         run: |

@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, writeFileSync, mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { basename, join, resolve } from 'node:path';
 import { assertRendererEvidence } from './osir-packaged-renderer-check.mjs';
 
 const directory = resolve(process.env.OSIR_ARTIFACT_DIRECTORY);
+const originalRun = 41030186148;
+if (process.argv[2] === 'prepare') {
+  assert.equal(process.env.GITHUB_ACTIONS, 'true');
+  renameSync(directory, directory + '-first-generation-download-not-tested');
+  mkdirSync(directory);
+  execFileSync('gh', ['run', 'download', String(originalRun), '--repo', process.env.GITHUB_REPOSITORY, '--name', 'osir-ci-0.1.1-prod-windows-x64-41030186148-1', '--dir', directory], { stdio: 'inherit' });
+}
 const manifestPath = join(directory, 'build-manifest.json');
 const json = path => JSON.parse(readFileSync(path));
 const digest = path => { const bytes = readFileSync(path); return { name: basename(path), bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }; };
@@ -16,7 +24,7 @@ assert.equal(manifest.sourceProvenance.verifiedAtEnd, true);
 assert.equal(manifest.sourceProvenance.git.dirty, false);
 assert.equal(manifest.mode, 'ci-pending-local-finalization');
 assert.equal(manifest.target, 'x86_64-pc-windows-msvc');
-for (const [field, expected] of [['installerArtifact', process.env.EXPECTED_INSTALLER_SHA256], ['mainExecutableArtifact', process.env.EXPECTED_MAIN_SHA256]]) {
+for (const [field, expected] of [['installerArtifact', '1c9dc25b2e1d40eec511bbefa99343dd26ea73fd3df1c865734dc41ac785b254'], ['mainExecutableArtifact', '83d33b772e1c414ba6e5927478d737280df36f3d77b559a9f5c9593a757e371e']]) {
   assert.deepEqual(digest(join(directory, manifest[field].name)), manifest[field]);
   assert.equal(manifest[field].sha256, expected);
 }
@@ -48,6 +56,6 @@ if (process.argv[2] === 'prepare') {
   manifest.packagedWindowScreenshot = digest(join(directory, 'windows-app-window.png'));
   manifest.packagedInstallerScreenshot = digest(join(directory, 'windows-installer-window.png'));
   manifest.packagedRendererScreenshots = [renderer.launchRun, renderer].flatMap(run => run.viewports.map(view => digest(join(directory, view.screenshot))));
-  manifest.acceptanceToolProvenance = { gitHead: process.env.GITHUB_SHA, runId: Number(process.env.GITHUB_RUN_ID), runtimeBuildPerformed: false, originalRun: Number(process.env.SOURCE_RUN_ID), originalManifest: digest(join(directory, 'original-manifest.json')), files: ['scripts/osir-existing-011-acceptance.mjs', 'scripts/osir-windows-packaged-smoke.ps1', 'scripts/osir-packaged-renderer-check.mjs', '.github/workflows/osir-windows-artifact-acceptance.yml'].map(path => ({ path, ...digest(path) })) };
+  manifest.acceptanceToolProvenance = { gitHead: process.env.GITHUB_SHA, runId: Number(process.env.GITHUB_RUN_ID), runtimeBuildPerformed: false, originalRun, originalManifest: digest(join(directory, 'original-manifest.json')), files: ['scripts/osir-existing-011-acceptance.mjs', 'scripts/osir-windows-packaged-smoke.ps1', 'scripts/osir-packaged-renderer-check.mjs', '.github/workflows/osir-windows-artifact-acceptance.yml'].map(path => ({ path, ...digest(path) })) };
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 }
