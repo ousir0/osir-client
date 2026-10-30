@@ -1,0 +1,41 @@
+node_modules/
+dist/
+release/
+.DS_Store
+*.log
+.env
+.env.local
+*.tsbuildinfo
+.npmrc
+CLAUDE.md
+GEMINI.md
+/.claude
+/.codex
+/.gemini
+/.cc-switch
+/.idea
+/.vscode
+vitest-report.json
+nul
+
+# Flatpak build artifacts
+flatpak/cc-switch.deb
+flatpak-build/
+flatpak-repo/
+.worktrees/
+.spec-workflow/
+copilot-api
+.history
+CODEBUDDY.md
+mainWindow.js
+
+.osir-dev-home/
+.playwright-cli/
+
+# Local acceptance evidence may contain account metadata; keep it off Git.
+/output/
+/.playwright-mcp/
+
+# Python probe/test caches (keep the reproducible scripts themselves).
+__pycache__/
+*.py[cod]

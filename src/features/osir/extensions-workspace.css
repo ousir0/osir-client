@@ -1,0 +1,384 @@
+/* Shared geometry for the OSIR extension views; no effect on upstream pages. */
+.osir-extensions-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.osir-extensions-navigation {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.osir-extensions-navigation .osir-tabs {
+  margin-bottom: 0;
+}
+
+.osir-extensions-status {
+  margin: 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+.osir-extension-empty {
+  margin: 0;
+  padding: 8px 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+
+.osir-extensions-preview {
+  padding: 24px;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: var(--osir-surface);
+  color: var(--osir-muted);
+  font-size: 14px;
+}
+
+.osir-shell .osir-management .osir-extension-panel[data-osir-variant="true"] {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: var(--osir-surface);
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  > header {
+  min-height: 56px;
+  padding: 10px 16px;
+  gap: 8px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--osir-border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  #main-content {
+  min-height: 220px;
+  border: 0;
+  border-radius: 0;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  h1 {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  .osir-extension-description {
+  margin: 0;
+  padding: 12px 16px 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  .osir-mcp-toolbar {
+  height: auto;
+  min-height: 54px;
+  padding: 10px 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  [data-testid$="-matrix"] {
+  max-height: min(460px, 60dvh);
+  overscroll-behavior: contain;
+  border-color: var(--osir-border);
+  border-radius: 8px;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  .osir-skills-view-tabs {
+  min-height: 48px;
+  height: auto;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  .osir-skills-view-tabs
+  > div:last-child {
+  min-width: 0;
+  flex: 1 1 260px;
+  justify-content: flex-end;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  .osir-skills-view-tabs
+  > div:last-child
+  > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.osir-shell
+  .osir-management
+  .osir-extension-panel[data-osir-variant="true"]
+  .osir-skills-view-tabs
+  input {
+  min-width: 0;
+  width: 100%;
+}
+
+@media (max-width: 980px) {
+  .osir-shell
+    .osir-management
+    .osir-extension-panel[data-osir-variant="true"]
+    > header {
+    gap: 8px;
+  }
+
+  .osir-shell
+    .osir-management
+    .osir-extension-panel[data-osir-variant="true"]
+    .osir-skills-view-tabs
+    > div:last-child {
+    justify-content: flex-start;
+  }
+}
+
+/* The local extension portals carry the same tokens as the workbench. */
+.osir-extension-overlay {
+  --border: 212 30% 90%;
+  --border-strong: #c5d2df;
+  --radius-dialog: 8px;
+  --radius-panel: 8px;
+  border-color: var(--osir-border);
+  border-radius: 8px;
+  color: var(--osir-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  box-shadow: 0 12px 40px #293b4d1a;
+}
+
+.osir-extension-overlay :is(input, select, textarea, button) {
+  border-radius: 8px;
+}
+
+.osir-extension-overlay :is(input, select, textarea) {
+  border-color: var(--osir-border);
+  color: var(--osir-text);
+}
+
+.osir-extension-overlay :is(button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}
+
+.osir-extension-overlay [data-highlighted] {
+  background: var(--osir-accent-tint);
+  color: var(--osir-text);
+}
+
+.osir-mcp-modal {
+  width: min(600px, calc(100vw - 48px));
+  max-width: 600px;
+  height: min(680px, calc(100dvh - 64px));
+  max-height: calc(100dvh - 64px);
+}
+
+.osir-extension-modal-heading {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--osir-border);
+}
+
+.osir-extension-import-sources {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  list-style: none;
+  border: 1px solid var(--osir-border);
+  border-radius: 8px;
+  background: var(--osir-bg);
+}
+
+.osir-extension-import-sources li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.osir-extension-import-sources code {
+  overflow-wrap: anywhere;
+  color: var(--osir-muted);
+}
+
+.osir-matrix-cell,
+.osir-matrix-column {
+  width: 64px;
+}
+
+.osir-skill-row {
+  height: auto;
+  min-height: 76px;
+  padding-block: 10px;
+}
+
+.osir-matrix-column > button {
+  width: 60px;
+  height: 44px;
+  gap: 2px;
+}
+
+.osir-matrix-column > button > span:last-child {
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.osir-matrix-column svg {
+  flex-shrink: 0;
+}
+
+.osir-skills-installed-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+
+.osir-skill-discovery {
+  border-radius: 8px 0 0 8px;
+}
+
+.osir-skill-discovery > div:first-child {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--osir-border);
+}
+
+.osir-skill-discovery p {
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.osir-skill-discovery > .overflow-y-auto {
+  display: flex;
+  padding: 16px;
+}
+
+.osir-skill-discovery .osir-skill-discovery-toolbar > div {
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.osir-skill-discovery .osir-skill-discovery-toolbar [role="search"] {
+  flex: 1 1 100%;
+  width: 100%;
+}
+
+.osir-skill-discovery .h-12 {
+  flex-wrap: wrap;
+  height: auto;
+  gap: 8px;
+  padding: 0 0 12px;
+}
+
+.osir-skill-discovery .px-6 {
+  padding-inline: 0;
+}
+
+.osir-skill-discovery ul[aria-label] {
+  min-width: 0;
+}
+
+.osir-skill-discovery ul[aria-label] li {
+  gap: 8px;
+  padding-inline: 12px;
+}
+
+.osir-skill-discovery ul[aria-label] li > div:last-child {
+  width: auto;
+  max-width: 116px;
+}
+
+.osir-skill-discovery ul[aria-label] li .text-badge {
+  display: none;
+}
+
+:is(.osir-extension-panel[data-osir-variant="true"], .osir-extension-overlay)
+  button.border-transparent {
+  border-color: transparent;
+  background: transparent;
+}
+
+:is(.osir-extension-panel[data-osir-variant="true"], .osir-extension-overlay)
+  button.bg-action {
+  border-color: var(--osir-primary);
+  background: var(--osir-primary);
+  color: #fff;
+}
+
+:is(.osir-extension-panel[data-osir-variant="true"], .osir-extension-overlay)
+  button.bg-action:hover:not(:disabled) {
+  background: var(--osir-primary-hover);
+}
+
+:is(.osir-extension-panel[data-osir-variant="true"], .osir-extension-overlay)
+  button.bg-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+:is(.osir-extension-panel[data-osir-variant="true"], .osir-extension-overlay)
+  button:is(.w-5, .w-7, .w-8) {
+  padding: 0;
+}
+
+.osir-extension-panel[data-osir-variant="true"] .osir-matrix-column > button,
+.osir-extension-panel[data-osir-variant="true"] .osir-matrix-cell button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.osir-extension-panel[data-osir-variant="true"]
+  .osir-matrix-column
+  > button[data-highlighted] {
+  background: var(--osir-accent-tint);
+}
+
+.osir-extension-tooltip {
+  background: var(--osir-text);
+  color: #fff;
+  font-size: 12px;
+}

@@ -1,0 +1,39 @@
+{
+  "productName": "OSIR Client",
+  "identifier": "com.osir.client",
+  "build": {
+    "devUrl": null,
+    "beforeDevCommand": null,
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "publisher": "OSIR",
+    "macOS": {
+      "hardenedRuntime": true
+    },
+    "shortDescription": "OSIR account and AI tool connection client",
+    "longDescription": "OSIR desktop client for account resources and provider connections to Codex, Claude Code, OpenCode, and Gemini CLI. Built on CC Switch.",
+    "icon": [
+      "icons/osir/32x32.png",
+      "icons/osir/128x128.png",
+      "icons/osir/128x128@2x.png",
+      "icons/osir/icon.icns",
+      "icons/osir/icon.ico"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "osir-client"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
+    }
+  },
+  "mainBinaryName": "osir_client"
+}

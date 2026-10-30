@@ -1,0 +1,36 @@
+[data-sonner-toast].osir-toast {
+  border: 1px solid #dfe6ee;
+  border-radius: 8px;
+  background: #fff;
+  color: #293b4d;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  box-shadow: 0 6px 24px #20324b1c;
+  padding: 13px 16px;
+  gap: 10px;
+}
+.osir-toast .osir-toast-title {
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.osir-toast .osir-toast-description {
+  color: #6f8092;
+  font-size: 12px;
+}
+.osir-toast[data-type="success"] [data-icon] {
+  color: #168158;
+}
+.osir-toast[data-type="error"] [data-icon] {
+  color: #c44343;
+}
+.osir-toast[data-type="warning"] [data-icon] {
+  color: #a96713;
+}
+.osir-toast[data-type="info"] [data-icon] {
+  color: #4679a7;
+}
+[data-sonner-toaster] {
+  max-width: calc(100vw - 32px);
+}

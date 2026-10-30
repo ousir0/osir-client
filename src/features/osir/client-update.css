@@ -1,0 +1,130 @@
+@import "./tokens.css";
+
+.osir-client-update-dialog[role="dialog"] {
+  width: min(480px, calc(100vw - 48px));
+  max-height: calc(100dvh - 72px);
+  overflow: hidden;
+  border: 1px solid var(--osir-border);
+  border-radius: var(--osir-radius);
+  background: var(--osir-surface);
+  color: var(--osir-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  box-shadow: 0 16px 48px #20324b1f;
+}
+.osir-client-update-dialog h2 {
+  color: var(--osir-text);
+  font-size: 18px;
+  line-height: 1.5;
+}
+.osir-client-update-dialog [id$="-description"] {
+  color: var(--osir-muted);
+  line-height: 1.6;
+}
+.osir-client-update-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 24px 12px;
+  overflow-wrap: anywhere;
+}
+.osir-client-update-versions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--osir-border-subtle);
+  border-radius: 8px;
+  background: var(--osir-bg);
+}
+.osir-client-update-versions dt {
+  margin-bottom: 4px;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-client-update-versions dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.osir-client-update-notes h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.osir-client-update-notes p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  color: var(--osir-text);
+}
+.osir-client-update-progress {
+  margin-top: 20px;
+  color: var(--osir-muted);
+  font-size: 12px;
+}
+.osir-client-update-progress span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.osir-client-update-progress progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 10px;
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  accent-color: var(--osir-primary);
+}
+.osir-client-update-progress progress::-webkit-progress-bar {
+  border-radius: 8px;
+  background: var(--osir-accent-tint);
+}
+.osir-client-update-progress progress::-webkit-progress-value {
+  border-radius: 8px;
+  background: var(--osir-primary);
+}
+.osir-client-update-error {
+  margin-top: 16px;
+  color: #b54545;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.osir-client-update-dialog > :last-child {
+  border-top: 1px solid var(--osir-border-subtle);
+  padding-top: 16px;
+}
+.osir-client-update-dialog button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--osir-control-height);
+  padding: 6px 12px;
+  border: 1px solid var(--osir-border);
+  border-radius: var(--osir-radius);
+  color: var(--osir-text);
+  background: var(--osir-surface);
+  font-size: 13px;
+}
+.osir-client-update-dialog button.primary {
+  border-color: var(--osir-primary);
+  background: var(--osir-primary);
+  color: white;
+}
+.osir-client-update-dialog button:hover:not(:disabled) {
+  background: var(--osir-bg);
+}
+.osir-client-update-dialog button.primary:hover:not(:disabled) {
+  background: var(--osir-primary-hover);
+}
+.osir-client-update-dialog button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.osir-client-update-dialog button:focus-visible {
+  outline: 2px solid var(--osir-accent);
+  outline-offset: 2px;
+}

@@ -1,0 +1,5 @@
+OSIR Client orbital O character Logo, user-selected portrait B looking up-right.
+Generated image source: docs/design/osir-client-avatar-b-gaze-2026-10-30/
+Canonical editable sources: assets/brand/osir-client/
+Generated with: pnpm icons:osir
+Upstream CC Switch icons outside this directory retain their original attribution.

@@ -1,0 +1,45 @@
+/* Softer desktop palette selected after production-brand review, 2026-10-28. */
+.osir-shell,
+.osir-drawer,
+.osir-invoice-dialog,
+.osir-tool-backups-dialog,
+.osir-tool-update-dialog,
+.osir-client-update-dialog,
+.osir-avatar-dialog,
+.osir-welcome-reauthorize-dialog,
+.osir-frontend-error-boundary,
+.osir-help-card,
+.osir-welcome {
+  --osir-primary: #4679a7;
+  --osir-primary-hover: #38668f;
+  --osir-accent: #4679a7;
+  --osir-accent-strong: #38668f;
+  --osir-accent-soft: #f0f5fa;
+  --osir-accent-tint: #e5eef7;
+  --osir-accent-border: #c5d8e9;
+  --osir-data: #5b87b0;
+  --osir-text: #293b4d;
+  --osir-muted: #6f8092;
+  --osir-border: #dfe6ee;
+  --osir-border-subtle: #eaf0f5;
+  --osir-bg: #f5f7fa;
+  --osir-surface: #fff;
+  --osir-radius: 8px;
+  --osir-control-height: 34px;
+  --osir-space: 8px;
+  --action-bg: var(--osir-primary);
+  --action-fg: #fff;
+  --action-hover: var(--osir-primary-hover);
+  --action-text: var(--osir-accent-strong);
+  --action-soft: var(--osir-accent-soft);
+  --bg-app: var(--osir-surface);
+  --bg-card: var(--osir-surface);
+  --bg-sidebar: var(--osir-bg);
+  --bg-subtle: var(--osir-accent-soft);
+  --bg-selected: var(--osir-accent-tint);
+  --text-1: var(--osir-text);
+  --text-2: #5b6d80;
+  --text-3: var(--osir-muted);
+  --ring: 208 41% 46.5%;
+  color-scheme: light;
+}

@@ -1,0 +1,64 @@
+{
+  "repository": "/Users/ouwei/codex-app-manager",
+  "revision": "b56e3e66b94166b209dda835f9f3088e9c615d23",
+  "source": "crates/codex-mac-engine; LICENSE from repository root",
+  "note": "Actual working-tree bytes, not a clean-commit assertion. No Cargo manifests, locks or binaries copied.",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "40cb8f172c30473bd4e4d160e3410603f74af7646b571e408ddf272dea4c8ffc"
+    },
+    {
+      "path": "src/appcast.rs",
+      "sha256": "a69f7aafc571cab48ec1cd272bd1f8b6f9a9753913ddfd098dba5f6873b49210"
+    },
+    {
+      "path": "src/apply.rs",
+      "sha256": "b3ad08500dff5415654afc10b5bb24339b5b1b085c563337fb4ba55f97ee4a1e"
+    },
+    {
+      "path": "src/codesign.rs",
+      "sha256": "740a69b34398daa63eb222990ac6e4fdde62dace18e6f17c17e9980c5e40dbff"
+    },
+    {
+      "path": "src/download.rs",
+      "sha256": "91d591fcce8837a812bb25373ed75bce979422a67d709198ab2f3bb11df3e04d"
+    },
+    {
+      "path": "src/lib.rs",
+      "sha256": "88e3e40be69367972efe1af6e9dd3286ee35837ad8a434e921dfb2df4ede2eb5"
+    },
+    {
+      "path": "src/limits.rs",
+      "sha256": "5d63d93e804c792dd797188da5f5b61a7495fd5f8f2ce6ae166fadc008cdd81a"
+    },
+    {
+      "path": "src/network.rs",
+      "sha256": "5dc786b129486052c22e6f66692cd1233fda976b4d19a8b54b287d3a7ad1e099"
+    },
+    {
+      "path": "src/plan.rs",
+      "sha256": "30418ed8eebf8c7d3f89be83b6da34a19b5221906e21ad43f1f2ba6bdb859b0a"
+    },
+    {
+      "path": "src/swap.rs",
+      "sha256": "4509df919cb25f2dd11180a19bd3f9668c945389f0ebbff6ecfbb7c0ff87c42d"
+    },
+    {
+      "path": "src/sys.rs",
+      "sha256": "bc5b82c2ec769288cbad3ae8903095476e37b09187383fc9688ebcbb09f82e70"
+    },
+    {
+      "path": "src/verify.rs",
+      "sha256": "fc8e9a810bdaa10c790501b1cb195f12fa4eac8ac1c55f1c57ee24fe4935981e"
+    },
+    {
+      "path": "tests/fixtures/appcast.xml",
+      "sha256": "dfd9e1900be855788e7227033481f12ee7ff2984d855e19aef1b9873bc337948"
+    },
+    {
+      "path": "tests/parse_and_plan.rs",
+      "sha256": "f2e15058a291fc74fe609dbfbc2682c1b6ea34fbef6058ca52537bfb3199efae"
+    }
+  ]
+}
