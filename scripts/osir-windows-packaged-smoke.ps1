@@ -221,21 +221,40 @@ try {
     $timer.Stop()
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
-    $wizardElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$wizard.Handle)
     $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
-    $buttons = $wizardElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+    $nextCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
+    $navigationDeadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
     $enabledButtons = 0
-    foreach ($button in $buttons) { if ($button.Current.IsEnabled -and -not $button.Current.IsOffscreen) { $enabledButtons++ } }
-    Assert-Smoke ($enabledButtons -ge 2) 'Installer wizard has no usable navigation buttons.'
+    $next = $null
+    # NSIS exposes its extraction dialog before the welcome page is ready.
+    while ([DateTime]::UtcNow -lt $navigationDeadline) {
+        $ownedLaunch.Refresh()
+        Assert-Smoke (-not $ownedLaunch.HasExited) 'Installer exited while preparing its setup wizard.'
+        $wizard = @([OsirWindows]::ForProcess($ownedLaunch.Id) | Where-Object {
+            $_.ClassName -eq '#32770' -and $_.Title.Contains($expectedWindowTitle) -and $_.Width -gt 200 -and $_.Height -gt 150
+        }) | Select-Object -First 1
+        try {
+            if ($null -ne $wizard) {
+                $wizardElement = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$wizard.Handle)
+                $buttons = $wizardElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+                $enabledButtons = 0
+                foreach ($button in $buttons) { if ($button.Current.IsEnabled -and -not $button.Current.IsOffscreen) { $enabledButtons++ } }
+                $next = $wizardElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
+                if ($enabledButtons -ge 2 -and $null -ne $next -and $next.Current.IsEnabled -and -not $next.Current.IsOffscreen) { break }
+            }
+        } catch { $next = $null }
+        Start-Sleep -Milliseconds 250
+    }
     Add-Type -AssemblyName System.Drawing
+    Assert-Smoke ($null -ne $wizard) 'Installer setup wizard disappeared.'
     $bitmap = [Drawing.Bitmap]::new($wizard.Width, $wizard.Height)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
         $graphics.CopyFromScreen($wizard.Left, $wizard.Top, 0, 0, $bitmap.Size)
         $bitmap.Save((Join-Path $artifactDir 'windows-installer-window.png'), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
-    $nextCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1')
-    $next = $wizardElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
+    Get-WizardPageSignature $wizardElement | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-installer-controls.txt') -Encoding utf8NoBOM
+    Assert-Smoke ($enabledButtons -ge 2) 'Installer wizard has no usable navigation buttons after waiting for initialization.'
     Assert-Smoke ($null -ne $next -and $next.Current.IsEnabled -and -not $next.Current.IsOffscreen) 'Installer Next action is unavailable.'
     $beforePage = Get-WizardPageSignature $wizardElement
     $invoke = $next.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
