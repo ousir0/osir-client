@@ -48,12 +48,15 @@ mod tests {
             Err(BackupError::UnsafePath)
         );
         assert_eq!(
-            path_safety::safe_path(&fixture.0.join("..").join("escape")),
+            path_safety::safe_path(&PathBuf::from(format!(
+                r"{}\..\escape",
+                fixture.0.display()
+            ))),
             Err(BackupError::UnsafePath)
         );
         fs::write(fixture.0.join("file"), b"synthetic").unwrap();
         assert_eq!(
-            path_safety::safe_path(&fixture.0.join("file/child")),
+            path_safety::safe_path(&fixture.0.join("file").join("child")),
             Err(BackupError::UnsafePath)
         );
     }
