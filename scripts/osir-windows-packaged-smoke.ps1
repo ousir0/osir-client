@@ -224,12 +224,57 @@ function Stop-OwnedApp {
 function Invoke-Installer([string]$Path, [string]$Arguments) {
     $process = Start-Isolated $Path $Arguments
     try {
-        if (-not $process.WaitForExit(180000)) {
+        if (-not $process.WaitForExit(600000)) {
             $process.Kill($true)
             throw "[$script:stage] Installer timed out."
         }
         Assert-Smoke ($process.ExitCode -eq 0) "Installer exited $($process.ExitCode)."
     } finally { $process.Dispose() }
+}
+
+function Get-RuntimeRegistration {
+    $guid = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+    foreach ($key in @(
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$guid",
+        "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$guid",
+        "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$guid")) {
+        $value = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+        if ($null -ne $value -and $value.PSObject.Properties['pv'] -and $value.pv -and $value.pv -ne '0.0.0.0') {
+            [ordered]@{ key = $key; version = [string]$value.pv }
+        }
+    }
+}
+
+function Remove-RunnerRuntime {
+    # This entire script is restricted to an ephemeral hosted runner. Invoke the
+    # runtime's own signed uninstaller; never simulate absence by deleting keys.
+    $before = @(Get-RuntimeRegistration)
+    $operations = @()
+    foreach ($root in @(
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft/EdgeWebView/Application'),
+        (Join-Path $env:ProgramFiles 'Microsoft/EdgeWebView/Application'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft/EdgeWebView/Application'))) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        foreach ($setup in @(Get-ChildItem -LiteralPath $root -Filter setup.exe -File -Recurse)) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $setup.FullName
+            Assert-Smoke ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -match 'Microsoft Corporation') 'WebView2 uninstaller signature rejected.'
+            $arguments = '--uninstall --msedgewebview --verbose-logging --force-uninstall'
+            if (-not $root.StartsWith($env:LOCALAPPDATA, [StringComparison]::OrdinalIgnoreCase)) { $arguments += ' --system-level' }
+            $process = Start-Process -FilePath $setup.FullName -ArgumentList $arguments -PassThru
+            try {
+                Assert-Smoke ($process.WaitForExit(180000)) 'Runtime uninstall timed out.'
+                $operations += [ordered]@{ executable = $setup.FullName; signature = 'Valid'; exitCode = $process.ExitCode }
+            } finally { $process.Dispose() }
+        }
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $remaining = @(Get-RuntimeRegistration)
+        if ($remaining.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Assert-Smoke ($remaining.Count -eq 0) 'WebView2 is still registered after its own uninstaller; missing-runtime installation is unproven.'
+    return [ordered]@{ before = $before; uninstallOperations = $operations; absentBeforeProductInstaller = $true }
 }
 
 function Assert-Installed {
@@ -360,11 +405,50 @@ try {
     }
     Stop-OwnedApp
 
+    $stage = 'crossVersionUpgrade'
+    $baselineInstaller = $env:OSIR_UPGRADE_BASELINE
+    Assert-Smoke ($manifest.version -eq '0.1.4') 'This acceptance requires target 0.1.4.'
+    Assert-Smoke ((Get-Hash $baselineInstaller) -eq 'b409637fd7a05d1835c7190d1c7224193af2f8fcc48763fbfe1dcae2cd82b1c5') 'Published 0.1.3 installer differs from the pinned baseline.'
+    Invoke-Installer $baselineInstaller ("/S /D=" + $installDir)
+    Assert-Smoke ((Get-Hash $mainExe) -eq 'e2846166db5fad1a6a9a8e6265f8ab6d644b9d23eb62b8a194a1b627ca15a42d') 'Installed 0.1.3 executable differs from the published baseline.'
+    $ownedLaunch = Start-Isolated $mainExe
+    $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
+    do {
+        $ownedLaunch.Refresh()
+        Assert-Smoke (-not $ownedLaunch.HasExited) 'Published baseline exited in its isolated home.'
+        $baselineWindow = Get-RealWindow $ownedLaunch.Id
+        if ($null -ne $baselineWindow) { break }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Assert-Smoke ($null -ne $baselineWindow) 'Published baseline did not show a window.'
+    Start-Sleep -Seconds 2
+    Stop-OwnedApp
+    $upgradeBaselineDatabase = Join-Path $smokeRoot 'published-013-baseline.db'
+    $upgradeFixture = Join-Path $smokeRoot 'upgrade-fixture.py'
+    @'
+import pathlib, sqlite3, sys
+database = pathlib.Path(sys.argv[2])
+with sqlite3.connect(database) as db:
+    assert db.execute('PRAGMA quick_check').fetchone() == ('ok',)
+    if sys.argv[1] == 'prepare':
+        db.execute('CREATE TABLE osir_upgrade_acceptance(value TEXT NOT NULL)')
+        db.execute("INSERT INTO osir_upgrade_acceptance VALUES ('published-013-preserved')")
+        db.commit()
+        with sqlite3.connect(sys.argv[3]) as target:
+            db.backup(target)
+    else:
+        assert db.execute('SELECT value FROM osir_upgrade_acceptance').fetchall() == [('published-013-preserved',)]
+print('Published baseline database preserved')
+'@ | Set-Content -LiteralPath $upgradeFixture -Encoding utf8NoBOM
+    & python $upgradeFixture prepare (Join-Path $isolatedToolHome '.osir_client/osir_client.db') $upgradeBaselineDatabase
+    Assert-Smoke ($LASTEXITCODE -eq 0) 'Published baseline fixture preparation failed.'
+
     $stage = 'install'
     # NSIS requires /D as the last raw argument, without quotation marks even
     # when the destination contains spaces. It consumes the remaining command.
-    Invoke-Installer $installer ("/S /D=" + $installDir)
+    Invoke-Installer $installer ("/S /UPDATE /D=" + $installDir)
     $report.stages.install = Assert-Installed
+    Stop-OwnedApp
 
     $stage = 'launch'
     $ownedLaunch = Start-Isolated $mainExe
@@ -447,6 +531,30 @@ try {
     }
     Stop-OwnedApp
 
+    & python $upgradeFixture verify (Join-Path $isolatedToolHome '.osir_client/osir_client.db')
+    Assert-Smoke ($LASTEXITCODE -eq 0) 'Cross-version installer upgrade lost the synthetic baseline row.'
+    $report.stages.crossVersionUpgrade = [ordered]@{
+        passed = $true; fromVersion = '0.1.3'; toVersion = '0.1.4'
+        kind = 'published-installer-to-new-installer-UPDATE-isolated-home'
+        baselineInstallerSha256 = 'b409637fd7a05d1835c7190d1c7224193af2f8fcc48763fbfe1dcae2cd82b1c5'
+        baselineWindowObserved = $true; newRendererAndNativeIpcPassed = $true
+        databaseQuickCheck = $true; syntheticRowPreserved = $true
+        updaterDownloadAndRestartCovered = $false
+    }
+
+    $stage = 'webviewBootstrapper'
+    $runtimeEvidence = Remove-RunnerRuntime
+    # NSIS deliberately skips runtime installation with /UPDATE. A normal
+    # installer invocation repairs the runtime and represents a fresh machine.
+    Invoke-Installer $installer ("/S /D=" + $installDir)
+    $runtimeEvidence.installedApplication = Assert-Installed
+    Stop-OwnedApp
+    $runtimeEvidence.after = @(Get-RuntimeRegistration)
+    Assert-Smoke ($runtimeEvidence.after.Count -ge 1) 'Small installer did not install the absent WebView2 runtime.'
+    $runtimeEvidence.passed = $true
+    $runtimeEvidence.installMode = 'embedded-bootstrapper-online-install-after-real-uninstall'
+    $report.stages.webviewBootstrapper = $runtimeEvidence
+
     # Reproduce the reported storage shape inside the disposable home only:
     # a valid legacy database and a new directory containing only crash.log.
     # The baseline was created by this exact installed binary, never user data.
@@ -467,18 +575,25 @@ def readonly(path):
 if sys.argv[1] == "prepare":
     with readonly(sys.argv[2]) as source, sqlite3.connect(sys.argv[3]) as target:
         source.backup(target)
+        for table, columns in [('mcp_servers', ['enabled_agy', 'enabled_kimi', 'enabled_omp']), ('skills', ['enabled_agy', 'enabled_kimi'])]:
+            present = {row[1] for row in target.execute('PRAGMA table_info(' + table + ')')}
+            for column in columns:
+                if column in present:
+                    target.execute('ALTER TABLE ' + table + ' DROP COLUMN ' + column)
+        target.execute('PRAGMA user_version = 20')
         target.execute("CREATE TABLE osir_migration_acceptance(value TEXT NOT NULL)")
         target.execute("INSERT INTO osir_migration_acceptance VALUES ('synthetic-preserved-row')")
         target.commit()
 else:
-    for path in sys.argv[2:]:
+    for index, path in enumerate(sys.argv[2:]):
         with readonly(path) as database:
             assert database.execute("PRAGMA quick_check").fetchone() == ("ok",)
             assert database.execute("SELECT value FROM osir_migration_acceptance").fetchall() == [("synthetic-preserved-row",)]
+            assert database.execute('PRAGMA user_version').fetchone()[0] == (20 if index == 0 else 23)
 print("Synthetic migration fixture verified")
 '@ | Set-Content -LiteralPath $fixtureScript -Encoding utf8NoBOM
     $legacyDatabase = Join-Path $legacyConfig 'cc-switch.db'
-    & python $fixtureScript prepare (Join-Path $baselineConfig 'osir_client.db') $legacyDatabase
+    & python $fixtureScript prepare $upgradeBaselineDatabase $legacyDatabase
     Assert-Smoke ($LASTEXITCODE -eq 0) 'Synthetic legacy database preparation failed.'
     $legacyDatabaseHash = Get-Hash $legacyDatabase
     'synthetic startup failure log' | Set-Content -LiteralPath (Join-Path $currentConfig 'crash.log') -Encoding utf8NoBOM
@@ -513,7 +628,7 @@ print("Synthetic migration fixture verified")
         migratedDatabaseQuickCheck = $true
         syntheticRowPreserved = $true
         startupLogPreserved = $true
-        scope = 'synthetic-current-schema-legacy-directory-and-crash-only-destination'
+        scope = 'synthetic-schema20-from-published013-baseline-and-crash-only-destination'
     }
 
     $stage = 'userDiagnostics'
