@@ -249,9 +249,20 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: osir-ci-0.1.3-prod-windows-x64-${{ inputs.source_run }}-1
-          path: source/release/osir/recheck
+          path: source/release/osir/recheck-input
           run-id: ${{ inputs.source_run }}
           github-token: ${{ github.token }}
+
+      - name: Prepare a clean package acceptance directory
+        run: |
+          $input = "$env:GITHUB_WORKSPACE/source/release/osir/recheck-input"
+          $output = "$env:GITHUB_WORKSPACE/source/release/osir/recheck"
+          $manifest = Get-Content -Raw (Join-Path $input 'build-manifest.json') | ConvertFrom-Json
+          New-Item -ItemType Directory -Path $output | Out-Null
+          Copy-Item (Join-Path $input 'build-manifest.json') $output
+          foreach ($artifact in @($manifest.installerArtifact, $manifest.mainExecutableArtifact, $manifest.compiledExecutableArtifact)) {
+            if ($artifact -and $artifact.name) { Copy-Item (Join-Path $input $artifact.name) $output }
+          }
 
       - name: Inspect exact Windows Codex discovery in the runner
         run: |

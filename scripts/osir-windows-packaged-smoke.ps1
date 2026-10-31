@@ -352,6 +352,42 @@ try {
         if ($null -ne $realWindow) { break }
         Start-Sleep -Milliseconds 250
     }
+    if ($null -eq $realWindow) {
+        $ownedLaunch.Refresh()
+        $processSnapshot = Get-Process -Id $ownedLaunch.Id -ErrorAction SilentlyContinue
+        $windowSnapshot = @([OsirWindows]::ForProcess($ownedLaunch.Id) | ForEach-Object {
+            [ordered]@{
+                title = $_.Title
+                className = $_.ClassName
+                width = $_.Width
+                height = $_.Height
+            }
+        })
+        $childSnapshot = @()
+        try {
+            $childSnapshot = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($ownedLaunch.Id)" |
+                Select-Object ProcessId, Name, ParentProcessId)
+        } catch { }
+        $logFiles = @()
+        $currentLogDir = Join-Path $isolatedToolHome '.osir_client/logs'
+        if (Test-Path -LiteralPath $currentLogDir -PathType Container) {
+            $logFiles = @(Get-ChildItem -LiteralPath $currentLogDir -File -ErrorAction SilentlyContinue |
+                Select-Object Name, Length, LastWriteTimeUtc)
+        }
+        $report.launchDiagnostics = [ordered]@{
+            processId = $ownedLaunch.Id
+            processName = if ($null -ne $processSnapshot) { $processSnapshot.ProcessName } else { $null }
+            executablePath = if ($null -ne $processSnapshot) { $processSnapshot.Path } else { $null }
+            mainWindowTitle = if ($null -ne $processSnapshot) { $processSnapshot.MainWindowTitle } else { $null }
+            hasExited = $ownedLaunch.HasExited
+            exitCode = if ($ownedLaunch.HasExited) { $ownedLaunch.ExitCode } else { $null }
+            windows = $windowSnapshot
+            childProcesses = $childSnapshot
+            currentLogFiles = $logFiles
+        }
+        $report.launchDiagnostics | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $artifactDir 'windows-launch-diagnostics.json') -Encoding utf8NoBOM
+        Write-Host ($report.launchDiagnostics | ConvertTo-Json -Depth 8)
+    }
     Assert-Smoke ($null -ne $realWindow) 'Installed application did not display a visible OSIR Client window of at least 900x600.'
     # Observe briefly after the window appears; a momentary handle is insufficient.
     Start-Sleep -Seconds 3
