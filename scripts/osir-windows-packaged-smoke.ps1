@@ -187,7 +187,7 @@ function Start-Isolated([string]$Path, [string]$Arguments = '', [bool]$MissingRu
     $start.Environment['APPDATA'] = $isolatedAppData
     $start.Environment['LOCALAPPDATA'] = $isolatedLocalAppData
     if ($Path -eq $mainExe) {
-        $start.Environment['WEBVIEW2_USER_DATA_FOLDER'] = Join-Path $smokeRoot 'webview-profile'
+        $start.Environment['WEBVIEW2_USER_DATA_FOLDER'] = Join-Path $smokeRoot ('webview-profile-' + [guid]::NewGuid().ToString('N'))
     }
     if ($Path -eq $mainExe -and -not $MissingRuntime) {
         do {

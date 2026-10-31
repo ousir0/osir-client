@@ -18,10 +18,11 @@ export function safeDiagnostic(value) {
 export function debuggerEndpoint(value, port) {
   const url = new URL(value);
   assert.equal(url.protocol, "ws:");
-  assert.equal(url.hostname, "127.0.0.1");
+  assert.ok(["127.0.0.1", "localhost"].includes(url.hostname));
   assert.equal(url.port, String(port));
   assert.equal(url.username + url.password + url.search + url.hash, "");
   assert.match(url.pathname, /^\/devtools\/page\/[\w-]+$/);
+  url.hostname = "127.0.0.1";
   return url.href;
 }
 
@@ -262,7 +263,17 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
           signal: AbortSignal.timeout(2000),
         });
         const pages = await response.json();
-        report.debuggerPages = pages.map(page => ({ type: page.type, url: page.url, applicationPage: applicationPage(page) }));
+        report.debuggerPages = pages.map((page) => {
+          let target;
+          try { target = new URL(page.webSocketDebuggerUrl); } catch { target = null; }
+          return {
+            type: page.type,
+            applicationPage: applicationPage(page),
+            debuggerHost: target?.hostname,
+            debuggerPort: target?.port,
+            debuggerPath: target?.pathname,
+          };
+        });
         const candidates = pages.filter(applicationPage);
         assert.ok(
           candidates.length <= 1,
@@ -274,7 +285,7 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
             debuggerEndpoint(page.webSocketDebuggerUrl, port),
           );
       } catch (error) {
-        report.debuggerConnectionError = safeDiagnostic(error.message);
+        report.debuggerConnectionError ??= safeDiagnostic(error.message);
         /* WebView2 may still be starting. */
       }
       if (!client) await delay(250);
