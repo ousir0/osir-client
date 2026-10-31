@@ -23,6 +23,17 @@ function File-Evidence([string]$Path) {
     }
 }
 
+function File-Sha256([string]$Path) {
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $algorithm.Dispose()
+    }
+}
+
 function Database-Evidence([string]$Path) {
     $item = File-Evidence $Path
     if (-not $item) { return $null }
@@ -64,7 +75,7 @@ if (-not $Executable) {
 if ($Executable -and (Test-Path -LiteralPath $Executable -PathType Leaf)) {
     $Executable = (Get-Item -LiteralPath $Executable).FullName
     $report.executable = File-Evidence $Executable
-    $report.executable.sha256 = (Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash
+    $report.executable.sha256 = File-Sha256 $Executable
     $report.executable.version = (Get-Item -LiteralPath $Executable).VersionInfo.ProductVersion
     if ($ExpectedExecutableSha256) {
         $report.executable.isExpectedBuild = $report.executable.sha256 -eq $ExpectedExecutableSha256
