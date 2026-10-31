@@ -274,6 +274,7 @@ jobs:
           }
 
       - name: Register the exact official Codex package in the ephemeral runner
+        shell: powershell
         timeout-minutes: 10
         run: |
           $package = Join-Path $env:RUNNER_TEMP 'Codex-26.1027.3384.0-x64.msix'
@@ -300,7 +301,7 @@ jobs:
             family = [string]$installed[0].PackageFamilyName
             scope = 'registered-official-package-on-ephemeral-runner-without-launch-or-login'
           }
-          $evidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath source/release/osir/recheck/windows-installed-codex-evidence.json -Encoding utf8NoBOM
+          [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'source/release/osir/recheck/windows-installed-codex-evidence.json'), ($evidence | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
 
       - name: Inspect exact Windows Codex discovery in the runner
         run: |
