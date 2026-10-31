@@ -386,6 +386,16 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
       freshAccount: true,
       codexDesktopDetection: native.codexDesktop.status,
     };
+    if (process.env.OSIR_EXPECT_CODEX_VERSION) {
+      assert.equal(native.codexDesktop.status, "detected");
+      assert.equal(native.codexDesktop.comparisonComplete, true);
+      assert.equal(native.codexDesktop.installations.length, 1);
+      const installation = native.codexDesktop.installations[0];
+      assert.equal(installation.version, process.env.OSIR_EXPECT_CODEX_VERSION);
+      assert.match(installation.path, /WindowsApps[\\/]OpenAI\.Codex_/i);
+      report.nativeIpc.installedCodexVersion = installation.version;
+      report.nativeIpc.installedCodexCount = 1;
+    }
     for (const [width, height] of [
       [1100, 720],
       [900, 600],
