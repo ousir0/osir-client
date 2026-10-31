@@ -40,8 +40,8 @@
         "id": "read_file-1791014409123-3f2a",
         "rawName": "read_file",
         "kind": "read",
-        "title": "/Users/fixture-user/Projects/demo-app/src/main.ts",
-        "inputPreview": "{\"absolute_path\": \"/Users/fixture-user/Projects/demo-app/src/main.ts\"}",
+        "title": "/Users/test-user/Projects/demo-app/src/main.ts",
+        "inputPreview": "{\"absolute_path\": \"/Users/test-user/Projects/demo-app/src/main.ts\"}",
         "inputTotalLen": 67
       },
       {
@@ -125,13 +125,13 @@
         "id": "replace-1791014588001-a7e4",
         "rawName": "replace",
         "kind": "edit",
-        "title": "/Users/fixture-user/Projects/demo-app/src/config.ts",
-        "inputPreview": "{\"file_path\": \"/Users/fixture-user/Projects/demo-app/src/config.ts\", \"old_string\": \"  port: process.env.PORT ?? 3000,\", \"new_string\": \"  port: Number(process.env.PORT ?? 3000),\"}",
+        "title": "/Users/test-user/Projects/demo-app/src/config.ts",
+        "inputPreview": "{\"file_path\": \"/Users/test-user/Projects/demo-app/src/config.ts\", \"old_string\": \"  port: process.env.PORT ?? 3000,\", \"new_string\": \"  port: Number(process.env.PORT ?? 3000),\"}",
         "inputTotalLen": 175,
         "diff": {
           "files": [
             {
-              "path": "/Users/fixture-user/Projects/demo-app/src/config.ts",
+              "path": "/Users/test-user/Projects/demo-app/src/config.ts",
               "op": "update",
               "added": 1,
               "removed": 1
@@ -145,7 +145,7 @@
         "type": "tool_result",
         "callId": "replace-1791014588001-a7e4",
         "status": "success",
-        "preview": "Successfully modified file: /Users/fixture-user/Projects/demo-app/src/config.ts (1 replacements).",
+        "preview": "Successfully modified file: /Users/test-user/Projects/demo-app/src/config.ts (1 replacements).",
         "totalLen": 94,
         "lineCount": 1,
         "truncated": false

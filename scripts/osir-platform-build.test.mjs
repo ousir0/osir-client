@@ -1,13 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inspectPe } from "./osir-pe-verify.mjs";
 import { windowsConfig } from "./osir-build-windows.mjs";
 import { macosCiConfig } from "./osir-build-macos-ci.mjs";
 import { validateSnapshotPath } from "./osir-source-snapshot.mjs";
-import { sourceSnapshot } from "./osir-build.mjs";
+import { sourceSnapshot, verifyRustIncludeInputs } from "./osir-build.mjs";
 import { nsisPayload, verifyNsisPayload } from "./osir-nsis-payload.mjs";
 
 test("NSIS baseline permits only one exact Tauri marker patch", () => {
@@ -144,11 +150,65 @@ test("private source export rejects credential files and personal homes", () => 
     assert.equal(validateSnapshotPath(path), path);
 });
 
-test("release source manifest includes Rust compile-time session fixtures", () => {
+test("release source manifest includes all Rust compile-time fixtures", () => {
   const snapshot = sourceSnapshot();
   assert.ok(
-    snapshot.provenance.inputs.directories.includes(
-      "tests/fixtures/sessions",
-    ),
+    snapshot.provenance.inputs.directories.includes("tests/fixtures/sessions"),
   );
+  for (const path of [
+    "tests/config/claudeKeyFields.json",
+    "tests/fixtures/copilot-endpoint-cases.json",
+  ])
+    assert.ok(snapshot.provenance.inputs.files.includes(path));
+});
+
+test("Rust include preflight rejects omitted files before a snapshot is exported", () => {
+  const directory = mkdtempSync(join(tmpdir(), "osir-includes-"));
+  try {
+    mkdirSync(join(directory, "src"));
+    writeFileSync(
+      join(directory, "src/lib.rs"),
+      `
+      // include_str!("ignored-comment")
+      /* outer /* nested */ include_bytes!("ignored-block") */
+      const EXAMPLE: &str = "include_str!(\\\"ignored-string\\\")";
+      const RAW: &str = r#"include_bytes!("ignored-raw")"#;
+      const QUOTE: char = '"';
+      const ESCAPED: char = '\\\\';
+      fn lifetime<'a>(value: &'a str) -> &'a str { value }
+      const VALUE: &str = include_str!(
+        "../fixture.json",
+      );
+      const BYTES: &[u8] = include_bytes!(r#"../fixture.json"#);
+    `,
+    );
+    writeFileSync(join(directory, "fixture.json"), "{}");
+    assert.throws(
+      () => verifyRustIncludeInputs(directory, ["src/lib.rs"]),
+      /missing from release inputs/,
+    );
+    assert.equal(
+      verifyRustIncludeInputs(directory, ["src/lib.rs", "fixture.json"])
+        .references,
+      2,
+    );
+    writeFileSync(
+      join(directory, "src/lib.rs"),
+      'include_str!(concat!("../", "fixture.json"))',
+    );
+    assert.throws(
+      () => verifyRustIncludeInputs(directory, ["src/lib.rs", "fixture.json"]),
+      /reviewed literal/,
+    );
+    writeFileSync(
+      join(directory, "src/lib.rs"),
+      'include_bytes!("../../outside.key")',
+    );
+    assert.throws(
+      () => verifyRustIncludeInputs(directory, ["src/lib.rs"]),
+      /missing from release inputs/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

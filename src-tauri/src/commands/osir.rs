@@ -109,6 +109,14 @@ impl OsirAccountState {
                 Err(_) => log::warn!("OSIR account startup recovery timed out"),
             }
             let status = state.reconcile();
+            if matches!(
+                status.recovery,
+                crate::services::osir::models::SessionRecovery::UnlockRequired
+                    | crate::services::osir::models::SessionRecovery::Retryable
+                    | crate::services::osir::models::SessionRecovery::Blocked
+            ) {
+                crate::client_telemetry::record_credential_failure(app.clone());
+            }
             emit_status(&app, &status);
         });
     }
@@ -128,7 +136,10 @@ impl OsirAccountState {
                 log::warn!("OSIR credential recovery incomplete; journal retained");
             }
             let state = app.state::<crate::store::AppState>();
-            super::osir_credential_recovery::recover_connections_at_startup(&state.db);
+            let failed = super::osir_credential_recovery::recover_connections_at_startup(&state.db);
+            if failed || result.is_err() {
+                crate::client_telemetry::record_credential_failure(app.clone());
+            }
         });
     }
     fn clear_locked(&self, binding: &mut Option<(u64, Session)>) {
@@ -184,6 +195,7 @@ fn resource_ttl(resource: AccountResource) -> Duration {
     })
 }
 fn emit_status(app: &tauri::AppHandle, status: &SessionStatus) {
+    crate::client_telemetry::session_changed(app);
     let _ = app.emit(SESSION_EVENT, status);
 }
 

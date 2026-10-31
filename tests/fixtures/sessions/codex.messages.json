@@ -19,7 +19,7 @@
     "blocks": [
       {
         "type": "text",
-        "text": "# AGENTS.md instructions for /Users/fixture-user/Projects/demo-app\n\n<INSTRUCTIONS>\n- 默认简体中文回复。\n- 提交信息使用 Conventional Commits。\n</INSTRUCTIONS>",
+        "text": "# AGENTS.md instructions for /Users/test-user/Projects/demo-app\n\n<INSTRUCTIONS>\n- 默认简体中文回复。\n- 提交信息使用 Conventional Commits。\n</INSTRUCTIONS>",
         "full": {
           "kind": "jsonl",
           "offset": 5120,
@@ -37,7 +37,7 @@
     "blocks": [
       {
         "type": "text",
-        "text": "<environment_context>\n  <cwd>/Users/fixture-user/Projects/demo-app</cwd>\n  <shell>zsh</shell>\n</environment_context>"
+        "text": "<environment_context>\n  <cwd>/Users/test-user/Projects/demo-app</cwd>\n  <shell>zsh</shell>\n</environment_context>"
       }
     ]
   },
@@ -91,8 +91,8 @@
         "rawName": "exec",
         "kind": "read",
         "title": "sed -n '1,80p' README.md",
-        "detail": "/Users/fixture-user/Projects/demo-app",
-        "inputPreview": "const r = await tools.exec_command({cmd:\"sed -n '1,80p' README.md\", workdir:\"/Users/fixture-user/Projects/demo-app\"});\ntext(r.output);",
+        "detail": "/Users/test-user/Projects/demo-app",
+        "inputPreview": "const r = await tools.exec_command({cmd:\"sed -n '1,80p' README.md\", workdir:\"/Users/test-user/Projects/demo-app\"});\ntext(r.output);",
         "inputTotalLen": 131
       }
     ]
@@ -132,8 +132,8 @@
         "rawName": "exec",
         "kind": "search",
         "title": "rg -n \"--legacy\" docs",
-        "detail": "/Users/fixture-user/Projects/demo-app",
-        "inputPreview": "const r = await tools.exec_command({cmd:\"rg -n \\\"--legacy\\\" docs\", workdir:\"/Users/fixture-user/Projects/demo-app\"});\ntext(r.output);",
+        "detail": "/Users/test-user/Projects/demo-app",
+        "inputPreview": "const r = await tools.exec_command({cmd:\"rg -n \\\"--legacy\\\" docs\", workdir:\"/Users/test-user/Projects/demo-app\"});\ntext(r.output);",
         "inputTotalLen": 130
       }
     ]
@@ -177,7 +177,7 @@
         "diff": {
           "files": [
             {
-              "path": "/Users/fixture-user/Projects/demo-app/README.md",
+              "path": "/Users/test-user/Projects/demo-app/README.md",
               "op": "update",
               "added": 3,
               "removed": 2
@@ -189,7 +189,7 @@
             "kind": "jsonl",
             "offset": 285530,
             "len": 1288,
-            "pointer": "/payload/item/changes/~1Users~1fixture-user~1Projects~1demo-app~1README.md/unified_diff"
+            "pointer": "/payload/item/changes/~1Users~1test-user~1Projects~1demo-app~1README.md/unified_diff"
           }
         }
       }
@@ -345,8 +345,8 @@
         "rawName": "exec",
         "kind": "shell",
         "title": "pnpm build",
-        "detail": "/Users/fixture-user/Projects/demo-app/docs",
-        "inputPreview": "const r = await tools.exec_command({cmd:\"pnpm build\", workdir:\"/Users/fixture-user/Projects/demo-app/docs\"});\ntext(r.output);",
+        "detail": "/Users/test-user/Projects/demo-app/docs",
+        "inputPreview": "const r = await tools.exec_command({cmd:\"pnpm build\", workdir:\"/Users/test-user/Projects/demo-app/docs\"});\ntext(r.output);",
         "inputTotalLen": 122
       }
     ]
@@ -532,7 +532,7 @@
         "image": {
           "source": {
             "kind": "local_file",
-            "path": "/Users/fixture-user/.codex/visualizations/2026-10-03/link-graph.png"
+            "path": "/Users/test-user/.codex/visualizations/2026-10-03/link-graph.png"
           },
           "mediaType": "image/png",
           "size": 58210

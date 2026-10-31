@@ -86,7 +86,7 @@
         "type": "tool_result",
         "callId": "toolu_01Bash",
         "status": "error",
-        "preview": "   Compiling demo-app v0.3.1 (/Users/fixture-user/Projects/demo-app)\nerror[E0433]: failed to resolve: use of undeclared crate or module `tokio_util`\n --> src/net/client.rs:7:5\n  |\n7 | use tokio_util::codec::LinesCodec;\n  |     ^^^^^^^^^^ use of undeclared crate or module `tokio_util`\n\nerror[E0412]: cannot find type `LinesCodec` in this scope\n  --> src/net/client.rs:42:23\n   |\n42 |     framed: Framed<TcpStream, LinesCodec>,\n   |                               ^^^^^^^^^^ not found in this scope",
+        "preview": "   Compiling demo-app v0.3.1 (/Users/test-user/Projects/demo-app)\nerror[E0433]: failed to resolve: use of undeclared crate or module `tokio_util`\n --> src/net/client.rs:7:5\n  |\n7 | use tokio_util::codec::LinesCodec;\n  |     ^^^^^^^^^^ use of undeclared crate or module `tokio_util`\n\nerror[E0412]: cannot find type `LinesCodec` in this scope\n  --> src/net/client.rs:42:23\n   |\n42 |     framed: Framed<TcpStream, LinesCodec>,\n   |                               ^^^^^^^^^^ not found in this scope",
         "totalLen": 5120,
         "lineCount": 88,
         "truncated": true,
@@ -117,9 +117,9 @@
         "id": "toolu_02Read",
         "rawName": "Read",
         "kind": "read",
-        "title": "/Users/fixture-user/Projects/demo-app/Cargo.toml",
+        "title": "/Users/test-user/Projects/demo-app/Cargo.toml",
         "detail": ":1-40",
-        "inputPreview": "{\"file_path\": \"/Users/fixture-user/Projects/demo-app/Cargo.toml\", \"offset\": 1, \"limit\": 40}",
+        "inputPreview": "{\"file_path\": \"/Users/test-user/Projects/demo-app/Cargo.toml\", \"offset\": 1, \"limit\": 40}",
         "inputTotalLen": 88
       },
       {
@@ -195,13 +195,13 @@
         "id": "toolu_04Edit",
         "rawName": "Edit",
         "kind": "edit",
-        "title": "/Users/fixture-user/Projects/demo-app/Cargo.toml",
-        "inputPreview": "{\"file_path\": \"/Users/fixture-user/Projects/demo-app/Cargo.toml\", \"old_string\": \"futures = \\\"0.3\\\"\", \"new_string\": \"futures = \\\"0.3\\\"\\ntokio-util = { version = \\\"0.7\\\", features = [\\\"codec\\\"] }\"}",
+        "title": "/Users/test-user/Projects/demo-app/Cargo.toml",
+        "inputPreview": "{\"file_path\": \"/Users/test-user/Projects/demo-app/Cargo.toml\", \"old_string\": \"futures = \\\"0.3\\\"\", \"new_string\": \"futures = \\\"0.3\\\"\\ntokio-util = { version = \\\"0.7\\\", features = [\\\"codec\\\"] }\"}",
         "inputTotalLen": 192,
         "diff": {
           "files": [
             {
-              "path": "/Users/fixture-user/Projects/demo-app/Cargo.toml",
+              "path": "/Users/test-user/Projects/demo-app/Cargo.toml",
               "op": "update",
               "added": 1,
               "removed": 0
@@ -216,13 +216,13 @@
         "id": "toolu_05Edit",
         "rawName": "Edit",
         "kind": "edit",
-        "title": "/Users/fixture-user/Projects/demo-app/src/net/client.rs",
-        "inputPreview": "{\"file_path\": \"/Users/fixture-user/Projects/demo-app/src/net/client.rs\", \"old_string\": \"use tokio_util::codec::Framed;\", \"new_string\": \"use tokio_util::codec::{Framed, LinesCodec};\\nuse futures::SinkExt;\", \"replace_all\": false}",
+        "title": "/Users/test-user/Projects/demo-app/src/net/client.rs",
+        "inputPreview": "{\"file_path\": \"/Users/test-user/Projects/demo-app/src/net/client.rs\", \"old_string\": \"use tokio_util::codec::Framed;\", \"new_string\": \"use tokio_util::codec::{Framed, LinesCodec};\\nuse futures::SinkExt;\", \"replace_all\": false}",
         "inputTotalLen": 224,
         "diff": {
           "files": [
             {
-              "path": "/Users/fixture-user/Projects/demo-app/src/net/client.rs",
+              "path": "/Users/test-user/Projects/demo-app/src/net/client.rs",
               "op": "update",
               "added": 2,
               "removed": 2
@@ -249,7 +249,7 @@
         "type": "tool_result",
         "callId": "toolu_04Edit",
         "status": "success",
-        "preview": "The file /Users/fixture-user/Projects/demo-app/Cargo.toml has been updated successfully.",
+        "preview": "The file /Users/test-user/Projects/demo-app/Cargo.toml has been updated successfully.",
         "totalLen": 85,
         "lineCount": 1,
         "truncated": false
@@ -266,7 +266,7 @@
         "type": "tool_result",
         "callId": "toolu_05Edit",
         "status": "success",
-        "preview": "The file /Users/fixture-user/Projects/demo-app/src/net/client.rs has been updated successfully.",
+        "preview": "The file /Users/test-user/Projects/demo-app/src/net/client.rs has been updated successfully.",
         "totalLen": 92,
         "lineCount": 1,
         "truncated": false
@@ -306,7 +306,7 @@
         "type": "tool_result",
         "callId": "toolu_06Bash",
         "status": "success",
-        "preview": "   Compiling tokio-util v0.7.12\n   Compiling demo-app v0.3.1 (/Users/fixture-user/Projects/demo-app)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.84s",
+        "preview": "   Compiling tokio-util v0.7.12\n   Compiling demo-app v0.3.1 (/Users/test-user/Projects/demo-app)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.84s",
         "totalLen": 170,
         "lineCount": 3,
         "truncated": false,
@@ -399,7 +399,7 @@
         "type": "event",
         "kind": "pr_link",
         "text": "PR #128",
-        "url": "https://github.com/fixture-user/demo-app/pull/128"
+        "url": "https://github.com/test-user/demo-app/pull/128"
       }
     ]
   },
@@ -518,7 +518,7 @@
           "relPath": "tool-results/toolu_10Bash.txt"
         },
         "durationMs": 95000,
-        "savedPath": "/Users/fixture-user/.claude/projects/-Users-fixture-user-Projects-demo-app/6f1c2d3e-8a9b-4c5d-9e0f-1a2b3c4d5e6f/tool-results/toolu_10Bash.txt"
+        "savedPath": "/Users/test-user/.claude/projects/-Users-test-user-Projects-demo-app/6f1c2d3e-8a9b-4c5d-9e0f-1a2b3c4d5e6f/tool-results/toolu_10Bash.txt"
       }
     ]
   },
@@ -618,13 +618,13 @@
         "id": "toolu_13Write",
         "rawName": "Write",
         "kind": "write",
-        "title": "/Users/fixture-user/Projects/demo-app/CHANGELOG.md",
-        "inputPreview": "{\"file_path\": \"/Users/fixture-user/Projects/demo-app/CHANGELOG.md\", \"content\": \"# Changelog\\n\\n## [0.3.2] - 2026-10-03\\n\\n### Fixed\\n\\n- Add missing `tokio-util` dependency for the line codec.\\n\"}",
+        "title": "/Users/test-user/Projects/demo-app/CHANGELOG.md",
+        "inputPreview": "{\"file_path\": \"/Users/test-user/Projects/demo-app/CHANGELOG.md\", \"content\": \"# Changelog\\n\\n## [0.3.2] - 2026-10-03\\n\\n### Fixed\\n\\n- Add missing `tokio-util` dependency for the line codec.\\n\"}",
         "inputTotalLen": 193,
         "diff": {
           "files": [
             {
-              "path": "/Users/fixture-user/Projects/demo-app/CHANGELOG.md",
+              "path": "/Users/test-user/Projects/demo-app/CHANGELOG.md",
               "op": "add",
               "added": 7,
               "removed": 0
@@ -668,7 +668,7 @@
         "type": "tool_result",
         "callId": "toolu_13Write",
         "status": "success",
-        "preview": "File created successfully at: /Users/fixture-user/Projects/demo-app/CHANGELOG.md",
+        "preview": "File created successfully at: /Users/test-user/Projects/demo-app/CHANGELOG.md",
         "totalLen": 77,
         "lineCount": 1,
         "truncated": false

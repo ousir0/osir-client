@@ -67,6 +67,19 @@ fn is_osir_resolution_error(error: &ProxyError) -> bool {
     matches!(error, ProxyError::InvalidRequest(message) if message == OSIR_RESOLUTION_ERROR)
 }
 
+fn credential_failure(error: &ProxyError) -> bool {
+    // Match native categories/status only. Never inspect upstream body strings.
+    is_osir_resolution_error(error)
+        || matches!(
+            error,
+            ProxyError::AuthError(_)
+                | ProxyError::UpstreamError {
+                    status: 401 | 403,
+                    ..
+                }
+        )
+}
+
 /// Whether the upstream belongs to the OpenCode gateway (`opencode.ai`).
 ///
 /// That gateway (<https://opencode.ai/docs/go/>) expects clients to identify
@@ -926,6 +939,11 @@ impl RequestForwarder {
                         .await);
                 }
                 Err(mut e) => {
+                    if credential_failure(&e) {
+                        if let Some(app) = &self.app_handle {
+                            crate::client_telemetry::record_credential_failure(app.clone());
+                        }
+                    }
                     // Stop before any rectifier retry or alternate billing route.
                     // Bookkeeping receives only the original, unmaterialized card.
                     if is_osir_resolution_error(&e) {
@@ -4902,6 +4920,31 @@ mod tests {
     }
 
     #[test]
+    fn credential_failure_telemetry_uses_native_category_not_response_contents() {
+        assert!(credential_failure(&ProxyError::InvalidRequest(
+            OSIR_RESOLUTION_ERROR.into()
+        )));
+        assert!(credential_failure(&ProxyError::AuthError(
+            "sensitive credential".into()
+        )));
+        for status in [401, 403] {
+            assert!(credential_failure(&ProxyError::UpstreamError {
+                status,
+                body: Some("sensitive upstream body".into()),
+            }));
+        }
+        for status in [400, 402, 404, 429, 500, 503] {
+            assert!(!credential_failure(&ProxyError::UpstreamError {
+                status,
+                body: Some("401 invalid credential /private/path sk-secret session-id".into()),
+            }));
+        }
+        assert!(!credential_failure(&ProxyError::Timeout(
+            "credential expired".into()
+        )));
+    }
+
+    #[test]
     fn osir_materialization_is_used_only_for_auth() {
         let adapter = get_adapter(&AppType::Claude).unwrap();
         let mut stored = test_provider_with_type(None);
@@ -4997,6 +5040,7 @@ mod tests {
             .await;
         let failure = result.err().expect("the missing managed grant is terminal");
         assert!(is_osir_resolution_error(&failure.error));
+        assert!(credential_failure(&failure.error));
         assert_eq!(failure.provider.unwrap().id, grant.provider.id);
         let status = forwarder.status.read().await;
         assert_eq!(status.failed_requests, 1);

@@ -7,6 +7,32 @@ fn invalid() -> AppError {
 fn binding(p: &Provider) -> Option<&crate::provider::ManagedBinding> {
     p.meta.as_ref()?.osir_binding.as_ref()
 }
+
+pub(super) fn recheck_expected_base(
+    app: &AppType,
+    saved: Option<&Provider>,
+    expected: Option<&Provider>,
+) -> Result<(), AppError> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let saved = saved.ok_or_else(invalid)?;
+    let snapshot = |p: &Provider| -> Result<serde_json::Value, AppError> {
+        let mut p = p.clone();
+        if binding(&p).is_some() {
+            managed::validate_provider(app, &p).map_err(|_| invalid())?;
+            p.settings_config =
+                managed::sanitize_settings(app, &p, &p.settings_config).map_err(|_| invalid())?;
+        }
+        serde_json::to_value(p).map_err(|_| invalid())
+    };
+    if snapshot(saved)? != snapshot(expected)? {
+        return Err(AppError::InvalidInput(
+            "连接设置已变化，请刷新后重试。".into(),
+        ));
+    }
+    Ok(())
+}
 /// Compare only against the native row freshly read under the switch lock.
 /// expected is a concurrency token; it is never used to load a credential.
 pub(super) fn recheck_replacement(
@@ -21,7 +47,7 @@ pub(super) fn recheck_replacement(
     }
     Ok(())
 }
-pub(super) fn recheck_update(
+pub(crate) fn recheck_update(
     app: &AppType,
     original_id: &str,
     saved: Option<&Provider>,
@@ -102,7 +128,7 @@ pub(super) fn lock_open_code(
     matches!(app, AppType::OpenCode)
         .then(|| futures::executor::block_on(state.proxy_service.lock_switch_for_app(app.as_str())))
 }
-fn non_model_settings(
+pub(crate) fn non_model_settings(
     app: &AppType,
     settings: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
@@ -133,6 +159,50 @@ fn non_model_settings(
                         }
                     }
                 }
+                if matches!(app, AppType::Claude) {
+                    for (field, minimum, maximum) in [
+                        ("CLAUDE_CODE_MAX_CONTEXT_TOKENS", 1, 2_000_000),
+                        ("CLAUDE_CODE_AUTO_COMPACT_WINDOW", 100_000, 1_000_000),
+                    ] {
+                        if let Some(value) = env.remove(field) {
+                            checked_limit(&value, minimum, maximum, true)?;
+                        }
+                    }
+                }
+            }
+            if matches!(app, AppType::Gemini) {
+                if let Some(config) = root.get_mut("config") {
+                    let config = config.as_object_mut().ok_or_else(invalid)?;
+                    if let Some(experimental) = config.get_mut("experimental") {
+                        let experimental = experimental.as_object_mut().ok_or_else(invalid)?;
+                        if let Some(enabled) = experimental.remove("contextManagement") {
+                            if !enabled.is_boolean() {
+                                return Err(invalid());
+                            }
+                        }
+                        if experimental.is_empty() {
+                            config.remove("experimental");
+                        }
+                    }
+                    if let Some(context) = config.get_mut("contextManagement") {
+                        let context = context.as_object_mut().ok_or_else(invalid)?;
+                        if let Some(history) = context.get_mut("historyWindow") {
+                            let history = history.as_object_mut().ok_or_else(invalid)?;
+                            if let Some(value) = history.remove("maxTokens") {
+                                checked_limit(&value, 1, 2_000_000, false)?;
+                            }
+                            if history.is_empty() {
+                                context.remove("historyWindow");
+                            }
+                        }
+                        if context.is_empty() {
+                            config.remove("contextManagement");
+                        }
+                    }
+                    if config.is_empty() {
+                        root.remove("config");
+                    }
+                }
             }
         }
         AppType::Codex => {
@@ -149,6 +219,17 @@ fn non_model_settings(
                     }
                 }
             }
+            for field in ["model_context_window", "model_auto_compact_token_limit"] {
+                if let Some(value) = table.remove(field) {
+                    let value = value
+                        .as_integer()
+                        .filter(|value| *value > 0)
+                        .ok_or_else(invalid)?;
+                    if value > 9_007_199_254_740_991 {
+                        return Err(invalid());
+                    }
+                }
+            }
             root.insert(
                 "config".into(),
                 serde_json::to_value(doc).map_err(|_| invalid())?,
@@ -156,38 +237,103 @@ fn non_model_settings(
             if let Some(catalog) = root.get_mut("modelCatalog") {
                 let catalog = catalog.as_object_mut().ok_or_else(invalid)?;
                 if let Some(models) = catalog.remove("models") {
+                    let mut remainder = serde_json::Map::new();
+                    let mut seen = std::collections::HashSet::new();
                     for model in models.as_array().ok_or_else(invalid)? {
-                        let model = model.as_object().ok_or_else(invalid)?;
-                        if !model.contains_key("model")
-                            || model.iter().any(|(key, value)| {
-                                !matches!(key.as_str(), "model" | "name") || !value.is_string()
-                            })
+                        let mut model = model.as_object().ok_or_else(invalid)?.clone();
+                        let id = model
+                            .remove("model")
+                            .and_then(|v| v.as_str().map(str::to_owned))
+                            .ok_or_else(invalid)?;
+                        if !seen.insert(id.clone()) {
+                            return Err(invalid());
+                        }
+                        if let Some(name) = model.remove("name") {
+                            if !name.is_string() {
+                                return Err(invalid());
+                            }
+                        }
+                        for field in ["contextWindow", "context_window"] {
+                            if let Some(value) = model.remove(field) {
+                                checked_limit(&value, 1, 9_007_199_254_740_991, false)?;
+                            }
+                        }
+                        if model
+                            .keys()
+                            .any(|key| matches!(key.as_str(), "headers" | "options" | "command"))
                         {
                             return Err(invalid());
                         }
+                        if !model.is_empty() {
+                            remainder.insert(id, serde_json::Value::Object(model));
+                        }
+                    }
+                    if !remainder.is_empty() {
+                        catalog.insert("models".into(), serde_json::Value::Object(remainder));
                     }
                 }
             }
         }
         AppType::OpenCode => {
             if let Some(models) = root.remove("models") {
-                for model in models.as_object().ok_or_else(invalid)?.values() {
+                let mut remainder = serde_json::Map::new();
+                for (id, model) in models.as_object().ok_or_else(invalid)? {
+                    let mut model = model.as_object().ok_or_else(invalid)?.clone();
+                    for field in ["name", "modelID", "id"] {
+                        if let Some(value) = model.remove(field) {
+                            if !value.is_string() {
+                                return Err(invalid());
+                            }
+                        }
+                    }
+                    if let Some(limits) = model.get_mut("limit") {
+                        let limits = limits.as_object_mut().ok_or_else(invalid)?;
+                        for field in ["context", "output"] {
+                            if let Some(value) = limits.remove(field) {
+                                checked_limit(&value, 1, 9_007_199_254_740_991, false)?;
+                            }
+                        }
+                        if limits.is_empty() {
+                            model.remove("limit");
+                        }
+                    }
                     if model
-                        .as_object()
-                        .ok_or_else(invalid)?
-                        .iter()
-                        .any(|(key, value)| {
-                            !matches!(key.as_str(), "name" | "modelID" | "id") || !value.is_string()
-                        })
+                        .keys()
+                        .any(|key| matches!(key.as_str(), "headers" | "options" | "command"))
                     {
                         return Err(invalid());
                     }
+                    if !model.is_empty() {
+                        remainder.insert(id.clone(), serde_json::Value::Object(model));
+                    }
+                }
+                if !remainder.is_empty() {
+                    root.insert("models".into(), serde_json::Value::Object(remainder));
                 }
             }
         }
         _ => return Err(invalid()),
     }
     Ok(value)
+}
+
+fn checked_limit(
+    value: &serde_json::Value,
+    minimum: u64,
+    maximum: u64,
+    allow_string: bool,
+) -> Result<(), String> {
+    let number = value.as_u64().or_else(|| {
+        allow_string
+            .then(|| value.as_str())
+            .flatten()
+            .filter(|value| !value.is_empty() && value.bytes().all(|ch| ch.is_ascii_digit()))
+            .and_then(|value| value.parse::<u64>().ok())
+    });
+    match number {
+        Some(value) if (minimum..=maximum).contains(&value) => Ok(()),
+        _ => Err(MANAGED_BINDING_ERROR.into()),
+    }
 }
 
 #[cfg(test)]
@@ -251,6 +397,60 @@ mod tests {
         edited.settings_config["env"]["ANTHROPIC_MODEL"] = json!("model-b");
         let safe = recheck_update(&AppType::Claude, &old.id, Some(&old), None, edited).unwrap();
         assert_eq!(safe.settings_config["env"]["ANTHROPIC_MODEL"], "model-b");
+    }
+
+    #[test]
+    fn context_edits_preserve_model_capabilities_and_reject_invalid_limits() {
+        let old = json!({"config":"model = 'a'\n", "modelCatalog":{"models":[{"model":"a","inputModalities":["text","image"]}]}});
+        let mut edited = old.clone();
+        edited["config"] = json!(
+            "model = 'a'\nmodel_context_window = 272000\nmodel_auto_compact_token_limit = 250000\n"
+        );
+        edited["modelCatalog"]["models"][0]["contextWindow"] = json!(272000);
+        assert_eq!(
+            non_model_settings(&AppType::Codex, &old).unwrap(),
+            non_model_settings(&AppType::Codex, &edited).unwrap()
+        );
+        let mut changed_capability = edited.clone();
+        changed_capability["modelCatalog"]["models"][0]["inputModalities"] = json!(["text"]);
+        assert_ne!(
+            non_model_settings(&AppType::Codex, &old).unwrap(),
+            non_model_settings(&AppType::Codex, &changed_capability).unwrap()
+        );
+        edited["modelCatalog"]["models"][0]["contextWindow"] = json!(-1);
+        assert!(non_model_settings(&AppType::Codex, &edited).is_err());
+        for settings in [
+            json!({"env":{"CLAUDE_CODE_MAX_CONTEXT_TOKENS":"2000001"}}),
+            json!({"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"99999"}}),
+            json!({"env":{"CLAUDE_CODE_MAX_CONTEXT_TOKENS":{"command":"bad"}}}),
+        ] {
+            assert!(non_model_settings(&AppType::Claude, &settings).is_err());
+        }
+        assert!(non_model_settings(
+            &AppType::Gemini,
+            &json!({"config":{"experimental":{"contextManagement":"true"}}})
+        )
+        .is_err());
+        assert!(non_model_settings(
+            &AppType::OpenCode,
+            &json!({"models":{"a":{"limit":{"context":1.5}}}})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn expected_base_compares_sanitized_latest_model_and_context() {
+        let saved = fixture();
+        let mut expected = saved.clone();
+        expected.settings_config["env"]["ANTHROPIC_API_KEY"] = json!("synthetic-only");
+        recheck_expected_base(&AppType::Claude, Some(&saved), Some(&expected)).unwrap();
+        let mut latest = saved.clone();
+        latest.settings_config["env"]["ANTHROPIC_MODEL"] = json!("new-model");
+        assert!(recheck_expected_base(&AppType::Claude, Some(&latest), Some(&expected)).is_err());
+        latest = saved.clone();
+        latest.settings_config["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = json!("100000");
+        assert!(recheck_expected_base(&AppType::Claude, Some(&latest), Some(&expected)).is_err());
+        assert!(recheck_expected_base(&AppType::Claude, None, Some(&expected)).is_err());
     }
     #[test]
     fn rename_copy_and_managed_target_are_rejected() {

@@ -63,8 +63,8 @@
         "id": "toolu_vrtx_02Read",
         "rawName": "read",
         "kind": "read",
-        "title": "/Users/fixture-user/Projects/demo-app/package.json",
-        "inputPreview": "{\"filePath\": \"/Users/fixture-user/Projects/demo-app/package.json\"}",
+        "title": "/Users/test-user/Projects/demo-app/package.json",
+        "inputPreview": "{\"filePath\": \"/Users/test-user/Projects/demo-app/package.json\"}",
         "inputTotalLen": 63
       },
       {
@@ -89,8 +89,8 @@
         "id": "toolu_vrtx_03Grep",
         "rawName": "grep",
         "kind": "search",
-        "title": "\"lint\" in /Users/fixture-user/Projects/demo-app",
-        "inputPreview": "{\"pattern\": \"\\\"lint\\\"\", \"path\": \"/Users/fixture-user/Projects/demo-app\", \"include\": \"*.json\"}",
+        "title": "\"lint\" in /Users/test-user/Projects/demo-app",
+        "inputPreview": "{\"pattern\": \"\\\"lint\\\"\", \"path\": \"/Users/test-user/Projects/demo-app\", \"include\": \"*.json\"}",
         "inputTotalLen": 90
       },
       {
@@ -109,12 +109,12 @@
         "rawName": "edit",
         "kind": "edit",
         "title": "package.json",
-        "inputPreview": "{\"filePath\": \"/Users/fixture-user/Projects/demo-app/package.json\", \"oldString\": \"    \\\"test\\\": \\\"vitest run\\\"\", \"newString\": \"    \\\"test\\\": \\\"vitest run\\\",\\n    \\\"lint\\\": \\\"biome check .\\\"\"}",
+        "inputPreview": "{\"filePath\": \"/Users/test-user/Projects/demo-app/package.json\", \"oldString\": \"    \\\"test\\\": \\\"vitest run\\\"\", \"newString\": \"    \\\"test\\\": \\\"vitest run\\\",\\n    \\\"lint\\\": \\\"biome check .\\\"\"}",
         "inputTotalLen": 187,
         "diff": {
           "files": [
             {
-              "path": "/Users/fixture-user/Projects/demo-app/package.json",
+              "path": "/Users/test-user/Projects/demo-app/package.json",
               "op": "update",
               "added": 2,
               "removed": 1

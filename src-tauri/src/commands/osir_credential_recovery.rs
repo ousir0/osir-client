@@ -163,8 +163,21 @@ pub async fn osir_recover_connection_credential(
 
 /// One bounded startup pass that only reads the credential store silently.
 /// Locked items remain available for the user's explicit recovery action.
-pub(crate) fn recover_connections_at_startup(db: &Database) {
-    let Ok(vault) = managed::vault() else { return };
+pub(crate) fn recover_connections_at_startup(db: &Database) -> bool {
+    recover_connections_with(db, |app, provider_id| {
+        let Ok(vault) = managed::vault() else {
+            return ManagedCredentialRecovery::at(CredentialRecoveryStage::Unavailable);
+        };
+        recover_saved_silently(db, app, provider_id, &vault)
+    })
+}
+
+// Report one aggregate failure for the startup pass, not one per connection.
+fn recover_connections_with(
+    db: &Database,
+    mut recover: impl FnMut(&AppType, &str) -> ManagedCredentialRecovery,
+) -> bool {
+    let mut failed = false;
     for app in [
         AppType::Codex,
         AppType::Claude,
@@ -187,17 +200,19 @@ pub(crate) fn recover_connections_at_startup(db: &Database) {
             if managed::validate_managed_provider_shape(&app, provider).is_err() {
                 continue;
             }
-            let result = recover_saved_silently(db, &app, &provider.id, &vault);
+            let result = recover(&app, &provider.id);
+            failed |= !result.restored;
             if matches!(
                 result.stage,
                 CredentialRecoveryStage::ConfirmationRequired
                     | CredentialRecoveryStage::Unavailable
             ) {
                 log::warn!("OSIR startup connection recovery deferred");
-                return;
+                return true;
             }
         }
     }
+    failed
 }
 
 #[cfg(test)]
@@ -384,6 +399,27 @@ mod tests {
         assert_eq!(result.stage, CredentialRecoveryStage::ConfirmationRequired);
         assert_eq!(f.memory.0.interactive_reads.load(Ordering::SeqCst), 0);
         assert_no_mutation(&f);
+    }
+
+    #[test]
+    fn startup_failure_is_reported_once_without_interactive_access_or_configuration_changes() {
+        let f = fixture();
+        let mut reads = 0;
+        assert!(recover_connections_with(&f.db, |app, id| {
+            reads += 1;
+            recover_saved_silently(&f.db, app, id, &f.vault)
+        }));
+        assert_eq!(reads, 1);
+        assert_eq!(f.memory.0.interactive_reads.load(Ordering::SeqCst), 0);
+        assert_no_mutation(&f);
+        f.memory.0.locked.store(false, Ordering::SeqCst);
+        assert!(!recover_connections_with(&f.db, |app, id| {
+            recover_saved_silently(&f.db, app, id, &f.vault)
+        }));
+        assert!(!recover_connections_with(
+            &Database::memory().unwrap(),
+            |_, _| { panic!("fresh startup has no credentials to recover") }
+        ));
     }
 
     #[test]

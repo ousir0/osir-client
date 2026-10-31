@@ -88,6 +88,8 @@ struct Runtime {
     local: Option<LocalState>,
     worker_started: bool,
     preference_generation: u64,
+    // One classification only, never a credential, account or error payload.
+    pending_credential_failure: bool,
 }
 impl Runtime {
     fn local(&mut self, path: &Path, wall: u64, now: Instant) -> Result<&mut LocalState, String> {
@@ -271,6 +273,9 @@ impl ClientTelemetryState {
         }
         write_preferences(path, &next)?;
         local.preferences = next;
+        if !account && !enabled {
+            runtime.pending_credential_failure = false;
+        }
         runtime.preference_generation = runtime.preference_generation.wrapping_add(1);
         drop(runtime);
         // Interrupt a sleeping worker or an in-flight optional HTTP request.
@@ -300,6 +305,31 @@ impl ClientTelemetryState {
                     .is_some_and(|local| local.preferences.account_enabled)
         })
     }
+    fn queue_credential_failure(
+        &self,
+        path: &Path,
+        allowed: bool,
+        wall: u64,
+        now: Instant,
+    ) -> bool {
+        if !allowed {
+            return false;
+        }
+        let Ok(mut runtime) = self.0.runtime.lock() else {
+            return false;
+        };
+        let Ok(local) = runtime.local(path, wall, now) else {
+            return false;
+        };
+        if !local.preferences.enabled || now < local.failure_rate.next_attempt {
+            return false;
+        }
+        if runtime.pending_credential_failure {
+            return false;
+        }
+        runtime.pending_credential_failure = true;
+        true
+    }
     fn prepare(
         &self,
         path: &Path,
@@ -316,6 +346,13 @@ impl ClientTelemetryState {
         }
         let mut runtime = self.0.runtime.lock().ok()?;
         let generation = runtime.preference_generation;
+        // A login/worker heartbeat drains a startup failure only after the
+        // existing production + connected gates passed. No disk event queue.
+        let event = if runtime.pending_credential_failure && matches!(event, Event::Heartbeat) {
+            Event::CredentialFailed
+        } else {
+            event
+        };
         let local = runtime.local(path, wall, now).ok()?;
         let failure = matches!(event, Event::CredentialFailed | Event::FrontendFailed);
         let rate = if failure {
@@ -347,6 +384,9 @@ impl ClientTelemetryState {
             event,
         })
         .ok()?;
+        if matches!(event, Event::CredentialFailed) {
+            runtime.pending_credential_failure = false;
+        }
         (body.len() <= MAX_BYTES).then_some(Prepared {
             body,
             preference_generation: generation,
@@ -543,7 +583,25 @@ pub enum ClientUpdateResult {
     Failed,
 }
 pub fn record_credential_failure(app: tauri::AppHandle) {
-    record_failure(app, Event::CredentialFailed);
+    let Some(state) = app.try_state::<ClientTelemetryState>() else {
+        return;
+    };
+    let (Ok(path), Some(wall)) = (storage_path(&app), wall_now()) else {
+        return;
+    };
+    if !state.queue_credential_failure(&path, available(&app), wall, Instant::now()) {
+        return;
+    }
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        // Credential failures use anonymous consent only, never account activity.
+        state.send_anonymous(&app, Event::CredentialFailed).await;
+    });
+}
+pub(crate) fn session_changed(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<ClientTelemetryState>() {
+        state.sync(app.clone());
+    }
 }
 fn record_failure(app: tauri::AppHandle, event: Event) {
     let Some(state) = app.try_state::<ClientTelemetryState>() else {
@@ -580,6 +638,96 @@ pub fn record_update_result(app: tauri::AppHandle, result: ClientUpdateResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_credential_failure_waits_for_login_and_coalesces_without_persisting_event() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("telemetry.json");
+        let state = ClientTelemetryState::default();
+        let now = Instant::now();
+        assert!(state.queue_credential_failure(&path, true, 1000, now));
+        for _ in 0..100 {
+            assert!(!state.queue_credential_failure(&path, true, 1000, now));
+        }
+        assert!(
+            !path.exists(),
+            "signed-out failure must not create an identifier or disk queue"
+        );
+        assert!(state
+            .prepare(
+                &path,
+                false,
+                Event::Heartbeat,
+                "0.1.3",
+                "darwin-aarch64",
+                1000,
+                now
+            )
+            .is_none());
+        assert!(state.0.runtime.lock().unwrap().pending_credential_failure);
+        let sent = state
+            .prepare(
+                &path,
+                true,
+                Event::Heartbeat,
+                "0.1.3",
+                "darwin-aarch64",
+                1000,
+                now,
+            )
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&sent.body).unwrap();
+        assert_eq!(body["event"], "credential_failed");
+        assert_eq!(body.as_object().unwrap().len(), 6);
+        assert!(!state.0.runtime.lock().unwrap().pending_credential_failure);
+        assert!(!state.queue_credential_failure(&path, true, 1001, now));
+        assert!(!ClientTelemetryState::default().queue_credential_failure(&path, true, 1001, now));
+        assert!(state.queue_credential_failure(&path, true, 901000, now + INTERVAL));
+        assert!(state
+            .prepare(
+                &path,
+                true,
+                Event::CredentialFailed,
+                "0.1.3",
+                "darwin-aarch64",
+                901000,
+                now + INTERVAL
+            )
+            .is_some());
+        assert!(!state.0.runtime.lock().unwrap().pending_credential_failure);
+    }
+
+    #[test]
+    fn opting_out_discards_deferred_credential_failure_without_account_consent_or_identifier() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("telemetry.json");
+        let state = ClientTelemetryState::default();
+        let now = Instant::now();
+        assert!(!state.queue_credential_failure(&path, false, 1000, now));
+        assert!(!path.exists());
+        assert!(state.queue_credential_failure(&path, true, 1000, now));
+        state.set_enabled(&path, false).unwrap();
+        assert!(!state.0.runtime.lock().unwrap().pending_credential_failure);
+        assert!(!state.queue_credential_failure(&path, true, 1000, now));
+        assert!(read_preferences(&path).unwrap().installation_id.is_none());
+        // Account activity opt-in must never override anonymous opt-out.
+        state.set_account_enabled(&path, true).unwrap();
+        assert!(!state.queue_credential_failure(&path, true, 1000, now));
+        state.set_enabled(&path, true).unwrap();
+        let heartbeat = state
+            .prepare(
+                &path,
+                true,
+                Event::Heartbeat,
+                "0.1.3",
+                "darwin-aarch64",
+                1000,
+                now,
+            )
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&heartbeat.body).unwrap();
+        assert_eq!(body["event"], "heartbeat");
+    }
 
     #[test]
     fn failures_have_a_separate_persisted_limit_and_no_error_details() {

@@ -69,9 +69,9 @@
         "id": "toolu_01PiRead",
         "rawName": "read",
         "kind": "read",
-        "title": "/Users/fixture-user/Projects/demo-app/src/components/LoginButton.tsx",
+        "title": "/Users/test-user/Projects/demo-app/src/components/LoginButton.tsx",
         "detail": ":10-40",
-        "inputPreview": "{\"path\": \"/Users/fixture-user/Projects/demo-app/src/components/LoginButton.tsx\", \"offset\": 10, \"limit\": 31}",
+        "inputPreview": "{\"path\": \"/Users/test-user/Projects/demo-app/src/components/LoginButton.tsx\", \"offset\": 10, \"limit\": 31}",
         "inputTotalLen": 104
       },
       {
@@ -140,13 +140,13 @@
         "id": "toolu_03PiEdit",
         "rawName": "edit",
         "kind": "edit",
-        "title": "/Users/fixture-user/Projects/demo-app/src/components/LoginButton.tsx",
-        "inputPreview": "{\"path\": \"/Users/fixture-user/Projects/demo-app/src/components/LoginButton.tsx\", \"oldText\": \"text-gray-800\", \"newText\": \"text-white\"}",
+        "title": "/Users/test-user/Projects/demo-app/src/components/LoginButton.tsx",
+        "inputPreview": "{\"path\": \"/Users/test-user/Projects/demo-app/src/components/LoginButton.tsx\", \"oldText\": \"text-gray-800\", \"newText\": \"text-white\"}",
         "inputTotalLen": 130,
         "diff": {
           "files": [
             {
-              "path": "/Users/fixture-user/Projects/demo-app/src/components/LoginButton.tsx",
+              "path": "/Users/test-user/Projects/demo-app/src/components/LoginButton.tsx",
               "op": "update",
               "added": 1,
               "removed": 1
@@ -161,8 +161,8 @@
         "id": "toolu_04PiRead",
         "rawName": "read",
         "kind": "read",
-        "title": "/Users/fixture-user/Projects/demo-app/docs/screens/login-dark.png",
-        "inputPreview": "{\"path\": \"/Users/fixture-user/Projects/demo-app/docs/screens/login-dark.png\"}",
+        "title": "/Users/test-user/Projects/demo-app/docs/screens/login-dark.png",
+        "inputPreview": "{\"path\": \"/Users/test-user/Projects/demo-app/docs/screens/login-dark.png\"}",
         "inputTotalLen": 74
       }
     ],
@@ -183,7 +183,7 @@
         "type": "tool_result",
         "callId": "toolu_03PiEdit",
         "status": "success",
-        "preview": "Successfully replaced text in /Users/fixture-user/Projects/demo-app/src/components/LoginButton.tsx.",
+        "preview": "Successfully replaced text in /Users/test-user/Projects/demo-app/src/components/LoginButton.tsx.",
         "totalLen": 96,
         "lineCount": 1,
         "truncated": false

@@ -63,130 +63,23 @@ fn ipc_provider(app: &AppType, mut provider: Provider) -> Result<Provider, Strin
     Ok(provider)
 }
 
-// Compare the non-model remainder after removing a small set of editable fields.
-// New executable hooks, environment variables, endpoints and SDK choices are not
-// model edits, even when the immutable vault binding itself was copied unchanged.
+#[cfg(test)]
 fn non_model_settings(
     app: &AppType,
     settings: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let mut value = settings.clone();
-    let invalid = || MANAGED_BINDING_ERROR.to_string();
-    let root = value.as_object_mut().ok_or_else(invalid)?;
-    match app {
-        AppType::Claude | AppType::Gemini => {
-            if let Some(env) = root
-                .get_mut("env")
-                .and_then(serde_json::Value::as_object_mut)
-            {
-                let fields: &[&str] = if matches!(app, AppType::Claude) {
-                    &[
-                        "ANTHROPIC_MODEL",
-                        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-                        "ANTHROPIC_DEFAULT_SONNET_MODEL",
-                        "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                        "CLAUDE_CODE_SUBAGENT_MODEL",
-                    ]
-                } else {
-                    &["GEMINI_MODEL"]
-                };
-                for field in fields {
-                    if let Some(model) = env.remove(*field) {
-                        if !model.is_string() {
-                            return Err(invalid());
-                        }
-                    }
-                }
-            }
-        }
-        AppType::Codex => {
-            let config = root
-                .get("config")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(invalid)?;
-            let mut doc: toml::Value = config.parse().map_err(|_| invalid())?;
-            let table = doc.as_table_mut().ok_or_else(invalid)?;
-            for field in ["model", "model_reasoning_effort"] {
-                if let Some(model) = table.remove(field) {
-                    if !model.is_str() {
-                        return Err(invalid());
-                    }
-                }
-            }
-            root.insert(
-                "config".into(),
-                serde_json::to_value(doc).map_err(|_| invalid())?,
-            );
-            if let Some(catalog) = root.get_mut("modelCatalog") {
-                let catalog = catalog.as_object_mut().ok_or_else(invalid)?;
-                if let Some(models) = catalog.remove("models") {
-                    for model in models.as_array().ok_or_else(invalid)? {
-                        let model = model.as_object().ok_or_else(invalid)?;
-                        if !model.contains_key("model")
-                            || model.iter().any(|(key, value)| {
-                                !matches!(key.as_str(), "model" | "name") || !value.is_string()
-                            })
-                        {
-                            return Err(invalid());
-                        }
-                    }
-                }
-            }
-        }
-        AppType::OpenCode => {
-            if let Some(models) = root.remove("models") {
-                for model in models.as_object().ok_or_else(invalid)?.values() {
-                    if model
-                        .as_object()
-                        .ok_or_else(invalid)?
-                        .iter()
-                        .any(|(key, value)| {
-                            !matches!(key.as_str(), "name" | "modelID" | "id") || !value.is_string()
-                        })
-                    {
-                        return Err(invalid());
-                    }
-                }
-            }
-        }
-        _ => return Err(invalid()),
-    }
-    Ok(value)
+    crate::services::provider::managed_update::non_model_settings(app, settings)
 }
 
+#[cfg(test)]
 fn prepare_managed_update(
     app: &AppType,
     saved: Option<&Provider>,
-    mut incoming: Provider,
+    incoming: Provider,
 ) -> Result<Provider, String> {
-    let managed = unchanged_binding(
-        saved.and_then(osir_binding),
-        osir_binding(&incoming),
-        saved.is_some_and(|old| old.id == incoming.id),
-    )?;
-    if managed {
-        let saved = saved.ok_or_else(|| MANAGED_BINDING_ERROR.to_string())?;
-        if incoming.category != saved.category
-            || serde_json::to_value(&incoming.meta).ok() != serde_json::to_value(&saved.meta).ok()
-        {
-            return Err(MANAGED_BINDING_ERROR.into());
-        }
-        managed::validate_provider(app, &incoming)
-            .map_err(|_| MANAGED_BINDING_ERROR.to_string())?;
-        incoming.settings_config =
-            managed::sanitize_settings(app, &incoming, &incoming.settings_config)
-                .map_err(|_| MANAGED_UNAVAILABLE.to_string())?;
-        managed::validate_provider(app, &incoming)
-            .map_err(|_| MANAGED_BINDING_ERROR.to_string())?;
-        let saved_settings = managed::sanitize_settings(app, saved, &saved.settings_config)
-            .map_err(|_| MANAGED_UNAVAILABLE.to_string())?;
-        if non_model_settings(app, &saved_settings)?
-            != non_model_settings(app, &incoming.settings_config)?
-        {
-            return Err(MANAGED_BINDING_ERROR.into());
-        }
-    }
-    Ok(incoming)
+    let id = incoming.id.clone();
+    crate::services::provider::managed_update::recheck_update(app, &id, saved, None, incoming)
+        .map_err(|error| error.to_string())
 }
 
 /// 获取所有供应商
@@ -247,6 +140,7 @@ pub async fn update_provider(
     provider: Provider,
     #[allow(non_snake_case)] originalId: Option<String>,
     #[allow(non_snake_case)] editorSave: Option<EditorSave>,
+    #[allow(non_snake_case)] expectedBase: Option<Provider>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -267,12 +161,25 @@ pub async fn update_provider(
                 return Err(MANAGED_BINDING_ERROR.into());
             }
         }
-        let provider = prepare_managed_update(&app_type, saved.as_ref(), provider)?;
-        if osir_binding(&provider).is_some() {
+        if osir_binding(&provider).is_some()
+            || saved.as_ref().and_then(osir_binding).is_some()
+            || expectedBase.is_some()
+        {
             // EditorSave plans merge live/base/draft data back into the row. Bypass
             // that path for managed rows: only the sanitized saved-row edit is owned.
-            return ProviderService::update(state.inner(), app_type, None, provider)
-                .map_err(|_| MANAGED_UNAVAILABLE.to_string());
+            return ProviderService::update_checked(
+                state.inner(),
+                app_type,
+                originalId.as_deref(),
+                provider,
+                expectedBase.as_ref(),
+            )
+            .map_err(|error| match error {
+                AppError::InvalidInput(_) => {
+                    "连接设置已变化或包含不支持的值，请刷新后重试。".to_string()
+                }
+                _ => MANAGED_UNAVAILABLE.to_string(),
+            });
         }
         ProviderService::update_from_editor(
             state.inner(),

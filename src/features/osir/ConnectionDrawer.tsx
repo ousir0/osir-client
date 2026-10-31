@@ -24,14 +24,18 @@ import { providersApi } from "@/lib/api";
 import type { Provider } from "@/types";
 import { AccountConnection } from "./AccountConnection";
 import { ManagedConnectionDetails } from "./ManagedConnectionDetails";
+import { GptContextWindowHint } from "@/components/providers/forms/shared/GptContextWindowHint";
 import "./drawer.css";
 import {
   buildConnection,
+  applyConnectionContext,
+  readConnectionContext,
   readConnection,
   isCodexConversationModel,
   TOOL_NAMES,
   type ConnectionToolId,
   type ConnectionDraft,
+  type ConnectionContextDraft,
 } from "./providerConfig";
 
 export function ConnectionDrawer({
@@ -80,6 +84,13 @@ export function ConnectionDrawer({
         },
   );
   const [models, setModels] = useState<string[]>([]);
+  const [context, setContext] = useState(() =>
+    readConnectionContext(provider, tool),
+  );
+  const contextBase = useRef(context);
+  const [contextModel, setContextModel] = useState("");
+  const contextDirty =
+    JSON.stringify(context) !== JSON.stringify(contextBase.current);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
@@ -122,6 +133,12 @@ export function ConnectionDrawer({
       .then((view) => {
         if (!cancelled) {
           setEditBase(view.settings);
+          const loadedContext = readConnectionContext(
+            { ...provider, settingsConfig: view.settings },
+            tool,
+          );
+          contextBase.current = loadedContext;
+          setContext(loadedContext);
           setDraft(
             readConnection(
               { ...provider, settingsConfig: view.settings },
@@ -144,7 +161,8 @@ export function ConnectionDrawer({
   const requestLeave = (action: () => void) => {
     if (pending.current) return;
     leaveAction.current = action;
-    if (dirty || accountDirty || keyCreationDirty) setConfirmClose(true);
+    if (dirty || contextDirty || accountDirty || keyCreationDirty)
+      setConfirmClose(true);
     else action();
   };
   const close = () => requestLeave(onClose);
@@ -220,7 +238,7 @@ export function ConnectionDrawer({
       reportBusy(false);
     }
   }
-  async function saveManagedName() {
+  async function saveManagedSettings() {
     if (pending.current || !managed || !provider || preview) return;
     reportBusy(true);
     setError("");
@@ -237,23 +255,34 @@ export function ConnectionDrawer({
       const latest = (await providersApi.getAll(tool))[provider.id];
       if (!latest?.meta?.osirBinding)
         throw new Error("此账户连接已变化，请关闭抽屉并刷新后重试。");
-      const renamed = {
-        ...latest,
-        name,
-        ...(tool === "codex" && aggregationChanged(draft)
-          ? {
-              meta: {
-                ...latest.meta,
-                hideAggregationName: draft.hideAggregationName ?? true,
-              },
-            }
-          : {}),
-      };
-      const confirmed = await providersApi.update(renamed, tool);
+      const configured = applyConnectionContext(
+        {
+          ...latest,
+          name,
+          ...(tool === "codex" && aggregationChanged(draft)
+            ? {
+                meta: {
+                  ...latest.meta,
+                  hideAggregationName: draft.hideAggregationName ?? true,
+                },
+              }
+            : {}),
+        },
+        tool,
+        context,
+        contextBase.current,
+      );
+      const confirmed = await providersApi.update(
+        configured,
+        tool,
+        undefined,
+        undefined,
+        latest,
+      );
       if (!confirmed)
-        throw new Error("名称保存未确认，请刷新供应商列表核对后重试。");
+        throw new Error("保存未确认，请刷新供应商列表核对后重试。");
       setDirty(false);
-      onSaved(renamed);
+      onSaved(configured);
       onClose();
     } catch (e) {
       setError(connectionError(e));
@@ -307,16 +336,22 @@ export function ConnectionDrawer({
           ? { ...provider, settingsConfig: editBase }
           : provider,
       );
+      const configured = applyConnectionContext(
+        result,
+        tool,
+        context,
+        contextBase.current,
+      );
       const saved = provider
         ? await providersApi.update(
-            result,
+            configured,
             tool,
             undefined,
             editBase ? { base: editBase, onConflict: "refuse" } : undefined,
           )
-        : await providersApi.add(result, tool, false);
+        : await providersApi.add(configured, tool, false);
       if (!saved) throw new Error("保存未确认完成，请先检查供应商列表再重试。");
-      onSaved(result);
+      onSaved(configured);
       onClose();
     } catch (e) {
       setError(connectionError(e, [draft.apiKey, draft.apiKey.trim()]));
@@ -325,6 +360,161 @@ export function ConnectionDrawer({
     }
   }
   const blocked = busy || loadingBase || !!baseError;
+  const contextFields = (disabled: boolean) => {
+    if (tool === "claude-desktop")
+      return (
+        <p className="osir-muted" role="note">
+          Claude
+          桌面客户端暂不支持在此设置自定义上下文上限或自动压缩阈值。Claude Code
+          的设置不适用于桌面客户端。
+        </p>
+      );
+    const update = (next: ConnectionContextDraft) => setContext(next);
+    const numberField = (
+      label: string,
+      value: string,
+      onChange: (value: string) => void,
+      maximum = Number.MAX_SAFE_INTEGER,
+      minimum = 1,
+      off = false,
+    ) => (
+      <label>
+        {label}
+        <input
+          type="number"
+          inputMode="numeric"
+          min={minimum}
+          max={maximum}
+          step={1}
+          value={value}
+          disabled={disabled || off}
+          placeholder="使用默认值"
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+    );
+    const ids = [
+      ...new Set([
+        ...Object.keys(context.models),
+        ...(!managed && draft.model.trim() ? [draft.model.trim()] : []),
+      ]),
+    ].filter((id) => tool !== "codex" || isCodexConversationModel(id));
+    const selected = ids.includes(contextModel) ? contextModel : ids[0] || "";
+    const row = context.models[selected] ?? { window: "", output: "" };
+    const setModel = (key: "window" | "output", value: string) =>
+      update({
+        ...context,
+        models: { ...context.models, [selected]: { ...row, [key]: value } },
+      });
+    return (
+      <section
+        className="osir-form osir-drawer-section"
+        aria-label="上下文设置"
+      >
+        <strong className="osir-drawer-section-title">上下文设置</strong>
+        {tool === "codex" && (
+          <>
+            <p className="osir-muted">
+              适用于 Codex CLI
+              和桌面客户端。供应商窗口上限优先于下方的单个模型设置；留空不指定上限，由客户端决定。
+            </p>
+            {numberField(
+              "供应商上下文上限（Token）",
+              context.window,
+              (window) => update({ ...context, window }),
+            )}
+            {numberField("自动压缩阈值（Token）", context.compact, (compact) =>
+              update({ ...context, compact }),
+            )}
+          </>
+        )}
+        {tool === "claude" && (
+          <>
+            <p className="osir-muted">
+              适用于此供应商的所有 Claude Code 模型，不适用于 Claude
+              桌面客户端。
+            </p>
+            {numberField(
+              "上下文上限（Token）",
+              context.window,
+              (window) => update({ ...context, window }),
+              2_000_000,
+            )}
+            <small>关闭自动压缩时使用此上限；留空使用模型默认值。</small>
+            {numberField(
+              "自动压缩窗口（Token）",
+              context.compact,
+              (compact) => update({ ...context, compact }),
+              1_000_000,
+              100_000,
+            )}
+            <small>留空使用默认值。可用窗口与费用取决于供应商和模型。</small>
+          </>
+        )}
+        {tool === "gemini" && (
+          <>
+            <p className="osir-muted">
+              适用于此供应商的所有 Gemini CLI 模型。保存后需重启 Gemini CLI。
+            </p>
+            <label className="osir-checkbox-label">
+              <input
+                type="checkbox"
+                checked={context.enabled}
+                disabled={disabled}
+                onChange={(event) =>
+                  update({ ...context, enabled: event.target.checked })
+                }
+              />
+              自动压缩历史记录
+            </label>
+            {numberField(
+              "历史窗口上限（Token）",
+              context.window,
+              (window) => update({ ...context, window }),
+              2_000_000,
+              1,
+              !context.enabled,
+            )}
+            <small>开启后达到上限时压缩较早的对话；留空使用 150000。</small>
+          </>
+        )}
+        {(tool === "codex" || tool === "opencode") && ids.length > 0 && (
+          <>
+            <label>
+              上下文设置模型
+              <select
+                value={selected}
+                disabled={disabled}
+                onChange={(event) => setContextModel(event.target.value)}
+              >
+                {ids.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {numberField("模型上下文上限（Token）", row.window, (value) =>
+              setModel("window", value),
+            )}
+            <GptContextWindowHint
+              modelId={selected}
+              contextWindow={
+                tool === "codex" ? context.window || row.window : row.window
+              }
+            />
+            {tool === "opencode" &&
+              numberField("模型输出上限（Token）", row.output, (value) =>
+                setModel("output", value),
+              )}
+            <small>
+              仅影响所选模型；留空不指定上限，不会提高上游模型的实际能力。
+            </small>
+          </>
+        )}
+      </section>
+    );
+  };
   function validateEndpoint() {
     let url: URL;
     try {
@@ -448,7 +638,7 @@ export function ConnectionDrawer({
               aria-label="编辑账户连接"
               onSubmit={(event) => {
                 event.preventDefault();
-                void saveManagedName();
+                void saveManagedSettings();
               }}
             >
               <label>
@@ -469,6 +659,7 @@ export function ConnectionDrawer({
                 busy={busy}
                 onBusy={reportBusy}
               />
+              {contextFields(busy || preview)}
               {tool === "opencode" &&
               provider.meta?.liveConfigManaged !== false ? (
                 <p className="osir-muted" role="note">
@@ -482,6 +673,7 @@ export function ConnectionDrawer({
                   onClick={() =>
                     requestLeave(() => {
                       setDirty(false);
+                      setContext(contextBase.current);
                       setAccountDirty(false);
                       setDraft((value) => ({ ...value, name: provider.name }));
                       setError("");
@@ -504,10 +696,11 @@ export function ConnectionDrawer({
                     preview ||
                     !draft.name.trim() ||
                     (draft.name.trim() === provider.name &&
-                      !aggregationChanged(draft))
+                      !aggregationChanged(draft) &&
+                      !contextDirty)
                   }
                 >
-                  {busy ? "正在保存…" : "保存名称"}
+                  {busy ? "正在保存…" : "保存设置"}
                 </button>
               </div>
             </form>
@@ -696,6 +889,7 @@ export function ConnectionDrawer({
               <p className="osir-muted">
                 密钥的分组由 OSIR 网站绑定。此处不会修改云端分组。
               </p>
+              {!managed && contextFields(blocked)}
               {provider && (
                 <p className="osir-muted">
                   编辑当前已生效的供应商时，保存后将同步工具配置。
@@ -740,7 +934,7 @@ export function ConnectionDrawer({
               <DialogTitle>放弃尚未保存的连接修改？</DialogTitle>
               <DialogDescription>
                 {managed && !replacingKey
-                  ? "关闭后将丢弃尚未保存的连接显示设置。"
+                  ? "关闭后将丢弃尚未保存的连接设置。"
                   : "关闭后丢弃两种来源的本地草稿。已在账户中创建的密钥会保留。"}
               </DialogDescription>
             </DialogHeader>

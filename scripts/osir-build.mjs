@@ -22,7 +22,15 @@ import {
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { arch } from "node:os";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDmg } from "./osir-dmg.mjs";
 import { verifyReleaseDiagnostics } from "./osir-release-diagnostics.mjs";
@@ -142,6 +150,8 @@ const inputFiles = [
   "pnpm-workspace.yaml",
   ".node-version",
   "rust-toolchain.toml",
+  "tests/config/claudeKeyFields.json",
+  "tests/fixtures/copilot-endpoint-cases.json",
   "scripts/osir-build.mjs",
   "scripts/osir-build-windows.mjs",
   "scripts/osir-build-macos-ci.mjs",
@@ -205,6 +215,109 @@ const excludedInputDirectories = new Set([
   ".gemini",
 ]);
 
+// Check only files explicitly approved for export. Missing dependencies fail
+// before building; this never widens the public snapshot allowlist.
+export function verifyRustIncludeInputs(sourceRoot, files) {
+  const approved = new Set(files);
+  let references = 0;
+  for (const file of approved) {
+    if (!file.endsWith(".rs")) continue;
+    const source = readFileSync(join(sourceRoot, file), "utf8");
+    // Tokenize strings and nested comments so examples in either cannot be
+    // mistaken for macros. Include paths may be normal or raw Rust strings.
+    const tokens = [];
+    for (let i = 0; i < source.length; ) {
+      if (/\s/.test(source[i])) {
+        i++;
+        continue;
+      }
+      if (source.startsWith("//", i)) {
+        const end = source.indexOf("\n", i + 2);
+        i = end < 0 ? source.length : end + 1;
+        continue;
+      }
+      if (source.startsWith("/*", i)) {
+        let depth = 1;
+        i += 2;
+        while (i < source.length && depth) {
+          if (source.startsWith("/*", i)) {
+            depth++;
+            i += 2;
+          } else if (source.startsWith("*/", i)) {
+            depth--;
+            i += 2;
+          } else i++;
+        }
+        continue;
+      }
+      const character =
+        /^'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\r\n])'/u.exec(
+          source.slice(i),
+        );
+      if (character) {
+        tokens.push({ character: true });
+        i += character[0].length;
+        continue;
+      }
+      const raw = /^r(#{0,255})"/.exec(source.slice(i));
+      if (raw) {
+        const start = i + raw[0].length;
+        const end = source.indexOf('"' + raw[1], start);
+        requireThat(end >= 0, `Unterminated Rust raw string: ${file}`);
+        tokens.push({ string: source.slice(start, end) });
+        i = end + 1 + raw[1].length;
+        continue;
+      }
+      if (source[i] === '"') {
+        const start = i++;
+        while (i < source.length) {
+          if (source[i] === "\\") i += 2;
+          else if (source[i++] === '"') break;
+        }
+        // Rust has escapes beyond JSON; reject unsupported include paths
+        // explicitly, while permitting those strings elsewhere in the file.
+        let value;
+        try {
+          value = JSON.parse(source.slice(start, i));
+        } catch {}
+        tokens.push({ string: value });
+        continue;
+      }
+      const word = /^[A-Za-z_][A-Za-z_0-9]*/.exec(source.slice(i));
+      if (word) {
+        tokens.push(word[0]);
+        i += word[0].length;
+      } else tokens.push(source[i++]);
+    }
+    for (let i = 0; i < tokens.length - 2; i++) {
+      if (
+        !/^(include_str|include_bytes)$/.test(tokens[i]) ||
+        tokens[i + 1] !== "!"
+      )
+        continue;
+      requireThat(
+        tokens[i + 2] === "(" &&
+          typeof tokens[i + 3]?.string === "string" &&
+          (tokens[i + 4] === ")" ||
+            (tokens[i + 4] === "," && tokens[i + 5] === ")")),
+        `Rust include needs a reviewed literal path: ${file}`,
+      );
+      const target = relative(
+        sourceRoot,
+        resolve(sourceRoot, dirname(file), tokens[i + 3].string),
+      )
+        .split(sep)
+        .join("/");
+      requireThat(
+        approved.has(target),
+        `Rust include missing from release inputs: ${file} -> ${target}`,
+      );
+      references++;
+    }
+  }
+  return { references };
+}
+
 export function sourceSnapshot() {
   const sourceRoot = realpathSync(root);
   function statInput(relative) {
@@ -252,6 +365,7 @@ export function sourceSnapshot() {
   const state = createHash("sha256");
   const buffer = Buffer.allocUnsafe(64 * 1024);
   let fileCount = 0;
+  const actualFiles = new Set();
   function metadata(stat) {
     return [
       stat.dev,
@@ -309,12 +423,14 @@ export function sourceSnapshot() {
       );
       content.update("\0");
       fileCount++;
+      actualFiles.add(relative);
     } finally {
       closeSync(fd);
     }
   }
   for (const directory of inputDirectories) visit(directory);
   for (const file of inputs.files) visit(file);
+  verifyRustIncludeInputs(sourceRoot, actualFiles);
   return {
     provenance: {
       schemaVersion: 1,

@@ -21,7 +21,9 @@ pub(crate) mod grok_direct;
 mod grok_editor;
 pub(crate) mod icon;
 mod live;
-mod managed_update;
+#[cfg(test)]
+mod managed_context_tests;
+pub(crate) mod managed_update;
 mod omp;
 #[cfg(test)]
 mod opencode_tests;
@@ -351,9 +353,11 @@ mod tests {
             .unwrap_or_else(|err| err.into_inner())
     }
 
-    fn with_test_home<T>(test: impl FnOnce(&AppState, &Path) -> T) -> T {
+    pub(super) fn with_test_home<T>(test: impl FnOnce(&AppState, &Path) -> T) -> T {
         let _guard = test_guard();
-        let temp = tempfile::tempdir().expect("tempdir");
+        let temp =
+            tempfile::tempdir_in(std::env::temp_dir().canonicalize().expect("canonical temp"))
+                .expect("tempdir");
         let old_test_home = std::env::var_os("CC_SWITCH_TEST_HOME");
         let old_home = std::env::var_os("HOME");
         std::env::set_var("CC_SWITCH_TEST_HOME", temp.path());
@@ -6650,6 +6654,17 @@ impl ProviderService {
         original_id: Option<&str>,
         provider: Provider,
     ) -> Result<bool, AppError> {
+        Self::update_checked(state, app_type, original_id, provider, None)
+    }
+
+    /// Check an IPC snapshot while holding the same lock as the write.
+    pub(crate) fn update_checked(
+        state: &AppState,
+        app_type: AppType,
+        original_id: Option<&str>,
+        provider: Provider,
+        expected_base: Option<&Provider>,
+    ) -> Result<bool, AppError> {
         let mut provider = provider;
         if app_type == AppType::Kimi {
             // Official cards come from signing in. Their models, name and notes are
@@ -6689,6 +6704,11 @@ impl ProviderService {
         let existing_provider = state
             .db
             .get_provider_by_id(&original_id, app_type.as_str())?;
+        managed_update::recheck_expected_base(
+            &app_type,
+            existing_provider.as_ref(),
+            expected_base,
+        )?;
         let target = if provider_id_changed {
             state
                 .db

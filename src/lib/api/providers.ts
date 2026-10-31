@@ -103,12 +103,14 @@ export const providersApi = {
     appId: AppId,
     originalId?: string,
     editorSave?: ProviderEditorSave,
+    expectedBase?: Provider,
   ): Promise<boolean> {
     return await invoke("update_provider", {
       provider,
       app: appId,
       originalId,
       ...(editorSave ? { editorSave } : {}),
+      ...(expectedBase ? { expectedBase } : {}),
     });
   },
 
