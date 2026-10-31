@@ -32,6 +32,7 @@ $stage = 'preflight'
 $failure = $null
 $rendererPort = 0
 $usedRendererPorts = [Collections.Generic.HashSet[int]]::new()
+$debugPolicyOwned = $false
 $report = [ordered]@{
     schemaVersion = 1
     passed = $false
@@ -200,6 +201,26 @@ function Start-Isolated([string]$Path, [string]$Arguments = '', [bool]$MissingRu
     }
     if ($MissingRuntime) {
         $start.Environment['WEBVIEW2_BROWSER_EXECUTABLE_FOLDER'] = Join-Path $smokeRoot 'missing-webview2-runtime'
+    }
+    if ($Path -eq $mainExe -and -not $MissingRuntime) {
+        # Runtime 150+ ignores environment browser arguments for elevated hosts.
+        # Use Microsoft's supported machine-policy channel only in this ephemeral
+        # runner, restricted to this application; never enable a wildcard policy.
+        $policy = 'SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+        $key = [Microsoft.Win32.Registry]::LocalMachine.CreateSubKey($policy)
+        try {
+            if (-not $script:debugPolicyOwned) {
+                foreach ($appId in @('osir_client.exe', 'com.osir.client')) {
+                    Assert-Smoke ($null -eq $key.GetValue($appId)) 'Refusing to replace an existing WebView2 debugging policy.'
+                }
+            }
+            $script:debugPolicyOwned = $true
+            foreach ($appId in @('osir_client.exe', 'com.osir.client')) {
+                $key.SetValue($appId, "--remote-debugging-port=$script:rendererPort --remote-debugging-address=127.0.0.1", [Microsoft.Win32.RegistryValueKind]::String)
+            }
+            $report.debuggerConfiguration = 'ephemeral-HKLM-application-specific-policy-for-elevated-WebView2-150-plus'
+        } finally { $key.Dispose() }
+        [void]$start.Environment.Remove('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS')
     }
     return [System.Diagnostics.Process]::Start($start)
 }
@@ -773,6 +794,15 @@ print("Synthetic migration fixture verified")
     Write-Host "::error::[$stage] $($_.Exception.Message)"
 } finally {
     Stop-OwnedApp
+    if ($script:debugPolicyOwned) {
+        $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments', $true)
+        if ($null -ne $key) {
+            try {
+                foreach ($appId in @('osir_client.exe', 'com.osir.client')) { $key.DeleteValue($appId, $false) }
+            } finally { $key.Dispose() }
+        }
+        $report.debuggerPolicyValuesRemoved = $true
+    }
     $startupLogDir = Join-Path $isolatedToolHome '.osir_client/logs'
     if (Test-Path -LiteralPath $startupLogDir -PathType Container) {
         Copy-Item -LiteralPath $startupLogDir -Destination (Join-Path $artifactDir 'windows-startup-logs') -Recurse -Force -ErrorAction Continue

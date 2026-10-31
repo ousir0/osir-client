@@ -56,6 +56,13 @@ test("renderer debugger refuses remote hosts, credentials and wrong ports", () =
     assert.throws(() => debuggerEndpoint(url, 9222));
 });
 
+test("renderer debugger normalizes a WebView localhost URL to IPv4 loopback", () => {
+  assert.equal(
+    debuggerEndpoint("ws://localhost:9222/devtools/page/fixture", 9222),
+    "ws://127.0.0.1:9222/devtools/page/fixture",
+  );
+});
+
 test("a window handle cannot pass blank, locked, broken-image or clipped renderers", () => {
   const ready = {
     ready: true,
