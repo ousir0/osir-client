@@ -5,6 +5,11 @@ use crate::services::osir::windows_codex_package::{
     PACKAGE_FAMILY, PACKAGE_IDENTITY as CODEX_PACKAGE, PACKAGE_PUBLISHER as CODEX_PUBLISHER,
 };
 pub(crate) const STORE_URL: &str = "https://apps.microsoft.com/detail/9PLM9XGG6VKS";
+// The first AppX query also starts Windows PowerShell and imports its module.
+// A clean Windows runner took 5.3 s before returning an empty package list.
+// Keep this bounded, but leave enough room for a cold query on user machines.
+#[cfg(any(windows, test))]
+const DISCOVERY_BUDGET: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub(crate) fn package_url(arch: &str) -> Result<&'static str, String> {
     match arch {
@@ -234,7 +239,12 @@ pub(crate) async fn discover(id: &str) -> Result<Vec<Installation>, String> {
         "claude-desktop" => CLAUDE_DISCOVERY,
         _ => return Err("此 Windows 桌面应用尚未接入检测与控制".into()),
     };
-    let json = powershell(script, std::time::Duration::from_secs(5)).await?;
+    let json = powershell(script, DISCOVERY_BUDGET).await?;
+    parse_installations(id, json)
+}
+
+#[cfg(any(windows, test))]
+fn parse_installations(id: &str, json: serde_json::Value) -> Result<Vec<Installation>, String> {
     let entries: Vec<Installation> =
         serde_json::from_value(json).map_err(|_| "无法读取 Windows 应用安装信息")?;
     for entry in &entries {

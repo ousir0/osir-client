@@ -124,13 +124,13 @@ async function connect(url) {
   });
   return {
     exceptions: () => exceptions,
-    async call(method, params = {}) {
+    async call(method, params = {}, timeoutMilliseconds = 10000) {
       const id = ++serial;
       return await new Promise((done, fail) => {
         const timer = setTimeout(() => {
           pending.delete(id);
           fail(new Error(`Renderer command timed out: ${method}`));
-        }, 10000);
+        }, timeoutMilliseconds);
         pending.set(id, (row) => {
           clearTimeout(timer);
           pending.delete(id);
@@ -279,13 +279,13 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
     }
     assert.ok(client, "Installed WebView2 renderer did not become available");
     await client.call("Runtime.enable");
-    const evaluate = async (expression, stage) => {
+    const evaluate = async (expression, stage, timeoutMilliseconds = 10000) => {
       try {
-        const result = await client.call("Runtime.evaluate", {
-          expression,
-          returnByValue: true,
-          awaitPromise: true,
-        });
+        const result = await client.call(
+          "Runtime.evaluate",
+          { expression, returnByValue: true, awaitPromise: true },
+          timeoutMilliseconds,
+        );
         if (result.exceptionDetails) {
           const details = result.exceptionDetails;
           const detail =
@@ -332,6 +332,9 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
       catch(error) { const message = typeof error === 'string' ? error : error?.message || 'native command rejected'; return {passed: false, error: message.slice(0, 240)}; }
       })()`,
         `native-ipc:${command}`,
+        // Windows discovery has a bounded 15 s allowance for cold PowerShell/
+        // AppX initialization; keep the IPC harness outside that native limit.
+        command === "osir_codex_desktop_detection" ? 20000 : 10000,
       );
       if (result.error) result.error = safeDiagnostic(result.error);
       report.nativeIpcChecks.push({

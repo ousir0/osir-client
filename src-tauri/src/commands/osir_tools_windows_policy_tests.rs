@@ -1,4 +1,5 @@
-//! Offline policy tests only. No process discovery, launch, close or restart.
+//! Identity policy and read-only Windows subprocess regression tests.
+//! Never launch, close or restart a user application.
 use super::*;
 
 fn installed() -> Installation {
@@ -170,4 +171,60 @@ fn powershell_values_are_single_literal_arguments() {
         "'C:\\folder''s\\file.exe'"
     );
     assert_eq!(ps_literal("$(not-a-command)"), "'$(not-a-command)'");
+}
+
+#[test]
+fn empty_discovery_is_absent_but_invalid_or_partial_output_is_an_error() {
+    assert!(parse_installations("codex", serde_json::json!([]))
+        .unwrap()
+        .is_empty());
+    for invalid in [
+        serde_json::Value::Null,
+        serde_json::json!({}),
+        serde_json::json!([{}]),
+        serde_json::json!([{"package": "OpenAI.Codex"}]),
+    ] {
+        assert!(parse_installations("codex", invalid).is_err());
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn cold_powershell_probe_can_complete_after_the_old_five_second_limit() {
+    let started = std::time::Instant::now();
+    let value = powershell("Start-Sleep -Milliseconds 5250; '[]'", DISCOVERY_BUDGET)
+        .await
+        .unwrap();
+    assert!(started.elapsed() >= std::time::Duration::from_millis(5250));
+    assert!(parse_installations("codex", value).unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn powershell_timeout_and_failed_query_never_become_not_installed() {
+    let error = powershell(
+        "Start-Sleep -Seconds 30; '[]'",
+        std::time::Duration::from_millis(300),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("超时"), "{error}");
+    assert!(
+        powershell("throw 'synthetic query failure'", DISCOVERY_BUDGET)
+            .await
+            .is_err()
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn real_registered_codex_query_returns_verified_entries_or_explicit_absence() {
+    let entries = discover("codex").await.unwrap();
+    for entry in &entries {
+        entry.validate("codex").unwrap();
+        assert!(std::path::Path::new(&entry.executable).is_file());
+    }
+    // An empty runner only covers absence; report real installed-tool coverage
+    // separately instead of treating this test as evidence of installation.
+    eprintln!("Registered Codex installations observed: {}", entries.len());
 }
