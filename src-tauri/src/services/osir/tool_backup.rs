@@ -14,7 +14,7 @@ use std::{
     collections::HashMap,
     fs,
     io::Read,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -22,9 +22,12 @@ use std::{
 const MAX_FILE: u64 = 4 * 1024 * 1024;
 const MAX_META: u64 = 32768;
 const MAX_SNAPSHOTS: usize = 100;
+#[path = "tool_backup_path.rs"]
+mod path_safety;
 #[cfg(windows)]
 #[path = "tool_backup_windows.rs"]
 mod windows;
+use path_safety::safe_path;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tool {
@@ -612,29 +615,6 @@ fn info(path: &Path, bytes: Option<&[u8]>) -> FileInfo {
         hash: engine::digest(bytes),
         size_bytes: bytes.map_or(0, |b| b.len() as u64),
     }
-}
-fn safe_path(path: &Path) -> Result<()> {
-    if !path.is_absolute() {
-        return Err(BackupError::UnsafePath);
-    }
-    let mut cursor = PathBuf::new();
-    for c in path.components() {
-        if matches!(c, Component::ParentDir | Component::CurDir) {
-            return Err(BackupError::UnsafePath);
-        }
-        cursor.push(c);
-        match fs::symlink_metadata(&cursor) {
-            #[cfg(windows)]
-            Ok(m) if windows::is_reparse(&m) => return Err(BackupError::UnsafePath),
-            Ok(m) if m.file_type().is_symlink() || (cursor != path && !m.is_dir()) => {
-                return Err(BackupError::UnsafePath)
-            }
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(BackupError::Storage),
-        }
-    }
-    Ok(())
 }
 fn read(path: &Path, limit: u64, private: bool) -> Result<Option<Vec<u8>>> {
     safe_path(path)?;

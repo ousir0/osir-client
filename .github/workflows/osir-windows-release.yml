@@ -18,6 +18,11 @@ on:
         required: true
         default: true
         type: boolean
+      backup_preflight_only:
+        description: Run only the fast native Windows path and ACL gate
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -27,7 +32,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-backup-preflight:
+    name: Fast native Windows backup path and ACL gate
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Preserve exact LF source bytes
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Verify frozen source identity
+        shell: pwsh
+        env:
+          OSIR_SOURCE_SHA256: ${{ inputs.source_sha256 }}
+        run: node scripts/osir-ci-artifact.mjs preflight ${{ inputs.channel }} x86_64-pc-windows-msvc
+      - name: Install pinned Rust
+        shell: pwsh
+        run: rustup toolchain install 1.95 --profile minimal
+      - name: Exercise real path and ACL code before expensive application compilation
+        shell: pwsh
+        run: cargo +1.95 test --locked --manifest-path tests/native-windows-backup/Cargo.toml -- --test-threads=1
   windows-x64:
+    needs: windows-backup-preflight
+    if: ${{ !inputs.backup_preflight_only }}
     name: Windows x64 NSIS and packaged lifecycle
     runs-on: windows-2022
     timeout-minutes: 120
@@ -147,7 +180,8 @@ jobs:
 
   macos-intel:
     name: Intel Mac application for local finalization
-    if: inputs.include_mac_intel
+    needs: windows-backup-preflight
+    if: inputs.include_mac_intel && !inputs.backup_preflight_only
     runs-on: macos-15-intel
     timeout-minutes: 120
     defaults:

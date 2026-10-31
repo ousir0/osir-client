@@ -56,7 +56,7 @@ pub(super) fn verify_file(file: &File, private: bool) -> Result<()> {
 
 fn open_metadata(path: &Path) -> Result<File> {
     OpenOptions::new()
-        .access_mode(0x0002_0000) // READ_CONTROL
+        .access_mode(0x0002_0080) // READ_CONTROL | FILE_READ_ATTRIBUTES
         .share_mode(FILE_SHARE_READ)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)

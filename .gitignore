@@ -39,3 +39,4 @@ mainWindow.js
 # Python probe/test caches (keep the reproducible scripts themselves).
 __pycache__/
 *.py[cod]
+/tests/native-windows-backup/target/
