@@ -334,7 +334,11 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
         `native-ipc:${command}`,
         // Windows discovery has a bounded 15 s allowance for cold PowerShell/
         // AppX initialization; keep the IPC harness outside that native limit.
-        command === "osir_codex_desktop_detection" ? 20000 : 10000,
+        command === "osir_detect_tools"
+          ? 60000
+          : command === "osir_codex_desktop_detection"
+            ? 20000
+            : 10000,
       );
       if (result.error) result.error = safeDiagnostic(result.error);
       report.nativeIpcChecks.push({
@@ -395,6 +399,13 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
       assert.match(installation.path, /WindowsApps[\\/]OpenAI\.Codex_/i);
       report.nativeIpc.installedCodexVersion = installation.version;
       report.nativeIpc.installedCodexCount = 1;
+      const inventory = await invokeNative("osir_detect_tools");
+      const codex = inventory.find((entry) => entry.id === "codex");
+      assert.equal(codex?.installed, true);
+      assert.equal(codex.status, "installed");
+      assert.equal(codex.version, installation.version);
+      assert.equal(codex.path, installation.path);
+      report.nativeIpc.installedToolInventory = true;
     }
     for (const [width, height] of [
       [1100, 720],
