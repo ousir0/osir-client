@@ -202,6 +202,23 @@ function Start-Isolated([string]$Path, [string]$Arguments = '', [bool]$MissingRu
 }
 
 function Stop-OwnedApp {
+    $rootToMatch = $smokeRoot.TrimEnd('\')
+    $knownPids = [Collections.Generic.HashSet[int]]::new()
+    if ($null -ne $script:ownedLaunch) { [void]$knownPids.Add($script:ownedLaunch.Id) }
+    for ($round = 0; $round -lt 20; $round++) {
+        $children = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $knownPids.Contains([int]$_.ParentProcessId) -and
+            ($_.ExecutablePath -eq $mainExe -or [string]$_.CommandLine -like "*$rootToMatch*")
+        })
+        if ($children.Count -eq 0) { break }
+        foreach ($child in $children) {
+            [void]$knownPids.Add([int]$child.ProcessId)
+            try {
+                Stop-Process -Id ([int]$child.ProcessId) -Force -ErrorAction SilentlyContinue
+            } catch { }
+        }
+        Start-Sleep -Milliseconds 250
+    }
     if ($null -ne $script:ownedLaunch) {
         try {
             if (-not $script:ownedLaunch.HasExited) {
@@ -219,6 +236,24 @@ function Stop-OwnedApp {
             }
         } catch { Write-Warning "Owned installed process cleanup: $($_.Exception.Message)" }
     }
+    # WebView2 child processes may outlive the native shell briefly. They are
+    # owned by this disposable smoke root when their command line carries its
+    # isolated user-data path; wait until that path is no longer in use before
+    # moving or deleting the test database.
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $leftovers = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            [string]$_.CommandLine -like "*$rootToMatch*"
+        })
+        foreach ($leftover in $leftovers) {
+            try { Stop-Process -Id ([int]$leftover.ProcessId) -Force -ErrorAction SilentlyContinue } catch { }
+        }
+        if ($leftovers.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Assert-Smoke (@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        [string]$_.CommandLine -like "*$rootToMatch*"
+    }).Count -eq 0) 'Owned WebView2 child processes did not exit before isolated data reuse.'
 }
 
 function Invoke-Installer([string]$Path, [string]$Arguments) {
