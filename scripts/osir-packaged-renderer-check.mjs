@@ -271,21 +271,42 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
     }
     assert.ok(client, "Installed WebView2 renderer did not become available");
     await client.call("Runtime.enable");
-    const evaluate = async (expression) => {
-      const result = await client.call("Runtime.evaluate", {
-        expression,
-        returnByValue: true,
-        awaitPromise: true,
-      });
-      assert.ok(
-        !result.exceptionDetails,
-        "Renderer evaluation or native IPC failed",
-      );
-      return result.result.value;
+    const evaluate = async (expression, stage) => {
+      try {
+        const result = await client.call("Runtime.evaluate", {
+          expression,
+          returnByValue: true,
+          awaitPromise: true,
+        });
+        if (result.exceptionDetails) {
+          const details = result.exceptionDetails;
+          const detail =
+            details.exception?.description ||
+            details.text ||
+            "renderer evaluation raised an exception";
+          const safeDetail = detail
+            .replace(/[A-Za-z]:\\\\[^\\s)]+/g, "[path]")
+            .replace(/\b(?:sk|tok|key)-[A-Za-z0-9_-]{12,}\b/g, "[redacted]")
+            .slice(0, 240);
+          report.rendererFailure = { stage, error: safeDetail };
+          throw new Error(`Renderer evaluation failed at ${stage}: ${safeDetail}`);
+        }
+        return result.result.value;
+      } catch (error) {
+        if (!report.rendererFailure) {
+          const message = error instanceof Error ? error.message : String(error);
+          report.rendererFailure = {
+            stage,
+            error: message.replace(/[A-Za-z]:\\\\[^\\s)]+/g, "[path]").slice(0, 240),
+          };
+        }
+        throw error;
+      }
     };
     let state;
     while (Date.now() < deadline) {
-      state = await evaluate(welcomeState);
+      state = await evaluate(welcomeState, "welcome-state");
+      report.welcomeState = state;
       if (state.ready) break;
       await delay(250);
     }
@@ -294,13 +315,21 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
       true,
       "Installed app is blank or login remains unavailable",
     );
-    const native = await evaluate(`(async () => {
-      const invoke = window.__TAURI_INTERNALS__.invoke;
-      const distribution = await invoke('get_update_distribution');
-      const account = await invoke('osir_account_session');
-      const codexDesktop = await invoke('osir_codex_desktop_detection');
-      return {updatesEnabled: distribution.updatesEnabled, signedOut: account.connected === false, recovery: account.recovery, codexDesktop};
-    })()`);
+    report.nativeIpcChecks = [];
+    const invokeNative = async (command) => {
+      const started = Date.now();
+      const result = await evaluate(`(async () => {
+        try { return {passed: true, value: await window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)})}; }
+      catch(error) { const message = typeof error === 'string' ? error : error?.message || 'native command rejected'; return {passed: false, error: message.slice(0, 240)}; }
+      })()`, `native-ipc:${command}`);
+      report.nativeIpcChecks.push({ command, passed: result.passed, elapsedMilliseconds: Date.now() - started, ...(result.error ? { error: result.error } : {}) });
+      assert.equal(result.passed, true, `Installed native IPC failed: ${command}${result.error ? ` (${result.error})` : ''}`);
+      return result.value;
+    };
+    const distribution = await invokeNative("get_update_distribution");
+    const account = await invokeNative("osir_account_session");
+    const codexDesktop = await invokeNative("osir_codex_desktop_detection");
+    const native = {updatesEnabled: distribution.updatesEnabled, signedOut: account.connected === false, recovery: account.recovery, codexDesktop};
     assert.equal(
       native.updatesEnabled,
       true,
@@ -335,8 +364,9 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
       resizeNativeWindow(windowHandle, width, height);
       await evaluate(
         "new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => done(true))))",
+        "window-layout",
       );
-      state = await evaluate(welcomeState);
+      state = await evaluate(welcomeState, "welcome-state-after-resize");
       assertReady(state, width, height);
       const screenshot = await client.call("Page.captureScreenshot", {
         format: "png",

@@ -23,6 +23,19 @@ on:
         required: true
         default: false
         type: boolean
+      acceptance_only:
+        description: Re-run acceptance against an existing Windows package without building
+        required: false
+        default: false
+        type: boolean
+      source_run:
+        description: Existing build run ID, required for acceptance-only mode
+        required: false
+        type: string
+      source_head:
+        description: Existing frozen source commit, required for acceptance-only mode
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -34,6 +47,7 @@ concurrency:
 jobs:
   windows-backup-preflight:
     name: Fast native Windows backup path and ACL gate
+    if: ${{ !inputs.acceptance_only }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -62,7 +76,7 @@ jobs:
         run: cargo +1.95 test --locked --manifest-path tests/native-windows-backup/Cargo.toml -- --test-threads=1
   windows-x64:
     needs: windows-backup-preflight
-    if: ${{ !inputs.backup_preflight_only }}
+    if: ${{ !inputs.backup_preflight_only && !inputs.acceptance_only }}
     name: Windows x64 NSIS and packaged lifecycle
     runs-on: windows-2022
     timeout-minutes: 120
@@ -179,6 +193,103 @@ jobs:
           path: src-tauri/target/cargo-timings/
           if-no-files-found: warn
           retention-days: 7
+
+  windows-acceptance-recheck:
+    if: ${{ inputs.acceptance_only }}
+    name: Recheck an existing Windows package without rebuilding
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CI: "true"
+      OSIR_SOURCE_SHA256: ${{ inputs.source_sha256 }}
+    steps:
+      - name: Preserve LF source bytes
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout acceptance harness
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: harness
+          persist-credentials: false
+
+      - name: Checkout immutable package source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: source
+          ref: ${{ inputs.source_head }}
+          persist-credentials: false
+
+      - name: Setup pinned Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: source/.node-version
+          package-manager-cache: false
+
+      - name: Verify immutable source and build identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run }}
+          SOURCE_HEAD: ${{ inputs.source_head }}
+        run: |
+          if ($env:SOURCE_RUN -notmatch '^\d+$' -or $env:SOURCE_HEAD -notmatch '^[a-f0-9]{40}$') { throw 'Invalid immutable build identity' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.head_sha -ne $env:SOURCE_HEAD -or $run.head_branch -ne 'codex/release-build') { throw 'Build identity mismatch' }
+          $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN/artifacts" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or @($artifact.artifacts | Where-Object { $_.name -eq "osir-ci-0.1.3-prod-windows-x64-$env:SOURCE_RUN-1" -and -not $_.expired }).Count -ne 1) { throw 'Exact Windows artifact is missing or expired' }
+          $env:GITHUB_SHA = $env:SOURCE_HEAD
+          node source/scripts/osir-ci-artifact.mjs preflight prod x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen source validation failed' }
+
+      - name: Download existing unsigned Windows package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: osir-ci-0.1.3-prod-windows-x64-${{ inputs.source_run }}-1
+          path: source/release/osir/recheck
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+
+      - name: Inspect exact Windows Codex discovery in the runner
+        run: |
+          $text = Get-Content -Raw source/src-tauri/src/commands/osir_tools_windows_support.rs
+          $match = [regex]::Match($text, '(?s)pub\(crate\) const CODEX_DISCOVERY: &str = r#"(.*?)"#;')
+          if (-not $match.Success) { throw 'Windows Codex discovery script is missing' }
+          $query = '$ErrorActionPreference = ''Stop''; ' + $match.Groups[1].Value
+          $query = $query -replace 'ConvertTo-Json -InputObject @\(\$result\) -Depth 5 -Compress', "Write-Output ('count=' + @(`$result).Count)"
+          $timer = [Diagnostics.Stopwatch]::StartNew()
+          $detail = @(& "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoLogo -NoProfile -NonInteractive -Command $query 2>&1)
+          $exit = $LASTEXITCODE
+          $timer.Stop()
+          Write-Host "Read-only AppX discovery exit=$exit elapsedMs=$($timer.ElapsedMilliseconds)"
+          if ($exit -eq 0) { Write-Host ($detail -join ' '); exit 0 }
+          $safe = (($detail | Select-Object -First 1 | Out-String).Trim() -replace '[A-Za-z]:\\[^ ]+', '[path]')
+          Write-Host "AppX discovery diagnostic: $($safe.Substring(0, [Math]::Min(240, $safe.Length)))"
+
+      - name: Run installed package lifecycle and renderer checks
+        run: |
+          & ./harness/scripts/osir-windows-packaged-smoke.ps1 -ArtifactDirectory "$env:GITHUB_WORKSPACE/source/release/osir/recheck"
+
+      - name: Restore exact source checkout and validate acceptance evidence
+        env:
+          SOURCE_HEAD: ${{ inputs.source_head }}
+        run: |
+          $env:GITHUB_SHA = $env:SOURCE_HEAD
+          node --input-type=module -e "import {acceptWindowsSmoke} from './source/scripts/osir-ci-artifact.mjs'; acceptWindowsSmoke('./source/release/osir/recheck');"
+          if ($LASTEXITCODE -ne 0) { throw 'Original source acceptance validation failed' }
+
+      - name: Upload rechecked Windows package and evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: osir-rechecked-0.1.3-windows-${{ github.run_id }}
+          path: source/release/osir/recheck/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
   macos-intel:
     name: Intel Mac application for local finalization
