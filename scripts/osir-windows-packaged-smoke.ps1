@@ -255,17 +255,19 @@ function Remove-RunnerRuntime {
         (Join-Path $env:ProgramFiles 'Microsoft/EdgeWebView/Application'),
         (Join-Path $env:LOCALAPPDATA 'Microsoft/EdgeWebView/Application'))) {
         if (-not (Test-Path -LiteralPath $root)) { continue }
-        foreach ($setup in @(Get-ChildItem -LiteralPath $root -Filter setup.exe -File -Recurse)) {
-            $signature = Get-AuthenticodeSignature -LiteralPath $setup.FullName
-            Assert-Smoke ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -match 'Microsoft Corporation') 'WebView2 uninstaller signature rejected.'
-            $arguments = '--uninstall --msedgewebview --verbose-logging --force-uninstall'
-            if (-not $root.StartsWith($env:LOCALAPPDATA, [StringComparison]::OrdinalIgnoreCase)) { $arguments += ' --system-level' }
-            $process = Start-Process -FilePath $setup.FullName -ArgumentList $arguments -PassThru
-            try {
-                Assert-Smoke ($process.WaitForExit(180000)) 'Runtime uninstall timed out.'
-                $operations += [ordered]@{ executable = $setup.FullName; signature = 'Valid'; exitCode = $process.ExitCode }
-            } finally { $process.Dispose() }
-        }
+        $versions = @(Get-ChildItem -LiteralPath $root -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object { [version]$_.Name } -Descending)
+        if ($versions.Count -eq 0) { continue }
+        $setupPath = Join-Path $versions[0].FullName 'Installer/setup.exe'
+        if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) { continue }
+        $signature = Get-AuthenticodeSignature -LiteralPath $setupPath
+        Assert-Smoke ($signature.Status -eq 'Valid' -and $signature.SignerCertificate.Subject -match 'Microsoft Corporation') 'WebView2 uninstaller signature rejected.'
+        $arguments = '--uninstall --msedgewebview --verbose-logging --force-uninstall'
+        if (-not $root.StartsWith($env:LOCALAPPDATA, [StringComparison]::OrdinalIgnoreCase)) { $arguments += ' --system-level' }
+        $process = Start-Process -FilePath $setupPath -ArgumentList $arguments -PassThru
+        try {
+            Assert-Smoke ($process.WaitForExit(180000)) 'Runtime uninstall timed out.'
+            $operations += [ordered]@{ executable = $setupPath; signature = 'Valid'; exitCode = $process.ExitCode }
+        } finally { $process.Dispose() }
     }
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
