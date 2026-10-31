@@ -422,6 +422,42 @@ try {
     }
     Stop-OwnedApp
 
+    # Reproduce the reported storage shape inside the disposable home only:
+    # a valid legacy database and a new directory containing only crash.log.
+    # The baseline was created by this exact installed binary, never user data.
+    $stage = 'migrationRecovery'
+    $currentConfig = Join-Path $isolatedToolHome '.osir_client'
+    $baselineConfig = Join-Path $isolatedToolHome 'synthetic-migration-baseline'
+    $legacyConfig = Join-Path $isolatedToolHome '.cc-switch'
+    Assert-Smoke (Test-Path -LiteralPath (Join-Path $currentConfig 'osir_client.db') -PathType Leaf) 'Synthetic startup database is missing.'
+    Assert-Smoke (-not (Test-Path -LiteralPath $legacyConfig)) 'Synthetic legacy directory must start absent.'
+    Move-Item -LiteralPath $currentConfig -Destination $baselineConfig
+    New-Item -ItemType Directory -Path $legacyConfig | Out-Null
+    New-Item -ItemType Directory -Path $currentConfig | Out-Null
+    $fixtureScript = Join-Path $smokeRoot 'migration-fixture.py'
+    @'
+import pathlib, sqlite3, sys
+def readonly(path):
+    return sqlite3.connect(pathlib.Path(path).as_uri() + "?mode=ro", uri=True)
+if sys.argv[1] == "prepare":
+    with readonly(sys.argv[2]) as source, sqlite3.connect(sys.argv[3]) as target:
+        source.backup(target)
+        target.execute("CREATE TABLE osir_migration_acceptance(value TEXT NOT NULL)")
+        target.execute("INSERT INTO osir_migration_acceptance VALUES ('synthetic-preserved-row')")
+        target.commit()
+else:
+    for path in sys.argv[2:]:
+        with readonly(path) as database:
+            assert database.execute("PRAGMA quick_check").fetchone() == ("ok",)
+            assert database.execute("SELECT value FROM osir_migration_acceptance").fetchall() == [("synthetic-preserved-row",)]
+print("Synthetic migration fixture verified")
+'@ | Set-Content -LiteralPath $fixtureScript -Encoding utf8NoBOM
+    $legacyDatabase = Join-Path $legacyConfig 'cc-switch.db'
+    & python $fixtureScript prepare (Join-Path $baselineConfig 'osir_client.db') $legacyDatabase
+    Assert-Smoke ($LASTEXITCODE -eq 0) 'Synthetic legacy database preparation failed.'
+    $legacyDatabaseHash = Get-Hash $legacyDatabase
+    'synthetic startup failure log' | Set-Content -LiteralPath (Join-Path $currentConfig 'crash.log') -Encoding utf8NoBOM
+
     $stage = 'reopen'
     $ownedLaunch = Start-Isolated $mainExe
     $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
@@ -438,6 +474,22 @@ try {
     Assert-Smoke ($LASTEXITCODE -eq 0) 'Reopened renderer or native IPC failed.'
     $report.stages.reopen = [ordered]@{ passed = $true; windowObserved = $true; rendererAndNativeIpcPassed = $true }
     Stop-OwnedApp
+    $stage = 'migrationRecovery'
+    & python $fixtureScript verify $legacyDatabase (Join-Path $currentConfig 'osir_client.db')
+    Assert-Smoke ($LASTEXITCODE -eq 0) 'Installed app did not preserve synthetic migration data.'
+    Assert-Smoke ((Get-Hash $legacyDatabase) -eq $legacyDatabaseHash) 'Installed app modified the legacy source database.'
+    $recoveryArchives = @(Get-ChildItem -LiteralPath $isolatedToolHome -Directory -Force | Where-Object { $_.Name -like '.osir_client-startup-recovery-*' })
+    Assert-Smoke ($recoveryArchives.Count -eq 1) 'Expected one preserved startup recovery archive.'
+    $preservedLog = Join-Path $recoveryArchives[0].FullName 'previous/crash.log'
+    Assert-Smoke ((Get-Content -Raw -LiteralPath $preservedLog).Trim() -eq 'synthetic startup failure log') 'Original startup log was not preserved.'
+    $report.stages.migrationRecovery = [ordered]@{
+        passed = $true
+        legacyDatabaseUnchanged = $true
+        migratedDatabaseQuickCheck = $true
+        syntheticRowPreserved = $true
+        startupLogPreserved = $true
+        scope = 'synthetic-current-schema-legacy-directory-and-crash-only-destination'
+    }
 
     $stage = 'startupFailure'
     $ownedLaunch = Start-Isolated $mainExe '' $true
