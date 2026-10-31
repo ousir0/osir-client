@@ -128,6 +128,7 @@ const inputDirectories = [
   "icons",
   "vendor",
   "src-tauri/src",
+  "tests/fixtures/sessions",
   "src-tauri/capabilities",
   "src-tauri/icons",
   "src-tauri/vendor",

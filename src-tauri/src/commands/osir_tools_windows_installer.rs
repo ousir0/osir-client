@@ -94,7 +94,9 @@ impl Installer {
         let (target, installed) = selected(target).await?;
         match action {
             "inspect" => (),
-            "launch" => windows::launch_desktop(app, "codex", false).await?,
+            "launch" => {
+                windows::launch_desktop(app, "codex", false).await?;
+            }
             "reveal" => {
                 let entries = support::discover("codex").await?;
                 let entry = entries.first().ok_or("请先安装 Codex Desktop")?;

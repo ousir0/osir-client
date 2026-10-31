@@ -7,6 +7,7 @@ import { inspectPe } from "./osir-pe-verify.mjs";
 import { windowsConfig } from "./osir-build-windows.mjs";
 import { macosCiConfig } from "./osir-build-macos-ci.mjs";
 import { validateSnapshotPath } from "./osir-source-snapshot.mjs";
+import { sourceSnapshot } from "./osir-build.mjs";
 import { nsisPayload, verifyNsisPayload } from "./osir-nsis-payload.mjs";
 
 test("NSIS baseline permits only one exact Tauri marker patch", () => {
@@ -141,4 +142,13 @@ test("private source export rejects credential files and personal homes", () => 
     ".github/workflows/osir-windows-release.yml",
   ])
     assert.equal(validateSnapshotPath(path), path);
+});
+
+test("release source manifest includes Rust compile-time session fixtures", () => {
+  const snapshot = sourceSnapshot();
+  assert.ok(
+    snapshot.provenance.inputs.directories.includes(
+      "tests/fixtures/sessions",
+    ),
+  );
 });

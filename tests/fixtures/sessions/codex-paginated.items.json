@@ -1,0 +1,60 @@
+[
+  {
+    "type": "userMessage",
+    "id": "fixture-user",
+    "content": [
+      {
+        "type": "text",
+        "text": "OSIR_SYNTHETIC_PAGINATED_USER",
+        "text_elements": []
+      }
+    ]
+  },
+  {
+    "type": "reasoning",
+    "id": "fixture-reasoning",
+    "summary": ["Synthetic summary"],
+    "content": ["Synthetic reasoning"]
+  },
+  {
+    "type": "commandExecution",
+    "id": "fixture-command",
+    "command": "printf fixture",
+    "cwd": "/fixture/project with spaces",
+    "status": "completed",
+    "commandActions": [],
+    "aggregatedOutput": "Synthetic command output",
+    "exitCode": 0,
+    "durationMs": 2
+  },
+  {
+    "type": "fileChange",
+    "id": "fixture-change",
+    "status": "completed",
+    "changes": [
+      {
+        "path": "fixture.txt",
+        "kind": { "type": "update", "move_path": null },
+        "diff": "--- a/fixture.txt\n+++ b/fixture.txt\n-old\n+synthetic\n"
+      }
+    ]
+  },
+  {
+    "type": "mcpToolCall",
+    "id": "fixture-mcp",
+    "server": "fixture",
+    "tool": "read",
+    "arguments": { "name": "synthetic" },
+    "status": "completed",
+    "result": {
+      "content": [{ "type": "text", "text": "Synthetic tool output" }]
+    },
+    "error": null
+  },
+  {
+    "type": "agentMessage",
+    "id": "fixture-agent",
+    "text": "OSIR_SYNTHETIC_PAGINATED_REPLY",
+    "phase": "final_answer"
+  }
+]
