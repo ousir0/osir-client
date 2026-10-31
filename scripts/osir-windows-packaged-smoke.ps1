@@ -186,6 +186,9 @@ function Start-Isolated([string]$Path, [string]$Arguments = '', [bool]$MissingRu
     $start.Environment['OSIR_TEST_HOME'] = $isolatedToolHome
     $start.Environment['APPDATA'] = $isolatedAppData
     $start.Environment['LOCALAPPDATA'] = $isolatedLocalAppData
+    if ($Path -eq $mainExe) {
+        $start.Environment['WEBVIEW2_USER_DATA_FOLDER'] = Join-Path $smokeRoot 'webview-profile'
+    }
     if ($Path -eq $mainExe -and -not $MissingRuntime) {
         do {
             $debugListener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -764,6 +767,9 @@ print("Synthetic migration fixture verified")
     $failure = $_
     $report.failedStage = $stage
     $report.failure = $_.Exception.Message
+    $report.failureDebugPort = $rendererPort
+    $report.failureOwnedProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $mainExe -or [string]$_.CommandLine.Contains($smokeRoot) } | Select-Object Name, ProcessId, ParentProcessId, ExecutablePath, CommandLine)
+    try { $report.failureListeners = @(Get-NetTCPConnection -LocalPort $rendererPort -State Listen -ErrorAction Stop | Select-Object LocalAddress, LocalPort, OwningProcess) } catch { $report.failureListeners = @() }
     Write-Host "::error::[$stage] $($_.Exception.Message)"
 } finally {
     Stop-OwnedApp

@@ -262,6 +262,7 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
           signal: AbortSignal.timeout(2000),
         });
         const pages = await response.json();
+        report.debuggerPages = pages.map(page => ({ type: page.type, url: page.url, applicationPage: applicationPage(page) }));
         const candidates = pages.filter(applicationPage);
         assert.ok(
           candidates.length <= 1,
@@ -272,7 +273,8 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
           client = await connect(
             debuggerEndpoint(page.webSocketDebuggerUrl, port),
           );
-      } catch {
+      } catch (error) {
+        report.debuggerConnectionError = safeDiagnostic(error.message);
         /* WebView2 may still be starting. */
       }
       if (!client) await delay(250);
