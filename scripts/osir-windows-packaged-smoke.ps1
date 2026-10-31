@@ -160,7 +160,6 @@ function Invoke-UserDiagnostics([string]$Name, [string]$ExpectedHash) {
         '-File', (Join-Path $PSScriptRoot 'osir-windows-user-diagnostics.ps1'),
         '-Executable', $mainExe, '-ExpectedExecutableSha256', $ExpectedHash,
         '-ReportPath', $destination)) { $start.ArgumentList.Add($argument) }
-    $start.Environment['USERPROFILE'] = $isolatedToolHome
     $start.Environment['CC_SWITCH_TEST_HOME'] = $isolatedToolHome
     $start.Environment['OSIR_TEST_HOME'] = $isolatedToolHome
     $start.Environment['APPDATA'] = $isolatedAppData

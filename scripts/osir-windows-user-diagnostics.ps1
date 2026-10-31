@@ -5,6 +5,8 @@ param(
     [string]$ReportPath = ''
 )
 $ErrorActionPreference = 'Continue'
+$configurationHome = $env:USERPROFILE
+if ($env:CC_SWITCH_TEST_HOME) { $configurationHome = $env:CC_SWITCH_TEST_HOME }
 $report = [ordered]@{
     schemaVersion = 1
     checkedAt = (Get-Date).ToString('o')
@@ -121,7 +123,7 @@ foreach ($key in @('HOME', 'CC_SWITCH_TEST_HOME', 'WEBVIEW2_BROWSER_EXECUTABLE_F
 }
 $report.configurationDirectories = @(
     foreach ($name in @('.cc-switch', '.osir_client')) {
-        $root = Join-Path $env:USERPROFILE $name
+        $root = Join-Path $configurationHome $name
         $entry = [ordered]@{ path = $root; exists = (Test-Path -LiteralPath $root) }
         if ($entry.exists) {
             $entry.attributes = (Get-Item -LiteralPath $root -Force).Attributes.ToString()
@@ -166,7 +168,7 @@ $timer.Stop()
 $report.codexQueryMilliseconds = $timer.ElapsedMilliseconds
 $report.cliCommands = @(Get-Command claude, codex, opencode, gemini -All -ErrorAction SilentlyContinue |
     Select-Object Name, CommandType, Source)
-$report.recoveryArchives = @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Force |
+$report.recoveryArchives = @(Get-ChildItem -LiteralPath $configurationHome -Directory -Force |
     Where-Object { $_.Name -like '.osir_client-startup-recovery-*' } |
     Select-Object Name, LastWriteTime)
 $destination = $ReportPath
