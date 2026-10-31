@@ -115,7 +115,9 @@ export function windowsConfig(channel, updater) {
         displayLanguageSelector: false,
         startMenuFolder: config.productName,
       },
-      webviewInstallMode: { type: "offlineInstaller", silent: true },
+      // Keep the app payload self-contained, but fetch the shared runtime only
+      // on machines that need it instead of embedding the full redistributable.
+      webviewInstallMode: { type: "embedBootstrapper", silent: true },
     },
   });
   return config;

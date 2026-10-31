@@ -5,7 +5,18 @@ import {
   applicationPage,
   assertReady,
   assertRendererEvidence,
+  safeDiagnostic,
 } from "./osir-packaged-renderer-check.mjs";
+
+test("acceptance diagnostics omit paths, secrets and subsequent stack lines", () => {
+  assert.equal(
+    safeDiagnostic(
+      "failed at C:\\Users\\runner\\app.js with sk-synthetic123456789\nprivate stack detail",
+    ),
+    "failed at [path] with [redacted]",
+  );
+  assert.equal(safeDiagnostic("x".repeat(300)).length, 240);
+});
 
 test("only the installed main document can satisfy renderer acceptance", () => {
   assert.equal(

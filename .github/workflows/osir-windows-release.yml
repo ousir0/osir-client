@@ -158,6 +158,15 @@ jobs:
           cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib tool_backup -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'Windows backup lifecycle tests failed' }
 
+      - name: Verify existing Codex package discovery and installer identity fixtures
+        run: |
+          cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib osir_identity::tests -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows startup migration tests failed' }
+          cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib commands::osir_tools::windows_support::tests -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installed-tool identity tests failed' }
+          cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib services::osir::windows_codex_package::tests -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Codex package identity tests failed' }
+
       - name: Build unsigned NSIS installer and embedded application
         timeout-minutes: 90
         run: node scripts/osir-build-windows.mjs $env:OSIR_CHANNEL

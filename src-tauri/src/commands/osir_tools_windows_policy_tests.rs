@@ -60,6 +60,24 @@ fn codex_identity_accepts_current_manifest_entry() {
 }
 
 #[test]
+fn codex_identity_accepts_registered_store_package_without_using_policy_constants() {
+    // Literal metadata from the Store/mirror package. Do not build this fixture
+    // from CODEX_PUBLISHER: doing so hid the 0.1.3 publisher/family mismatch.
+    let entry: Installation = serde_json::from_str(
+        r#"{
+          "root":"C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0",
+          "executable":"C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0\\app\\ChatGPT.exe",
+          "relative":"app/ChatGPT.exe", "version":"26.1027.3384.0",
+          "family":"OpenAI.Codex_2p2nqsd0c76g0", "appId":"App",
+          "protocol":true, "package":"OpenAI.Codex",
+          "publisher":"CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B"
+        }"#,
+    )
+    .unwrap();
+    entry.validate("codex").unwrap();
+}
+
+#[test]
 fn codex_identity_accepts_legacy_gui_entry() {
     let mut entry = installed();
     entry.relative = r"app\Codex.exe".into();

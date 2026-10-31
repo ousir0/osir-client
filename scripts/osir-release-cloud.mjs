@@ -532,6 +532,9 @@ export async function runCloudRelease(
     verifyPublic = verifyPublicReleaseArtifacts,
     beforePublish = async () => {},
     expectedCurrentRelease,
+    resumeReceiptSha256,
+    resumeReceiptOperator,
+    resumeRemoteScriptSha256,
     root = ROOT,
     report = (message) => process.stderr.write(message + "\n"),
   } = {},
@@ -539,6 +542,16 @@ export async function runCloudRelease(
   const options = parseCloudArguments(args);
   root = ordinaryDirectory(root, "Client checkout");
   const config = loadOperatorConfig(options.operatorConfigPath);
+  if (resumeReceiptSha256) {
+    requireThat(
+      /^[a-f0-9]{64}$/.test(resumeReceiptSha256) &&
+        resumeReceiptOperator?.binary_sha256 === config.binarySha256 &&
+        resumeReceiptOperator?.live_release === config.liveRelease &&
+        resumeReceiptOperator?.live_sha === config.liveSha &&
+        resumeRemoteScriptSha256 === config.tools.remote.sha256,
+      "Resume receipt does not match the reviewed production operator identity.",
+    );
+  }
   const updaterConfigPath = ordinaryFile(
     join(root, "config", `osir-updater-${options.channel}.json`),
     65536,
@@ -622,6 +635,9 @@ export async function runCloudRelease(
       live_sha: config.liveSha,
     },
     steps: [],
+    ...(resumeReceiptSha256
+      ? { resumed_from_receipt_sha256: resumeReceiptSha256 }
+      : {}),
   };
   let revision = 0;
   const persist = () => {
@@ -819,35 +835,57 @@ export async function runCloudRelease(
         "Current release changed before registration completed; stop before upload.",
       );
     });
-    await step("upload-immutable-artifacts", async (entry) => {
-      assertPlan();
-      assertToolBindings(config);
-      const logPath = join(runDirectory, "upload.log");
-      entry.log_path = logPath;
-      persist();
-      const result = await command(
-        PYTHON,
-        [config.tools.upload.path, planPath, buildDirectory, "--upload"],
-        {
-          cwd: config.serverCheckout,
-          env: pythonEnvironment(),
-          logPath,
-        },
-      );
-      const line = result.stdout
-        .split(/\r?\n/)
-        .filter((value) => value.trim().startsWith("{"))
-        .at(-1);
-      const uploaded = line ? JSON.parse(line) : null;
-      requireThat(
-        uploaded?.release_id === plan.release_id &&
-          uploaded.immutable === true &&
-          uploaded.uploaded ===
-            new Set(plan.artifacts.map((artifact) => artifact.file_name)).size,
-        "Upload did not confirm every immutable artifact; inspect its log before retrying.",
-      );
-      writeJson(join(runDirectory, "upload-result.json"), uploaded);
-    });
+    await step(
+      resumeReceiptSha256
+        ? "reuse-uploaded-artifacts"
+        : "upload-immutable-artifacts",
+      async (entry) => {
+        assertPlan();
+        if (resumeReceiptSha256) {
+          const uploaded = {
+            release_id: plan.release_id,
+            uploaded: new Set(
+              plan.artifacts.map((artifact) => artifact.file_name),
+            ).size,
+            immutable: true,
+            reused: true,
+            previous_receipt_sha256: resumeReceiptSha256,
+          };
+          writeJson(join(runDirectory, "upload-result.json"), uploaded);
+          report(
+            "Reusing immutable public artifacts; full byte verification follows.",
+          );
+          return uploaded;
+        }
+        assertToolBindings(config);
+        const logPath = join(runDirectory, "upload.log");
+        entry.log_path = logPath;
+        persist();
+        const result = await command(
+          PYTHON,
+          [config.tools.upload.path, planPath, buildDirectory, "--upload"],
+          {
+            cwd: config.serverCheckout,
+            env: pythonEnvironment(),
+            logPath,
+          },
+        );
+        const line = result.stdout
+          .split(/\r?\n/)
+          .filter((value) => value.trim().startsWith("{"))
+          .at(-1);
+        const uploaded = line ? JSON.parse(line) : null;
+        requireThat(
+          uploaded?.release_id === plan.release_id &&
+            uploaded.immutable === true &&
+            uploaded.uploaded ===
+              new Set(plan.artifacts.map((artifact) => artifact.file_name))
+                .size,
+          "Upload did not confirm every immutable artifact; inspect its log before retrying.",
+        );
+        writeJson(join(runDirectory, "upload-result.json"), uploaded);
+      },
+    );
     const verificationPath = join(runDirectory, "public-verification.json");
     await step("verify-full-public-bytes", async () => {
       assertPlan();

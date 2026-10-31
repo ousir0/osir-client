@@ -3,9 +3,11 @@ use std::io::Read;
 use std::path::Path;
 
 pub const PACKAGE_IDENTITY: &str = "OpenAI.Codex";
-pub const PACKAGE_PUBLISHER: &str = "CN=OpenAI OpCo, LLC, O=OpenAI OpCo, LLC, C=US";
+// Store package identity, also used by installed-package discovery. This is
+// the identity that hashes to PublisherId 2p2nqsd0c76g0, not the company name.
+pub const PACKAGE_PUBLISHER: &str = "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B";
 pub const PACKAGE_FAMILY: &str = "OpenAI.Codex_2p2nqsd0c76g0";
-const MARKETPLACE_SIGNER_SUBJECT: &str = "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B";
+const MARKETPLACE_SIGNER_SUBJECT: &str = PACKAGE_PUBLISHER;
 pub const MIRROR_REPOSITORY: &str = "Wangnov/codex-app-mirror";
 const MAX_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
@@ -370,14 +372,22 @@ mod tests {
     }
 
     #[test]
+    fn accepts_store_manifest_identity_from_a_literal_package_fixture() {
+        let xml = r#"<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"><Identity Name="OpenAI.Codex" Publisher="CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B" Version="26.1027.3384.0" ProcessorArchitecture="x64" /></Package>"#;
+        parse_msix_identity(xml, "26.1027.3384.0", "x64").unwrap();
+    }
+
+    #[test]
     fn validates_pinned_package_identity_version_architecture_and_signature() {
         let xml = format!(
             r#"<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"><Identity Name="{PACKAGE_IDENTITY}" Publisher="{PACKAGE_PUBLISHER}" Version="26.1027.3384.0" ProcessorArchitecture="x64" /></Package>"#
         );
         assert!(parse_msix_identity(&xml, "26.1027.3384.0", "x64").is_ok());
         assert!(parse_msix_identity(&xml, "26.1027.3384.0", "arm64").is_err());
-        let wrong_manifest_publisher =
-            xml.replace(PACKAGE_PUBLISHER, "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B");
+        let wrong_manifest_publisher = xml.replace(
+            PACKAGE_PUBLISHER,
+            "CN=OpenAI OpCo, LLC, O=OpenAI OpCo, LLC, C=US",
+        );
         assert!(parse_msix_identity(&wrong_manifest_publisher, "26.1027.3384.0", "x64").is_err());
         assert!(is_valid_marketplace_signature(
             "Valid",
@@ -386,7 +396,7 @@ mod tests {
         ));
         assert!(!is_valid_marketplace_signature(
             "Valid",
-            PACKAGE_PUBLISHER,
+            "CN=OpenAI OpCo, LLC, O=OpenAI OpCo, LLC, C=US",
             "CN=Trusted CA, O=Microsoft Corporation"
         ));
     }

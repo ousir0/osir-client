@@ -27,6 +27,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { downloadReleaseArtifact } from "./osir-release-download.mjs";
 import {
   createReleasePlan,
   inspectArtifact,
@@ -165,21 +166,6 @@ async function download(artifact, destination, fetchImpl) {
       url.pathname.startsWith("/api/v1/osir-client/artifacts/"),
     "Backup artifact origin rejected.",
   );
-  const response = await fetchImpl(url.href, {
-    method: "GET",
-    redirect: "error",
-    signal: AbortSignal.timeout(180000),
-    headers: { accept: "application/octet-stream" },
-  });
-  requireThat(
-    response.status === 200 && response.url === url.href,
-    "Backup public download failed or redirected.",
-  );
-  const declared = response.headers.get("content-length");
-  requireThat(
-    declared === null || Number(declared) === artifact.size_bytes,
-    "Backup response size differs from release.",
-  );
   const fd = openSync(
     destination,
     constants.O_WRONLY |
@@ -188,17 +174,23 @@ async function download(artifact, destination, fetchImpl) {
       constants.O_NOFOLLOW,
     0o600,
   );
-  let bytes = 0;
   try {
-    for await (const chunk of response.body ?? []) {
-      bytes += chunk.length;
-      requireThat(
-        bytes <= artifact.size_bytes,
-        "Backup response exceeded release size.",
+    try {
+      await downloadReleaseArtifact(artifact, {
+        fetchImpl,
+        onChunk(chunk) {
+          let offset = 0;
+          while (offset < chunk.length)
+            offset += writeSync(fd, chunk, offset, chunk.length - offset);
+        },
+      });
+    } catch (error) {
+      throw new Error(
+        "Backup public download failed or was incomplete: " +
+          (error instanceof Error
+            ? error.message
+            : "artifact verification failed"),
       );
-      let offset = 0;
-      while (offset < chunk.length)
-        offset += writeSync(fd, chunk, offset, chunk.length - offset);
     }
     fsyncSync(fd);
   } finally {

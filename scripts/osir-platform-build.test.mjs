@@ -115,7 +115,7 @@ test("CI configurations contain real updater runtime but defer artifact signing"
   assert.equal(windows.bundle.windows.signCommand, null);
   assert.equal(windows.bundle.windows.wix, null);
   assert.deepEqual(windows.bundle.windows.webviewInstallMode, {
-    type: "offlineInstaller",
+    type: "embedBootstrapper",
     silent: true,
   });
   assert.deepEqual(

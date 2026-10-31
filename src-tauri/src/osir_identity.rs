@@ -127,7 +127,13 @@ fn inventory(root: &Path) -> Result<BTreeMap<PathBuf, EntryStamp>, AppError> {
 }
 
 fn private_copy(source: &Path, target: &Path) -> Result<(), AppError> {
-    fs::copy(source, target).map_err(|e| AppError::io(target, e))?;
+    let mut source_file = fs::File::open(source).map_err(|e| AppError::io(source, e))?;
+    let mut target_file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)
+        .map_err(|e| AppError::io(target, e))?;
+    std::io::copy(&mut source_file, &mut target_file).map_err(|e| AppError::io(target, e))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -138,8 +144,10 @@ fn private_copy(source: &Path, target: &Path) -> Result<(), AppError> {
         fs::set_permissions(target, fs::Permissions::from_mode(mode & 0o700))
             .map_err(|e| AppError::io(target, e))?;
     }
-    fs::File::open(target)
-        .and_then(|file| file.sync_all())
+    // FlushFileBuffers on Windows requires a write-capable handle. Keep the
+    // copy's writer open even when the source permissions are read-only.
+    target_file
+        .sync_all()
         .map_err(|e| AppError::io(target, e))?;
     Ok(())
 }
@@ -194,7 +202,9 @@ fn sqlite_snapshot(source: &Path, target: &Path) -> Result<(), AppError> {
         fs::set_permissions(target, fs::Permissions::from_mode(0o600))
             .map_err(|e| AppError::io(target, e))?;
     }
-    fs::File::open(target)
+    fs::OpenOptions::new()
+        .write(true)
+        .open(target)
         .and_then(|file| file.sync_all())
         .map_err(|e| AppError::io(target, e))?;
     Ok(())
@@ -234,20 +244,105 @@ fn publish_directory(source: &Path, target: &Path) -> std::io::Result<()> {
     }
 }
 
+fn is_reparse_point(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
+/// Only startup's own plain files may be set aside automatically. In
+/// particular, never classify settings, DB sidecars, links or subdirectories
+/// as a failed-startup residue, even if a crash log is also present.
+fn startup_diagnostics(root: &Path) -> Result<Option<BTreeMap<PathBuf, EntryStamp>>, AppError> {
+    let metadata = fs::symlink_metadata(root).map_err(|e| AppError::io(root, e))?;
+    if !metadata.is_dir() || is_reparse_point(&metadata) {
+        return Ok(None);
+    }
+    let mut entries = BTreeMap::new();
+    for entry in fs::read_dir(root).map_err(|e| AppError::io(root, e))? {
+        let entry = entry.map_err(|e| AppError::io(root, e))?;
+        if !matches!(
+            entry.file_name().to_str(),
+            Some("crash.log" | "crash.log.1" | "crash.log.2" | "startup-error.log")
+        ) {
+            return Ok(None);
+        }
+        let metadata =
+            fs::symlink_metadata(entry.path()).map_err(|e| AppError::io(entry.path(), e))?;
+        if !metadata.is_file() || is_reparse_point(&metadata) {
+            return Ok(None);
+        }
+        entries.insert(PathBuf::from(entry.file_name()), stamp(&entry.path())?);
+    }
+    Ok(Some(entries))
+}
+
+fn publish_migration(
+    stage: &Path,
+    target: &Path,
+    diagnostics: Option<BTreeMap<PathBuf, EntryStamp>>,
+) -> Result<(), AppError> {
+    let Some(ref expected) = diagnostics else {
+        return publish_directory(stage, target).map_err(|e| AppError::io(target, e));
+    };
+    if startup_diagnostics(target)?.as_ref() != Some(expected) {
+        return Err(migration_error(
+            "新配置目录在迁移期间发生变化，请关闭客户端后重试",
+        ));
+    }
+    let recovery = tempfile::Builder::new()
+        .prefix(".osir_client-startup-recovery-")
+        .tempdir_in(
+            target
+                .parent()
+                .ok_or_else(|| migration_error("无法确定配置目录"))?,
+        )
+        .map_err(|e| AppError::io(target, e))?;
+    let previous = recovery.path().join("previous");
+    publish_directory(target, &previous).map_err(|e| AppError::io(target, e))?;
+    // From this point the archive must survive every failure, including a
+    // concurrent app creating the destination before our no-clobber publish.
+    let _preserved = recovery.keep();
+    if !matches!(startup_diagnostics(&previous), Ok(Some(actual)) if actual == *expected) {
+        let _ = publish_directory(&previous, target);
+        return Err(migration_error(
+            "新配置目录在迁移期间发生变化，原目录已保留，请检查启动恢复备份",
+        ));
+    }
+    if let Err(error) = publish_directory(stage, target) {
+        // Never replace a concurrently created destination during rollback.
+        let _ = publish_directory(&previous, target);
+        return Err(AppError::io(target, error));
+    }
+    Ok(())
+}
+
 fn migrate_directory(legacy: &Path, target: &Path) -> Result<(), AppError> {
     if !legacy.exists() {
         return Ok(());
     }
-    if target.exists() {
-        // Existing OSIR data always wins. A partial destination without a DB
-        // must never make an existing legacy DB appear to have disappeared.
-        if source_database(legacy).exists() && !target.join(DATABASE_NAME).exists() {
-            return Err(migration_error(
-                "新配置目录已存在但没有数据库，请先备份并检查该目录",
-            ));
-        }
-        return Ok(());
-    }
+    let diagnostics =
+        if target.exists() {
+            // Existing OSIR data always wins. A partial destination without a DB
+            // must never make an existing legacy DB appear to have disappeared.
+            if source_database(target).exists() {
+                return migrate_database_in_directory(target);
+            }
+            if !source_database(legacy).exists() {
+                return Ok(());
+            }
+            Some(startup_diagnostics(target)?.ok_or_else(|| {
+                migration_error("新配置目录已存在但没有数据库，请先备份并检查该目录")
+            })?)
+        } else {
+            None
+        };
     let metadata = fs::symlink_metadata(legacy).map_err(|e| AppError::io(legacy, e))?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err(migration_error(
@@ -292,8 +387,7 @@ fn migrate_directory(legacy: &Path, target: &Path) -> Result<(), AppError> {
     if before != inventory(legacy)? {
         return Err(migration_error("旧配置在迁移期间发生变化"));
     }
-    publish_directory(stage.path(), target).map_err(|e| AppError::io(target, e))?;
-    Ok(())
+    publish_migration(stage.path(), target, diagnostics)
 }
 
 fn migrate_database_in_directory(directory: &Path) -> Result<(), AppError> {
@@ -425,6 +519,192 @@ mod tests {
         assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
         let stage = tempfile::tempdir_in(home.path()).unwrap();
         assert!(publish_directory(stage.path(), &target).is_err());
+    }
+
+    #[test]
+    fn startup_diagnostics_do_not_block_a_valid_migration_or_disappear() {
+        let home = tempfile::tempdir().unwrap();
+        let legacy = home.path().join("legacy");
+        let target = home.path().join("target");
+        let conn = seed(&legacy);
+        conn.execute("INSERT INTO fixture VALUES ('wal-row')", [])
+            .unwrap();
+        fs::write(legacy.join("settings.json"), b"synthetic settings").unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("crash.log"), b"synthetic original failure").unwrap();
+        migrate_directory(&legacy, &target).unwrap();
+        let migrated = Connection::open(target.join(DATABASE_NAME)).unwrap();
+        assert_eq!(
+            migrated
+                .query_row("SELECT COUNT(*) FROM fixture", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            fs::read(target.join("settings.json")).unwrap(),
+            b"synthetic settings"
+        );
+        let archives: Vec<_> = fs::read_dir(home.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".osir_client-startup-recovery-")
+            })
+            .collect();
+        assert_eq!(archives.len(), 1);
+        assert_eq!(
+            fs::read(archives[0].path().join("previous/crash.log")).unwrap(),
+            b"synthetic original failure"
+        );
+        assert!(legacy.join(LEGACY_DATABASE_NAME).exists());
+    }
+
+    #[test]
+    fn a_failed_retry_keeps_the_diagnostic_directory_and_legacy_database() {
+        let home = tempfile::tempdir().unwrap();
+        let legacy = home.path().join("legacy");
+        let target = home.path().join("target");
+        fs::create_dir(&legacy).unwrap();
+        fs::write(
+            legacy.join(LEGACY_DATABASE_NAME),
+            b"invalid synthetic database",
+        )
+        .unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("crash.log"), b"synthetic failure").unwrap();
+        let error = migrate_directory(&legacy, &target).unwrap_err().to_string();
+        assert!(
+            error.contains("无法只读打开旧数据库")
+                || error.contains("旧数据库正在使用或无法完整读取"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read(target.join("crash.log")).unwrap(),
+            b"synthetic failure"
+        );
+        assert!(!target.join(DATABASE_NAME).exists());
+        assert_eq!(
+            fs::read(legacy.join(LEGACY_DATABASE_NAME)).unwrap(),
+            b"invalid synthetic database"
+        );
+    }
+
+    #[test]
+    fn failed_publish_restores_previous_startup_diagnostics() {
+        let home = tempfile::tempdir().unwrap();
+        let target = home.path().join("target");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("startup-error.log"), b"synthetic failure").unwrap();
+        let diagnostics = startup_diagnostics(&target).unwrap();
+        assert!(
+            publish_migration(&home.path().join("missing-stage"), &target, diagnostics).is_err()
+        );
+        assert_eq!(
+            fs::read(target.join("startup-error.log")).unwrap(),
+            b"synthetic failure"
+        );
+    }
+
+    #[test]
+    fn destination_changes_before_publish_are_preserved() {
+        let home = tempfile::tempdir().unwrap();
+        let target = home.path().join("target");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("crash.log"), b"synthetic failure").unwrap();
+        let diagnostics = startup_diagnostics(&target).unwrap();
+        fs::write(target.join("settings.json"), b"new user settings").unwrap();
+        let stage = tempfile::tempdir_in(home.path()).unwrap();
+        assert!(publish_migration(stage.path(), &target, diagnostics).is_err());
+        assert_eq!(
+            fs::read(target.join("settings.json")).unwrap(),
+            b"new user settings"
+        );
+        assert!(stage.path().exists());
+    }
+
+    #[test]
+    fn migration_can_flush_a_copy_of_read_only_settings() {
+        let home = tempfile::tempdir().unwrap();
+        let legacy = home.path().join("legacy");
+        let target = home.path().join("target");
+        let _conn = seed(&legacy);
+        let settings = legacy.join("settings.json");
+        fs::write(&settings, b"synthetic read-only settings").unwrap();
+        let original = fs::metadata(&settings).unwrap().permissions();
+        let mut readonly = original.clone();
+        readonly.set_readonly(true);
+        fs::set_permissions(&settings, readonly).unwrap();
+        let result = migrate_directory(&legacy, &target);
+        fs::set_permissions(&settings, original).unwrap();
+        result.unwrap();
+        assert_eq!(
+            fs::read(target.join("settings.json")).unwrap(),
+            b"synthetic read-only settings"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diagnostic_names_do_not_allow_links_or_directories() {
+        let home = tempfile::tempdir().unwrap();
+        let target = home.path().join("target");
+        fs::create_dir(&target).unwrap();
+        let outside = home.path().join("outside");
+        fs::write(&outside, b"preserve outside data").unwrap();
+        std::os::unix::fs::symlink(&outside, target.join("crash.log")).unwrap();
+        assert!(startup_diagnostics(&target).unwrap().is_none());
+        fs::remove_file(target.join("crash.log")).unwrap();
+        fs::create_dir(target.join("crash.log")).unwrap();
+        assert!(startup_diagnostics(&target).unwrap().is_none());
+        assert_eq!(fs::read(&outside).unwrap(), b"preserve outside data");
+    }
+
+    #[test]
+    fn existing_destination_legacy_database_wins_over_an_unrelated_old_database() {
+        let home = tempfile::tempdir().unwrap();
+        let legacy = home.path().join("legacy");
+        let target = home.path().join("target");
+        let _old = seed(&legacy);
+        let current = seed(&target);
+        current
+            .execute("INSERT INTO fixture VALUES ('current destination')", [])
+            .unwrap();
+        migrate_directory(&legacy, &target).unwrap();
+        let migrated = Connection::open(target.join(DATABASE_NAME)).unwrap();
+        assert_eq!(
+            migrated
+                .query_row("SELECT COUNT(*) FROM fixture", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert!(target.join(LEGACY_DATABASE_NAME).exists());
+    }
+
+    #[test]
+    fn destination_user_files_and_orphaned_wal_are_never_classified_as_diagnostics() {
+        for name in [
+            "settings.json",
+            "config.json",
+            "osir_client.db-wal",
+            "cc-switch.db-wal",
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let legacy = home.path().join("legacy");
+            let target = home.path().join("target");
+            let _conn = seed(&legacy);
+            fs::create_dir(&target).unwrap();
+            fs::write(target.join("crash.log"), b"synthetic failure").unwrap();
+            fs::write(target.join(name), b"preserve destination data").unwrap();
+            assert!(migrate_directory(&legacy, &target).is_err(), "{name}");
+            assert_eq!(
+                fs::read(target.join(name)).unwrap(),
+                b"preserve destination data"
+            );
+            assert!(!target.join(DATABASE_NAME).exists());
+        }
     }
 
     #[cfg(unix)]

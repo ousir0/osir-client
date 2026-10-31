@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ToolName } from "@/components/apps/useToolManagement";
@@ -139,21 +139,65 @@ export function mergeDesktopRuntime(
         ...info,
         runtimeStatus: "unavailable" as const,
         runtimeError: "运行状态暂不可用，请重新检测",
+        launchSupported: false,
         closeSupported: false,
         restartSupported: false,
       };
     const current = runtime?.find((item) => item.id === info.id);
+    // A per-tool failure still resolves the IPC successfully on Windows. It is
+    // unknown installation state, not evidence that the user uninstalled it.
+    // Preserve the last inventory while disabling actions until a fresh probe
+    // succeeds; a successful not_installed result below still removes it.
+    if (current?.status === "unavailable")
+      return {
+        ...info,
+        runtimeStatus: "unavailable" as const,
+        runtimeError:
+          current.error ??
+          current.runtimeError ??
+          "运行状态暂不可用，请重新检测",
+        launchSupported: false,
+        closeSupported: false,
+        restartSupported: false,
+      };
     return current ? { ...info, ...current } : info;
   });
 }
 
 // Local metadata only: no update checks, account reads or credential access.
 export function useLocalTools(enabled: boolean) {
+  const queryClient = useQueryClient();
   const installations = useQuery({
     queryKey: LOCAL_TOOLS_QUERY,
-    queryFn: () => invoke<LocalToolInstallation[]>("osir_detect_tools"),
+    queryFn: async () => {
+      const detected =
+        await invoke<LocalToolInstallation[]>("osir_detect_tools");
+      const previous =
+        queryClient.getQueryData<LocalToolInstallation[]>(LOCAL_TOOLS_QUERY);
+      // A full refresh can fail per tool just like the runtime heartbeat.
+      // Preserve known installations only for unknown results; confirmed
+      // removals and fresh successes must still replace previous evidence.
+      return detected.map((current) => {
+        const known = previous?.find(
+          (item) => item.id === current.id && item.installed,
+        );
+        if (current.status !== "unavailable" || !known) return current;
+        return {
+          ...current,
+          installed: true,
+          version: known.version,
+          path: known.path,
+          runtimeStatus: "unavailable" as const,
+          launchSupported: false,
+          closeSupported: false,
+          restartSupported: false,
+        };
+      });
+    },
     enabled,
     retry: false,
+    // Local filesystem/registry IPC must run even when WebView reports offline.
+    networkMode: "always",
     staleTime: 30_000,
     refetchOnWindowFocus: "always",
   });

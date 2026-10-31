@@ -17,6 +17,7 @@ import {
   loadUpdaterReleaseConfig,
   verifyUpdaterArtifact,
 } from "./osir-release-updater.mjs";
+import { downloadReleaseArtifact } from "./osir-release-download.mjs";
 
 const TRUSTED_ORIGIN = "https://osirclaw.com";
 const CHANNELS = new Set(["beta", "prod"]);
@@ -458,36 +459,7 @@ function dataOf(envelope) {
 }
 
 async function verifyPublicArtifact(fetchImpl, artifact) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 180000);
-  try {
-    const response = await fetchImpl(artifact.url, {
-      method: "GET",
-      redirect: "error",
-      signal: controller.signal,
-      headers: { "accept-encoding": "identity" },
-    });
-    requireThat(
-      response.ok && response.url === artifact.url,
-      `Public artifact readback failed for ${artifact.file_name}.`,
-    );
-    const hash = createHash("sha256");
-    let bytes = 0;
-    for await (const chunk of response.body) {
-      bytes += chunk.length;
-      requireThat(
-        bytes <= MAX_ARTIFACT_BYTES && bytes <= artifact.size_bytes,
-        `Public artifact size differs for ${artifact.file_name}.`,
-      );
-      hash.update(chunk);
-    }
-    requireThat(
-      bytes === artifact.size_bytes && hash.digest("hex") === artifact.sha256,
-      `Public artifact hash differs for ${artifact.file_name}.`,
-    );
-  } finally {
-    clearTimeout(timer);
-  }
+  await downloadReleaseArtifact(artifact, { fetchImpl });
 }
 
 export function createServiceReleaseMetadata(plan) {
@@ -518,7 +490,7 @@ export function createServiceReleaseMetadata(plan) {
 
 export async function verifyPublicReleaseArtifacts(
   plan,
-  { fetchImpl = globalThis.fetch, metadataPath } = {},
+  { fetchImpl = globalThis.fetch, metadataPath, onProgress } = {},
 ) {
   let metadataDigest;
   if (metadataPath) {
@@ -552,7 +524,7 @@ export async function verifyPublicReleaseArtifacts(
     unique.set(artifact.url, artifact);
   }
   for (const artifact of unique.values())
-    await verifyPublicArtifact(fetchImpl, artifact);
+    await downloadReleaseArtifact(artifact, { fetchImpl, onProgress });
   return {
     schema_version: 1,
     release_id: plan.release_id,

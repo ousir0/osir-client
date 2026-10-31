@@ -1,8 +1,9 @@
 //! Windows metadata and fixed-source policy. Pure policy tests never launch apps.
 use serde::Deserialize;
 
-pub(crate) const CODEX_PACKAGE: &str = "OpenAI.Codex";
-pub(crate) const CODEX_PUBLISHER: &str = "CN=OpenAI OpCo, LLC, O=OpenAI OpCo, LLC, C=US";
+use crate::services::osir::windows_codex_package::{
+    PACKAGE_FAMILY, PACKAGE_IDENTITY as CODEX_PACKAGE, PACKAGE_PUBLISHER as CODEX_PUBLISHER,
+};
 pub(crate) const STORE_URL: &str = "https://apps.microsoft.com/detail/9PLM9XGG6VKS";
 
 pub(crate) fn package_url(arch: &str) -> Result<&'static str, String> {
@@ -95,7 +96,7 @@ impl Installation {
             if self.package.as_deref() != Some(CODEX_PACKAGE)
                 || !self.publisher.eq_ignore_ascii_case(CODEX_PUBLISHER)
                 || !entry_relative(&relative)
-                || self.family.as_deref() != Some("OpenAI.Codex_2p2nqsd0c76g0")
+                || self.family.as_deref() != Some(PACKAGE_FAMILY)
                 || self.app_id.as_deref() != Some("App")
             {
                 return Err("无法确认官方 Codex Desktop 安装身份".into());

@@ -7,6 +7,14 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { spawnSync } from "node:child_process";
 
+export function safeDiagnostic(value) {
+  return String(value)
+    .split(/\r?\n/, 1)[0]
+    .replace(/[A-Za-z]:\\[^\s)]+/g, "[path]")
+    .replace(/\b(?:sk|tok|key)-[A-Za-z0-9_-]{12,}\b/g, "[redacted]")
+    .slice(0, 240);
+}
+
 export function debuggerEndpoint(value, port) {
   const url = new URL(value);
   assert.equal(url.protocol, "ws:");
@@ -284,20 +292,20 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
             details.exception?.description ||
             details.text ||
             "renderer evaluation raised an exception";
-          const safeDetail = detail
-            .replace(/[A-Za-z]:\\\\[^\\s)]+/g, "[path]")
-            .replace(/\b(?:sk|tok|key)-[A-Za-z0-9_-]{12,}\b/g, "[redacted]")
-            .slice(0, 240);
+          const safeDetail = safeDiagnostic(detail);
           report.rendererFailure = { stage, error: safeDetail };
-          throw new Error(`Renderer evaluation failed at ${stage}: ${safeDetail}`);
+          throw new Error(
+            `Renderer evaluation failed at ${stage}: ${safeDetail}`,
+          );
         }
         return result.result.value;
       } catch (error) {
         if (!report.rendererFailure) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof Error ? error.message : String(error);
           report.rendererFailure = {
             stage,
-            error: message.replace(/[A-Za-z]:\\\\[^\\s)]+/g, "[path]").slice(0, 240),
+            error: safeDiagnostic(message),
           };
         }
         throw error;
@@ -318,18 +326,36 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
     report.nativeIpcChecks = [];
     const invokeNative = async (command) => {
       const started = Date.now();
-      const result = await evaluate(`(async () => {
+      const result = await evaluate(
+        `(async () => {
         try { return {passed: true, value: await window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)})}; }
       catch(error) { const message = typeof error === 'string' ? error : error?.message || 'native command rejected'; return {passed: false, error: message.slice(0, 240)}; }
-      })()`, `native-ipc:${command}`);
-      report.nativeIpcChecks.push({ command, passed: result.passed, elapsedMilliseconds: Date.now() - started, ...(result.error ? { error: result.error } : {}) });
-      assert.equal(result.passed, true, `Installed native IPC failed: ${command}${result.error ? ` (${result.error})` : ''}`);
+      })()`,
+        `native-ipc:${command}`,
+      );
+      if (result.error) result.error = safeDiagnostic(result.error);
+      report.nativeIpcChecks.push({
+        command,
+        passed: result.passed,
+        elapsedMilliseconds: Date.now() - started,
+        ...(result.error ? { error: result.error } : {}),
+      });
+      assert.equal(
+        result.passed,
+        true,
+        `Installed native IPC failed: ${command}${result.error ? ` (${result.error})` : ""}`,
+      );
       return result.value;
     };
     const distribution = await invokeNative("get_update_distribution");
     const account = await invokeNative("osir_account_session");
     const codexDesktop = await invokeNative("osir_codex_desktop_detection");
-    const native = {updatesEnabled: distribution.updatesEnabled, signedOut: account.connected === false, recovery: account.recovery, codexDesktop};
+    const native = {
+      updatesEnabled: distribution.updatesEnabled,
+      signedOut: account.connected === false,
+      recovery: account.recovery,
+      codexDesktop,
+    };
     assert.equal(
       native.updatesEnabled,
       true,

@@ -28,7 +28,13 @@ test("public verification deduplicates URLs but rejects conflicting identities b
   let calls = 0;
   const fetchImpl = async () => {
     calls++;
-    return { ok: true, url: artifact.url, body: [Buffer.from("test")] };
+    return {
+      status: 200,
+      ok: true,
+      url: artifact.url,
+      headers: { get: () => null },
+      body: [Buffer.from("test")],
+    };
   };
   const receipt = await verifyPublicReleaseArtifacts(
     { release_id: "test", artifacts: [artifact, { ...artifact }] },

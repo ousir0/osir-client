@@ -276,7 +276,8 @@ export function OsirToolsHub({
                         info.runtimeStatus && (
                           <p className="osir-tools-runtime">
                             {toolRuntimeLabel(info)}
-                            {info.launchSupported === false
+                            {info.launchSupported === false &&
+                            info.runtimeStatus !== "unavailable"
                               ? " · 暂不支持从客户端启动"
                               : ""}
                           </p>
