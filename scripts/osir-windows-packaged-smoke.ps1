@@ -151,6 +151,32 @@ function Get-Hash([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Invoke-UserDiagnostics([string]$Name, [string]$ExpectedHash) {
+    $destination = Join-Path $artifactDir ("windows-user-diagnostics-" + $Name + '.json')
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe"
+    $start.UseShellExecute = $false
+    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', (Join-Path $PSScriptRoot 'osir-windows-user-diagnostics.ps1'),
+        '-Executable', $mainExe, '-ExpectedExecutableSha256', $ExpectedHash,
+        '-ReportPath', $destination)) { $start.ArgumentList.Add($argument) }
+    $start.Environment['USERPROFILE'] = $isolatedToolHome
+    $start.Environment['CC_SWITCH_TEST_HOME'] = $isolatedToolHome
+    $start.Environment['OSIR_TEST_HOME'] = $isolatedToolHome
+    $start.Environment['APPDATA'] = $isolatedAppData
+    $start.Environment['LOCALAPPDATA'] = $isolatedLocalAppData
+    $check = [Diagnostics.Process]::Start($start)
+    try {
+        if (-not $check.WaitForExit(60000)) {
+            $check.Kill($true)
+            throw 'User diagnostics exceeded the acceptance timeout.'
+        }
+        Assert-Smoke ($check.ExitCode -eq 0) 'User diagnostics failed in Windows PowerShell 5.1.'
+    } finally { $check.Dispose() }
+    Assert-Smoke (Test-Path -LiteralPath $destination -PathType Leaf) 'User diagnostics report is missing.'
+    return Get-Content -Raw -LiteralPath $destination | ConvertFrom-Json
+}
+
 function Start-Isolated([string]$Path, [string]$Arguments = '', [bool]$MissingRuntime = $false) {
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Path
@@ -490,6 +516,26 @@ print("Synthetic migration fixture verified")
         startupLogPreserved = $true
         scope = 'synthetic-current-schema-legacy-directory-and-crash-only-destination'
     }
+
+    $stage = 'userDiagnostics'
+    $mismatch = Invoke-UserDiagnostics 'mismatch' ('0' * 64)
+    Assert-Smoke ($mismatch.executable.isExpectedBuild -eq $false -and $mismatch.startupTest.skipped -eq 'different-build') 'Diagnostics did not reject the wrong build.'
+    $diagnostic = Invoke-UserDiagnostics 'installed' (Get-Hash $mainExe)
+    Assert-Smoke ($diagnostic.powershell -like '5.1.*') 'Diagnostics did not run under Windows PowerShell 5.1.'
+    Assert-Smoke ($diagnostic.executable.isExpectedBuild -eq $true -and $diagnostic.startupTest.aliveAfter12Seconds -eq $true -and $diagnostic.startupTest.windowObserved -eq $true) 'Diagnostics did not observe the installed build opening.'
+    Assert-Smoke ($diagnostic.codexQuerySucceeded -eq $true -and @($diagnostic.codexPackages | Where-Object { $_.Version -eq '26.1027.3384.0' }).Count -eq 1) 'Diagnostics did not record the real installed Codex.'
+    $detectedConfig = @($diagnostic.configurationDirectories | Where-Object { $_.path -eq $currentConfig })
+    Assert-Smoke ($detectedConfig.Count -eq 1 -and $detectedConfig[0].database.sqliteHeader -eq $true) 'Diagnostics did not read synthetic database metadata.'
+    $report.stages.userDiagnostics = [ordered]@{
+        passed = $true
+        windowsPowerShell51 = $true
+        wrongBuildNotLaunched = $true
+        expectedBuildWindowObserved = $true
+        registeredCodexRecorded = $true
+        syntheticDatabaseMetadataRecorded = $true
+        scriptSha256 = Get-Hash (Join-Path $PSScriptRoot 'osir-windows-user-diagnostics.ps1')
+    }
+    Stop-OwnedApp
 
     $stage = 'startupFailure'
     $ownedLaunch = Start-Isolated $mainExe '' $true
