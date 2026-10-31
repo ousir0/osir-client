@@ -768,7 +768,7 @@ print("Synthetic migration fixture verified")
     $report.failedStage = $stage
     $report.failure = $_.Exception.Message
     $report.failureDebugPort = $rendererPort
-    $report.failureOwnedProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $mainExe -or [string]$_.CommandLine.Contains($smokeRoot) } | Select-Object Name, ProcessId, ParentProcessId, ExecutablePath, CommandLine)
+    $report.failureOwnedProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $mainExe -or ([string]$_.CommandLine).Contains($smokeRoot) } | Select-Object Name, ProcessId, ParentProcessId, ExecutablePath, CommandLine)
     try { $report.failureListeners = @(Get-NetTCPConnection -LocalPort $rendererPort -State Listen -ErrorAction Stop | Select-Object LocalAddress, LocalPort, OwningProcess) } catch { $report.failureListeners = @() }
     Write-Host "::error::[$stage] $($_.Exception.Message)"
 } finally {
