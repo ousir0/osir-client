@@ -240,24 +240,31 @@ jobs:
           package-manager-cache: false
 
       - name: Verify immutable source and build identity
+        id: package-identity
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN: ${{ inputs.source_run }}
           SOURCE_HEAD: ${{ inputs.source_head }}
+          SOURCE_CHANNEL: ${{ inputs.channel }}
         run: |
           if ($env:SOURCE_RUN -notmatch '^\d+$' -or $env:SOURCE_HEAD -notmatch '^[a-f0-9]{40}$') { throw 'Invalid immutable build identity' }
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $run.head_sha -ne $env:SOURCE_HEAD -or $run.head_branch -ne 'codex/release-build') { throw 'Build identity mismatch' }
+          $version = (Get-Content -Raw source/package.json | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $env:SOURCE_CHANNEL -notin @('prod', 'beta')) { throw 'Invalid package version/channel' }
+          $artifactName = "osir-ci-$version-${env:SOURCE_CHANNEL}-windows-x64-${env:SOURCE_RUN}-$($run.run_attempt)"
           $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN/artifacts" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or @($artifact.artifacts | Where-Object { $_.name -eq "osir-ci-0.1.3-prod-windows-x64-$env:SOURCE_RUN-1" -and -not $_.expired }).Count -ne 1) { throw 'Exact Windows artifact is missing or expired' }
+          if ($LASTEXITCODE -ne 0 -or @($artifact.artifacts | Where-Object { $_.name -eq $artifactName -and -not $_.expired }).Count -ne 1) { throw 'Exact Windows artifact is missing or expired' }
+          "artifact-name=$artifactName" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
           $env:GITHUB_SHA = $env:SOURCE_HEAD
-          node source/scripts/osir-ci-artifact.mjs preflight prod x86_64-pc-windows-msvc
+          node source/scripts/osir-ci-artifact.mjs preflight $env:SOURCE_CHANNEL x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw 'Frozen source validation failed' }
 
       - name: Download existing unsigned Windows package
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: osir-ci-0.1.3-prod-windows-x64-${{ inputs.source_run }}-1
+          name: ${{ steps.package-identity.outputs.artifact-name }}
           path: source/release/osir/recheck-input
           run-id: ${{ inputs.source_run }}
           github-token: ${{ github.token }}
@@ -305,7 +312,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: osir-rechecked-0.1.3-windows-${{ github.run_id }}
+          name: osir-rechecked-${{ steps.package-identity.outputs.version }}-windows-${{ github.run_id }}
           path: source/release/osir/recheck/
           if-no-files-found: error
           retention-days: 7
