@@ -2,8 +2,7 @@
 //!
 //! - `.env`：先删掉所有命中 `gemini_floor_env` 的行，再写目标供应商的；其他行（包括注释、
 //!   空行和顺序）不动。
-//! - `settings.json`：按键路径只改 `security.auth.selectedType` 和 `model.name`，所在对象的
-//!   其他键不动。
+//! - `settings.json`：只改供应商自己的认证、模型和上下文限制字段，所在对象的其他键不动。
 //!
 //! Gemini 没有供应商独有字段：兼容选项都是环境变量，已经在关键字段里。行里其余的内容
 //! （旧版回填进来的整份 `settings.json`、非关键的环境变量）不投影，它们归用户和客户端。
@@ -24,6 +23,7 @@ pub const SELECTED_TYPE_API_KEY: &str = "gemini-api-key";
 pub const BASE_URL_ENV: &str = "GOOGLE_GEMINI_BASE_URL";
 pub const API_KEY_ENV: &str = "GEMINI_API_KEY";
 const MODEL_ENV: &str = "GEMINI_MODEL";
+const DEFAULT_HISTORY_WINDOW_MAX_TOKENS: u64 = 150_000;
 
 /// 一个供应商在 Gemini CLI 两个文件里拥有的键。
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +36,10 @@ pub struct GeminiProjection {
     pub selected_type: Option<&'static str>,
     /// `model.name`（Gemini CLI 的 `/model` 写在这里）。行里没有就从 live 删掉。
     pub model_name: Option<Value>,
+    /// `experimental.contextManagement`，启用 Gemini CLI 的历史压缩。
+    pub context_management: Option<Value>,
+    /// `contextManagement.historyWindow.maxTokens`，供应商对应的压缩阈值。
+    pub history_window_max_tokens: Option<Value>,
 }
 
 impl GeminiProjection {
@@ -56,6 +60,16 @@ impl GeminiProjection {
             .pointer("/config/model/name")
             .filter(|value| !value.is_null())
             .cloned();
+        let context_management = settings
+            .pointer("/config/experimental/contextManagement")
+            .filter(|value| !value.is_null())
+            .cloned()
+            .unwrap_or_else(|| json!(true));
+        let history_window_max_tokens = settings
+            .pointer("/config/contextManagement/historyWindow/maxTokens")
+            .filter(|value| !value.is_null())
+            .cloned()
+            .unwrap_or_else(|| json!(DEFAULT_HISTORY_WINDOW_MAX_TOKENS));
         Self {
             env,
             selected_type: Some(if official {
@@ -64,6 +78,8 @@ impl GeminiProjection {
                 SELECTED_TYPE_API_KEY
             }),
             model_name,
+            context_management: Some(context_management),
+            history_window_max_tokens: Some(history_window_max_tokens),
         }
     }
 
@@ -73,6 +89,8 @@ impl GeminiProjection {
             env: Vec::new(),
             selected_type: None,
             model_name: None,
+            context_management: None,
+            history_window_max_tokens: None,
         }
     }
 
@@ -94,6 +112,8 @@ impl GeminiProjection {
             env,
             selected_type: Some(SELECTED_TYPE_API_KEY),
             model_name: route.model_name.clone(),
+            context_management: route.context_management.clone(),
+            history_window_max_tokens: route.history_window_max_tokens.clone(),
         }
     }
 
@@ -115,6 +135,16 @@ impl GeminiProjection {
             Some(name) => patch.set.push((model_name_path(), name.clone())),
             None => patch.remove.push(model_name_path()),
         }
+        match &self.context_management {
+            Some(enabled) => patch.set.push((context_management_path(), enabled.clone())),
+            None => patch.remove.push(context_management_path()),
+        }
+        match &self.history_window_max_tokens {
+            Some(limit) => patch
+                .set
+                .push((history_window_max_tokens_path(), limit.clone())),
+            None => patch.remove.push(history_window_max_tokens_path()),
+        }
         patch
     }
 
@@ -124,6 +154,8 @@ impl GeminiProjection {
             "env": self.env,
             "selectedType": self.selected_type,
             "modelName": self.model_name,
+            "contextManagement": self.context_management,
+            "historyWindowMaxTokens": self.history_window_max_tokens,
         })
     }
 }
@@ -134,6 +166,14 @@ pub fn selected_type_path() -> KeyPath {
 
 pub fn model_name_path() -> KeyPath {
     KeyPath::new(&["model", "name"])
+}
+
+pub fn context_management_path() -> KeyPath {
+    KeyPath::new(&["experimental", "contextManagement"])
+}
+
+pub fn history_window_max_tokens_path() -> KeyPath {
+    KeyPath::new(&["contextManagement", "historyWindow", "maxTokens"])
 }
 
 #[cfg(test)]
@@ -203,13 +243,15 @@ mod tests {
     }
 
     #[test]
-    fn settings_switch_touches_only_the_two_key_paths() {
+    fn settings_switch_updates_supplier_fields_and_preserves_user_fields() {
         let official = GeminiProjection::of(&json!({"env": {}}), true);
         let pre = r#"{"model": {"name": "gemini-a", "compressionThreshold": 0.5}, "security": {"auth": {"selectedType": "gemini-api-key", "useExternal": true}}, "mcpServers": {"x": {"command": "y"}}}"#;
         assert_eq!(
             apply_settings(&official, pre),
             json!({
                 "model": {"compressionThreshold": 0.5},
+                "experimental": {"contextManagement": true},
+                "contextManagement": {"historyWindow": {"maxTokens": 150000}},
                 "security": {"auth": {"selectedType": "oauth-personal", "useExternal": true}},
                 "mcpServers": {"x": {"command": "y"}},
             })
@@ -238,5 +280,54 @@ mod tests {
             ]
         );
         assert_eq!(contract.selected_type, Some(SELECTED_TYPE_API_KEY));
+    }
+
+    #[test]
+    fn supplier_context_limit_projects_and_follows_proxy_route() {
+        let row = json!({
+            "config": {
+                "experimental": {"contextManagement": true},
+                "contextManagement": {"historyWindow": {"maxTokens": 150000}},
+            }
+        });
+        let projection = GeminiProjection::of(&row, false);
+        let live = r#"{"experimental":{"contextManagement":false,"other":true},"contextManagement":{"historyWindow":{"maxTokens":90000,"other":1}},"model":{"name":"old"},"mcpServers":{"keep":{}}}"#;
+        assert_eq!(
+            apply_settings(&projection, live),
+            json!({
+                "experimental": {"contextManagement": true, "other": true},
+                "contextManagement": {"historyWindow": {"maxTokens": 150000, "other": 1}},
+                "model": {},
+                "security": {"auth": {"selectedType": "gemini-api-key"}},
+                "mcpServers": {"keep": {}}
+            })
+        );
+
+        let proxy = GeminiProjection::proxy_contract(
+            &projection,
+            "http://127.0.0.1:15721",
+            "PROXY_MANAGED",
+        );
+        assert_eq!(proxy.context_management, Some(json!(true)));
+        assert_eq!(proxy.history_window_max_tokens, Some(json!(150000)));
+    }
+
+    #[test]
+    fn context_management_defaults_are_applied_and_explicit_opt_out_is_preserved() {
+        let default = GeminiProjection::of(&json!({}), false);
+        assert_eq!(default.context_management, Some(json!(true)));
+        assert_eq!(default.history_window_max_tokens, Some(json!(150000)));
+
+        let opted_out = GeminiProjection::of(
+            &json!({
+                "config": {
+                    "experimental": {"contextManagement": false},
+                    "contextManagement": {"historyWindow": {"maxTokens": 120000}}
+                }
+            }),
+            false,
+        );
+        assert_eq!(opted_out.context_management, Some(json!(false)));
+        assert_eq!(opted_out.history_window_max_tokens, Some(json!(120000)));
     }
 }

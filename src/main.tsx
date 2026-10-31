@@ -43,6 +43,13 @@ import { initializeInputModality } from "@/lib/inputModality";
 const nativeStartup = "__TAURI_INTERNALS__" in window;
 const startupPolicyPromise = resolveStartupPolicy(nativeStartup);
 if (nativeStartup) installGlobalErrorHandlers();
+if (nativeStartup) {
+  const reportFailure = () => {
+    void invoke("osir_client_report_frontend_failure").catch(() => {});
+  };
+  window.addEventListener("error", reportFailure);
+  window.addEventListener("unhandledrejection", reportFailure);
+}
 
 // 根据平台添加 body class，便于平台特定样式
 try {

@@ -595,6 +595,7 @@ mod tests {
 
     #[tokio::test]
     async fn replacement_closes_the_previous_keep_alive_connection() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let dir = tempfile::tempdir().unwrap();
         let manager = CodexOAuthManager::new(dir.path().into());
         let listener = bind_callback_listener(0).await.unwrap();
@@ -605,18 +606,29 @@ mod tests {
             .await
             .unwrap();
         let endpoint = format!("http://127.0.0.1:{port}/auth/callback");
-        let old = client
-            .get(&endpoint)
-            .query(&[("state", "wrong"), ("code", "c")])
-            .send()
+        // Observe the old connection directly. A pooled HTTP client can race
+        // its background EOF handling and reuse a socket the server just closed.
+        let mut old = tokio::net::TcpStream::connect(("127.0.0.1", port))
             .await
             .unwrap();
-        assert_eq!(old.status(), StatusCode::BAD_REQUEST);
-        old.bytes().await.unwrap();
+        old.write_all(b"GET /auth/callback?state=wrong&code=c HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response_bytes = vec![0; 4096];
+        let count = old.read(&mut response_bytes).await.unwrap();
+        assert!(response_bytes[..count].starts_with(b"HTTP/1.1 400"));
         let response = manager
             .start_browser_flow_at_port(None, port, Duration::from_secs(LOGIN_LIFETIME))
             .await
             .unwrap();
+        let remaining =
+            tokio::time::timeout(Duration::from_secs(3), old.read_to_end(&mut Vec::new()))
+                .await
+                .expect("superseded callback connection must close");
+        assert!(
+            remaining.is_ok(),
+            "old callback connection failed to close cleanly"
+        );
         let url = url::Url::parse(&response.verification_uri).unwrap();
         let state = url
             .query_pairs()

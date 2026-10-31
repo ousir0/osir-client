@@ -180,9 +180,13 @@ pub fn gemini_floor_env(key: &str) -> bool {
         )
 }
 
-/// Gemini CLI `settings.json` 里的关键字段：按键路径只清这两个键。
-pub const GEMINI_FLOOR_SETTINGS: &[&[&str]] =
-    &[&["security", "auth", "selectedType"], &["model", "name"]];
+/// Gemini CLI `settings.json` 里的供应商字段：认证、模型和上下文限制随供应商切换。
+pub const GEMINI_FLOOR_SETTINGS: &[&[&str]] = &[
+    &["security", "auth", "selectedType"],
+    &["model", "name"],
+    &["experimental", "contextManagement"],
+    &["contextManagement", "historyWindow", "maxTokens"],
+];
 
 /// Claude Desktop 的 `configLibrary/<id>.json` 里的关键字段。
 pub const DESKTOP_PROFILE_FLOOR: &[&str] = &[

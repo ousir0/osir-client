@@ -127,6 +127,8 @@ impl OsirAccountState {
             if result.is_err() {
                 log::warn!("OSIR credential recovery incomplete; journal retained");
             }
+            let state = app.state::<crate::store::AppState>();
+            super::osir_credential_recovery::recover_connections_at_startup(&state.db);
         });
     }
     fn clear_locked(&self, binding: &mut Option<(u64, Session)>) {

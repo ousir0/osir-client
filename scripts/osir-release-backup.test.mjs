@@ -125,6 +125,34 @@ function fixture(t, { channel = "beta", version = "1.2.3-beta.1" } = {}) {
     },
   };
 }
+test("Mac report shared by native binding and screenshots survives backup restore", async (t) => {
+  const f = fixture(t);
+  const path = join(f.source, "build-manifest.json");
+  const manifest = JSON.parse(readFileSync(path, "utf8"));
+  const record = (name, data) => {
+    writeFileSync(join(f.source, name), data);
+    return { name, sha256: digest(data), bytes: Buffer.byteLength(data) };
+  };
+  manifest.packagedMacAcceptance = record("mac-report.json", "{}");
+  manifest.packagedMacScreenshots = [record("mac-window.png", "fixture-image")];
+  manifest.nativeAcceptance = {
+    ...manifest.packagedMacAcceptance,
+    path: "mac-report.json",
+  };
+  writeFileSync(path, JSON.stringify(manifest));
+  const backup = await backupRelease(f.options);
+  const restored = restoreRelease({
+    backupDirectory: backup.path,
+    destination: join(f.root, "restored"),
+    expectedReceiptSha256: backup.receipt_sha256,
+  });
+  assert.equal(
+    readFileSync(join(restored.path, "release/mac-window.png"), "utf8"),
+    "fixture-image",
+  );
+  assert.deepEqual(backup.missing_evidence, []);
+});
+
 test("cloud bytes are backed up, independently signed, sealed and restored without credentials", async (t) => {
   const f = fixture(t);
   const result = await backupRelease(f.options);

@@ -1718,6 +1718,10 @@
     "modelHelper": "選填：指定預設使用的 Claude 模型，留空則使用系統預設。",
     "modelMappingLabel": "模型對應",
     "modelMappingHint": "顯示名稱只影響 /model 選單；1M 只是提供給 Claude Code 的上下文能力聲明。",
+    "contextWindowLimit": "上下文視窗上限",
+    "contextWindowLimitHint": "僅在關閉自動壓縮時設定模型視窗；留白時使用 Claude Code 的模型預設值。",
+    "autoCompactWindow": "自動壓縮參考視窗",
+    "autoCompactWindowHint": "Claude Code 會依此視窗計算自動壓縮。預設為 100,000 tokens；實際上限與費用取決於所選供應商和模型。",
     "stackModelsLabel": "模型列表",
     "addStackModel": "手動新增",
     "stackModelDefaultHelp": "這些模型會出現在 Claude Code 的 /model 裡，選中後請求直達這家。第一行是預設模型，也會寫成這張卡的 ANTHROPIC_MODEL。",
@@ -1759,7 +1763,7 @@
     "fetchModelsSuccess": "取得 {{count}} 個模型",
     "modelMetadataFilled": "已補齊 {{model}} 的上下文等參數（來源：{{source}}），請核對",
     "modelMetadataFilledMany": "已補齊 {{count}} 個模型的上下文等參數（來源：{{source}}），請核對",
-    "gptContextWindowHint": "中轉站的 GPT 多來自 ChatGPT 訂閱，視窗只有 272K。視窗寫大了不會提前壓縮，等上游拒收時這一輪會失敗；確認這家支援更大視窗再這樣填。",
+    "gptContextWindowHint": "建議先使用 272K 或供應商支援的較小視窗。較大視窗可能增加費用，例如 GPT-5.5 的輸入超過 272K 後會使用長上下文價格。請確認目前供應商和模型支援後再提高。",
     "modelMetadataSourcePreset": "預設",
     "modelMetadataSourceBoth": "預設和 models.dev",
     "modelPicker": {
@@ -2038,6 +2042,10 @@
     "configJsonHint": "Gemini CLI 的 settings.json（MCP 伺服器在 MCP 面板中管理）",
     "keyFieldsHint": "位址、Key、模型名稱和認證方式隨供應商切換；其餘環境變數和 settings.json 是 Gemini CLI 全域設定，儲存後對所有供應商生效。",
     "inactiveFieldsHint": "這些是舊版存進卡裡的設定，現在切換不會寫出去。點一下加入上方，儲存後對所有供應商生效。",
+    "contextManagementEnabled": "自動壓縮對話歷史",
+    "contextManagementEnabledHint": "對話歷史超過下方視窗後，自動壓縮較早的內容。",
+    "historyWindowMaxTokens": "歷史視窗上限",
+    "historyWindowMaxTokensHint": "啟用自動壓縮時，達到此 token 數後開始壓縮。留白使用建議值 150,000；儲存後重新啟動 Gemini CLI 生效。",
     "addToGlobalSettings": "加入全域設定"
   },
   "opencode": {

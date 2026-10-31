@@ -146,6 +146,14 @@ mod tests {
                 continue;
             }
             let text = fs::read_to_string(&path).unwrap();
+            // Externally declared test-only modules have no enclosing cfg block.
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with("_tests.rs") || name == "tests.rs")
+            {
+                continue;
+            }
             // 测试模块里造数据可以直接读写，只查生产代码：跳过顶层的
             // `#[cfg(test)] mod xxx { … }`（到下一个顶格的 `}` 为止）。
             let mut in_tests = false;

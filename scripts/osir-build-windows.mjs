@@ -205,6 +205,11 @@ async function main() {
   );
   let complete = false;
   try {
+    // Reuse compiled dependencies, but never select a previous NSIS installer.
+    rmSync(join(cache, target, "release/bundle/nsis"), {
+      recursive: true,
+      force: true,
+    });
     run(
       [join(root, "node_modules/vite/bin/vite.js"), "build"],
       environment.renderer,
@@ -224,6 +229,7 @@ async function main() {
         "nsis",
         "--",
         "--locked",
+        "--timings",
         "-j",
         "1",
       ],

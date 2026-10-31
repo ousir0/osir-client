@@ -1,6 +1,6 @@
 {
   "name": "osir_client",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OSIR API desktop client for Codex, Claude Code, OpenCode and Gemini CLI",
   "type": "module",
   "scripts": {
@@ -31,6 +31,11 @@
     "release:osir:adhoc:beta": "node scripts/osir-release-local.mjs beta",
     "release:osir:adhoc:prod": "node scripts/osir-release-local.mjs prod",
     "release:osir:cloud": "node scripts/osir-release-cloud.mjs",
+    "release:osir:tool": "node scripts/osir-release-tool.mjs",
+    "release:osir:combine": "node scripts/osir-release-combine.mjs",
+    "release:osir:snapshot": "node scripts/osir-source-snapshot.mjs",
+    "release:osir:finalize": "node scripts/osir-release-finalize.mjs",
+    "release:osir:test": "node --test scripts/osir-release-*.test.mjs",
     "icons:osir": "python3 scripts/osir-icons.py",
     "icons:osir:check": "python3 scripts/osir-icons.py --check"
   },

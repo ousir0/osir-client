@@ -84,6 +84,13 @@ import { Label } from "@/components/ui/label";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
 import { BasicFormFields } from "./BasicFormFields";
 import { ClaudeFormFields } from "./ClaudeFormFields";
+import {
+  CLAUDE_AUTO_COMPACT_WINDOW_DEFAULT,
+  readClaudeAutoCompactWindow,
+  readClaudeContextLimit,
+  updateClaudeAutoCompactWindow,
+  updateClaudeContextLimit,
+} from "./claudeContextLimit";
 import type { DirectModeFormatNotice } from "./shared";
 import {
   claudeStackModelsFromEnv,
@@ -681,6 +688,34 @@ function ProviderFormFull({
   // 按行里实际写的映射算（和后端一样），不用 useModelState 回填过的值。
   const claudeSettingsConfig =
     appId === "claude" ? form.watch("settingsConfig") : "";
+  const claudeContextLimit = readClaudeContextLimit(claudeSettingsConfig);
+  const claudeAutoCompactLimit =
+    readClaudeAutoCompactWindow(claudeSettingsConfig) ||
+    String(CLAUDE_AUTO_COMPACT_WINDOW_DEFAULT);
+  const handleClaudeContextLimitChange = (value: string) => {
+    const next = updateClaudeContextLimit(
+      form.getValues("settingsConfig"),
+      value,
+    );
+    if (next !== null) {
+      form.setValue("settingsConfig", next, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
+  };
+  const handleClaudeAutoCompactLimitChange = (value: string) => {
+    const next = updateClaudeAutoCompactWindow(
+      form.getValues("settingsConfig"),
+      value,
+    );
+    if (next !== null) {
+      form.setValue("settingsConfig", next, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    }
+  };
   const mappedClaudeStackRows = useMemo(() => {
     let env: Record<string, unknown> | undefined;
     try {
@@ -2664,6 +2699,10 @@ function ProviderFormFull({
               showEndpointTools
               shouldShowModelSelector={category !== "official"}
               claudeModel={claudeModel}
+              contextLimit={claudeContextLimit}
+              onContextLimitChange={handleClaudeContextLimitChange}
+              autoCompactLimit={claudeAutoCompactLimit}
+              onAutoCompactLimitChange={handleClaudeAutoCompactLimitChange}
               defaultHaikuModel={defaultHaikuModel}
               defaultHaikuModelName={defaultHaikuModelName}
               defaultSonnetModel={defaultSonnetModel}
@@ -2811,6 +2850,8 @@ function ProviderFormFull({
               shouldShowModelField={true}
               model={geminiModel}
               onModelChange={handleGeminiModelChange}
+              configValue={geminiConfig}
+              onConfigChange={handleGeminiConfigChange}
               speedTestEndpoints={speedTestEndpoints}
             />
           )}

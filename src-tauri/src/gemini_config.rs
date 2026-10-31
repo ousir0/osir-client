@@ -283,6 +283,24 @@ pub fn validate_gemini_settings(settings: &Value) -> Result<(), AppError> {
                 "Gemini config invalid: config must be an object",
             ));
         }
+        if let Some(enabled) = config.pointer("/experimental/contextManagement") {
+            if !enabled.is_boolean() {
+                return Err(AppError::localized(
+                    "gemini.validation.invalid_context_management",
+                    "Gemini 配置格式错误: experimental.contextManagement 必须是布尔值",
+                    "Gemini config invalid: experimental.contextManagement must be a boolean",
+                ));
+            }
+        }
+        if let Some(limit) = config.pointer("/contextManagement/historyWindow/maxTokens") {
+            if !limit.as_u64().is_some_and(|value| value > 0) {
+                return Err(AppError::localized(
+                    "gemini.validation.invalid_context_limit",
+                    "Gemini 配置格式错误: historyWindow.maxTokens 必须是正整数",
+                    "Gemini config invalid: historyWindow.maxTokens must be a positive integer",
+                ));
+            }
+        }
     }
 
     Ok(())
@@ -595,5 +613,24 @@ KEY_WITH-DASH=value";
         });
 
         assert!(validate_gemini_settings(&settings).is_err());
+    }
+
+    #[test]
+    fn test_validate_context_management_settings() {
+        assert!(validate_gemini_settings(&serde_json::json!({
+            "config": {
+                "experimental": {"contextManagement": true},
+                "contextManagement": {"historyWindow": {"maxTokens": 150000}}
+            }
+        }))
+        .is_ok());
+
+        for invalid in [
+            serde_json::json!({"config":{"experimental":{"contextManagement":"true"}}}),
+            serde_json::json!({"config":{"contextManagement":{"historyWindow":{"maxTokens":0}}}}),
+            serde_json::json!({"config":{"contextManagement":{"historyWindow":{"maxTokens":1.5}}}}),
+        ] {
+            assert!(validate_gemini_settings(&invalid).is_err(), "{invalid}");
+        }
     }
 }

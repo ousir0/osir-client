@@ -14,6 +14,16 @@ import {
   type FetchedModel,
 } from "@/lib/api/model-fetch";
 import type { ProviderCategory } from "@/types";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import {
+  GEMINI_HISTORY_TOKEN_DEFAULT,
+  GEMINI_HISTORY_TOKEN_MAX,
+  readGeminiContextManagementEnabled,
+  readGeminiHistoryTokenLimit,
+  updateGeminiContextManagementEnabled,
+  updateGeminiHistoryTokenLimit,
+} from "./geminiContextLimit";
 
 interface EndpointCandidate {
   url: string;
@@ -46,6 +56,8 @@ interface GeminiFormFieldsProps {
   shouldShowModelField: boolean;
   model: string;
   onModelChange: (value: string) => void;
+  configValue: string;
+  onConfigChange: (value: string) => void;
 
   // Speed Test Endpoints
   speedTestEndpoints: EndpointCandidate[];
@@ -73,6 +85,8 @@ export function GeminiFormFields({
   shouldShowModelField,
   model,
   onModelChange,
+  configValue,
+  onConfigChange,
   speedTestEndpoints,
 }: GeminiFormFieldsProps) {
   const { t } = useTranslation();
@@ -219,6 +233,68 @@ export function GeminiFormFields({
             fetchedModels={fetchedModels}
             isLoading={isFetchingModels}
           />
+        </div>
+      )}
+
+      {appId === "gemini" && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <FormLabel htmlFor="gemini-context-management-enabled">
+              {t("geminiConfig.contextManagementEnabled", {
+                defaultValue: "Automatic history compaction",
+              })}
+            </FormLabel>
+            <Switch
+              id="gemini-context-management-enabled"
+              checked={readGeminiContextManagementEnabled(configValue)}
+              onCheckedChange={(enabled) => {
+                const next = updateGeminiContextManagementEnabled(
+                  configValue,
+                  enabled,
+                );
+                if (next !== null) onConfigChange(next);
+              }}
+              aria-label={t("geminiConfig.contextManagementEnabled", {
+                defaultValue: "Automatic history compaction",
+              })}
+            />
+          </div>
+          <p className="text-xs text-fg-2">
+            {t("geminiConfig.contextManagementEnabledHint", {
+              defaultValue:
+                "Compress older conversation history when it grows beyond the configured window.",
+            })}
+          </p>
+          <FormLabel htmlFor="gemini-history-token-limit">
+            {t("geminiConfig.historyWindowMaxTokens", {
+              defaultValue: "History window limit",
+            })}
+          </FormLabel>
+          <Input
+            id="gemini-history-token-limit"
+            type="number"
+            min={1}
+            max={GEMINI_HISTORY_TOKEN_MAX}
+            step={1}
+            inputMode="numeric"
+            disabled={!readGeminiContextManagementEnabled(configValue)}
+            value={readGeminiHistoryTokenLimit(configValue)}
+            placeholder={String(GEMINI_HISTORY_TOKEN_DEFAULT)}
+            onChange={(event) => {
+              const next = updateGeminiHistoryTokenLimit(
+                configValue,
+                event.target.value,
+              );
+              if (next !== null) onConfigChange(next);
+            }}
+            aria-describedby="gemini-history-token-limit-help"
+          />
+          <p id="gemini-history-token-limit-help" className="text-xs text-fg-2">
+            {t("geminiConfig.historyWindowMaxTokensHint", {
+              defaultValue:
+                "Compression starts after this many tokens while enabled. Leave blank for the recommended 150,000. Restart Gemini CLI to apply.",
+            })}
+          </p>
         </div>
       )}
 

@@ -1540,6 +1540,7 @@ base_url = "https://api.osirclaw.com/v1"
             live,
             json!({ "env": {
                 "ANTHROPIC_BASE_URL": "https://api.deepseek.example/anthropic",
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000",
                 "DEBUG": "1"
             }})
         );

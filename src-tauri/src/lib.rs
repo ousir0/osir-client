@@ -1588,6 +1588,7 @@ pub fn run() {
             client_telemetry::osir_client_telemetry_set_enabled,
             client_telemetry::osir_client_activity_set_enabled,
             client_telemetry::osir_client_telemetry_sync,
+            client_telemetry::osir_client_report_frontend_failure,
             commands::session_resume::resume_session,
             commands::get_providers,
             commands::osir_desktop_auth_capability,

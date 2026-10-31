@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "修复 Codex 已连接图片服务后原生生图工具未启用的问题，支持生成图片和参考图编辑。改善更新提醒：客户端保持打开或切回窗口时也会检查更新，手动检查可重新显示已关闭的提醒。"
+  "notes": "启动时自动恢复已保存的连接凭据；系统要求授权时会请求确认。改善 Windows 安装包构建与验收。新安装默认开启客户端统计，可随时关闭；新增不含错误原文、密钥和对话内容的异常分类统计。"
 }

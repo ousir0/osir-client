@@ -35,7 +35,7 @@ impl OsirInstallerState {
             .map_err(|_| "安装器初始化不可用".into())
     }
 }
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallSource {
     Auto,

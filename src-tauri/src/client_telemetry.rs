@@ -27,16 +27,19 @@ struct Preferences {
     account_enabled: bool,
     #[serde(default)]
     account_last_attempt_unix_ms: Option<u64>,
+    #[serde(default)]
+    failure_last_attempt_unix_ms: Option<u64>,
 }
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             schema_version: 1,
-            enabled: false,
+            enabled: true,
             installation_id: None,
             last_attempt_unix_ms: None,
             account_enabled: false,
             account_last_attempt_unix_ms: None,
+            failure_last_attempt_unix_ms: None,
         }
     }
 }
@@ -78,6 +81,7 @@ struct LocalState {
     preferences: Preferences,
     rate: RateLimit,
     account_rate: RateLimit,
+    failure_rate: RateLimit,
 }
 #[derive(Default)]
 struct Runtime {
@@ -93,6 +97,7 @@ impl Runtime {
                 path: path.to_owned(),
                 rate: RateLimit::new(preferences.last_attempt_unix_ms, wall, now),
                 account_rate: RateLimit::new(preferences.account_last_attempt_unix_ms, wall, now),
+                failure_rate: RateLimit::new(preferences.failure_last_attempt_unix_ms, wall, now),
                 preferences,
             });
         }
@@ -124,6 +129,8 @@ enum Event {
     Heartbeat,
     UpdateInstalled,
     UpdateFailed,
+    CredentialFailed,
+    FrontendFailed,
 }
 #[derive(Serialize)]
 struct Payload<'a> {
@@ -310,7 +317,13 @@ impl ClientTelemetryState {
         let mut runtime = self.0.runtime.lock().ok()?;
         let generation = runtime.preference_generation;
         let local = runtime.local(path, wall, now).ok()?;
-        if !local.preferences.enabled || !local.rate.reserve(now) {
+        let failure = matches!(event, Event::CredentialFailed | Event::FrontendFailed);
+        let rate = if failure {
+            &mut local.failure_rate
+        } else {
+            &mut local.rate
+        };
+        if !local.preferences.enabled || !rate.reserve(now) {
             return None;
         }
         let id = local
@@ -318,7 +331,11 @@ impl ClientTelemetryState {
             .installation_id
             .get_or_insert_with(|| Uuid::new_v4().to_string())
             .clone();
-        local.preferences.last_attempt_unix_ms = Some(wall);
+        if failure {
+            local.preferences.failure_last_attempt_unix_ms = Some(wall);
+        } else {
+            local.preferences.last_attempt_unix_ms = Some(wall);
+        }
         // Persist before dispatch, including failed attempts, to bound restarts.
         write_preferences(path, &local.preferences).ok()?;
         let body = serde_json::to_vec(&Payload {
@@ -525,6 +542,23 @@ pub enum ClientUpdateResult {
     Installed,
     Failed,
 }
+pub fn record_credential_failure(app: tauri::AppHandle) {
+    record_failure(app, Event::CredentialFailed);
+}
+fn record_failure(app: tauri::AppHandle, event: Event) {
+    let Some(state) = app.try_state::<ClientTelemetryState>() else {
+        return;
+    };
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        state.send(&app, event).await;
+    });
+}
+#[tauri::command]
+pub fn osir_client_report_frontend_failure(app: tauri::AppHandle) {
+    // No error string, stack, filename or renderer-chosen event crosses IPC.
+    record_failure(app, Event::FrontendFailed);
+}
 pub fn record_update_result(app: tauri::AppHandle, result: ClientUpdateResult) {
     let Some(state) = app.try_state::<ClientTelemetryState>() else {
         return;
@@ -546,6 +580,61 @@ pub fn record_update_result(app: tauri::AppHandle, result: ClientUpdateResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failures_have_a_separate_persisted_limit_and_no_error_details() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("telemetry.json");
+        let state = ClientTelemetryState::default();
+        let now = Instant::now();
+        assert!(state
+            .prepare(
+                &path,
+                true,
+                Event::Heartbeat,
+                "0.1.3",
+                "darwin-aarch64",
+                1000,
+                now
+            )
+            .is_some());
+        let failure = state
+            .prepare(
+                &path,
+                true,
+                Event::CredentialFailed,
+                "0.1.3",
+                "darwin-aarch64",
+                1000,
+                now,
+            )
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&failure.body).unwrap();
+        assert_eq!(body["event"], "credential_failed");
+        assert_eq!(body.as_object().unwrap().len(), 6);
+        assert!(state
+            .prepare(
+                &path,
+                true,
+                Event::FrontendFailed,
+                "0.1.3",
+                "darwin-aarch64",
+                1001,
+                now
+            )
+            .is_none());
+        assert!(ClientTelemetryState::default()
+            .prepare(
+                &path,
+                true,
+                Event::FrontendFailed,
+                "0.1.3",
+                "darwin-aarch64",
+                1001,
+                now
+            )
+            .is_none());
+    }
 
     #[test]
     fn legacy_anonymous_opt_in_never_grants_account_linking() {
@@ -572,7 +661,7 @@ mod tests {
         assert!(state.account_still_allowed(generation));
         assert!(state.prepare_account(&path, true, 1001, now).is_none());
         assert!(read_preferences(&path).unwrap().installation_id.is_none());
-        assert!(!read_preferences(&path).unwrap().enabled);
+        assert!(read_preferences(&path).unwrap().enabled);
         assert!(state
             .prepare_account(&path, true, 901000, now + INTERVAL)
             .is_some());
@@ -679,7 +768,7 @@ mod tests {
         let status = serde_json::to_value(state.status(&path, false).unwrap()).unwrap();
         assert_eq!(status.as_object().unwrap().len(), 4);
         assert_eq!(status["accountEnabled"], false);
-        assert_eq!(status["enabled"], false);
+        assert_eq!(status["enabled"], true);
         assert_eq!(status["available"], false);
         assert!(status.get("installationId").is_none());
         assert!(!path.exists());

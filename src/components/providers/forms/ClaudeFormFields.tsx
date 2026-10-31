@@ -70,6 +70,10 @@ import {
   type ClaudeModelEnvField,
 } from "./hooks/useModelState";
 import {
+  CLAUDE_AUTO_COMPACT_WINDOW_MAX,
+  CLAUDE_AUTO_COMPACT_WINDOW_MIN,
+} from "./claudeContextLimit";
+import {
   providerPresets,
   type TemplateValueConfig,
 } from "@/config/claudeProviderPresets";
@@ -135,6 +139,10 @@ interface ClaudeFormFieldsProps {
   // Model Selector
   shouldShowModelSelector: boolean;
   claudeModel: string;
+  contextLimit: string;
+  onContextLimitChange: (value: string) => void;
+  autoCompactLimit: string;
+  onAutoCompactLimitChange: (value: string) => void;
   defaultHaikuModel: string;
   defaultHaikuModelName: string;
   defaultSonnetModel: string;
@@ -222,6 +230,10 @@ export function ClaudeFormFields({
   showEndpointTools = true,
   shouldShowModelSelector,
   claudeModel,
+  contextLimit,
+  onContextLimitChange,
+  autoCompactLimit,
+  onAutoCompactLimitChange,
   defaultHaikuModel,
   defaultHaikuModelName,
   defaultSonnetModel,
@@ -299,6 +311,58 @@ export function ClaudeFormFields({
   const [xaiOauthModelsLoading, setXaiOauthModelsLoading] = useState(false);
   const xaiOauthModelsRequestRef = useRef(0);
   const fallbackUsesOneM = hasClaudeOneMMarker(claudeModel);
+  const contextLimitField = !usesOAuth && category !== "official" && (
+    <div className="space-y-3 border-t border-border pt-3">
+      <div className="space-y-1.5">
+        <FormLabel htmlFor="claude-context-token-limit">
+          {t("providerForm.contextWindowLimit", {
+            defaultValue: "Context window limit",
+          })}
+        </FormLabel>
+        <Input
+          id="claude-context-token-limit"
+          type="number"
+          min={1}
+          max={2_000_000}
+          step={1}
+          inputMode="numeric"
+          value={contextLimit}
+          placeholder="200000"
+          onChange={(event) => onContextLimitChange(event.target.value)}
+        />
+        <p className="text-xs text-fg-2">
+          {t("providerForm.contextWindowLimitHint", {
+            defaultValue:
+              "Sets the model window when automatic compaction is disabled. Leave blank to use Claude Code's model default.",
+          })}
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <FormLabel htmlFor="claude-auto-compact-window">
+          {t("providerForm.autoCompactWindow", {
+            defaultValue: "Automatic compaction window",
+          })}
+        </FormLabel>
+        <Input
+          id="claude-auto-compact-window"
+          type="number"
+          min={CLAUDE_AUTO_COMPACT_WINDOW_MIN}
+          max={CLAUDE_AUTO_COMPACT_WINDOW_MAX}
+          step={1}
+          inputMode="numeric"
+          value={autoCompactLimit}
+          placeholder="100000"
+          onChange={(event) => onAutoCompactLimitChange(event.target.value)}
+        />
+        <p className="text-xs text-fg-2">
+          {t("providerForm.autoCompactWindowHint", {
+            defaultValue:
+              "Sets the window Claude Code uses for automatic compaction. The 100,000-token default is conservative; supported windows and pricing depend on the selected provider and model.",
+          })}
+        </p>
+      </div>
+    </div>
+  );
 
   // 通用模型获取（非 Copilot 供应商）
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -1017,6 +1081,7 @@ export function ClaudeFormFields({
         {showAuthField && authFieldSelect}
         {templateSection}
         {endpointSection}
+        {contextLimitField}
         {speedTestModal}
 
         {onStackModelRowsChange && (
@@ -1073,6 +1138,7 @@ export function ClaudeFormFields({
       {apiKeySection}
       {templateSection}
       {endpointSection}
+      {contextLimitField}
       {speedTestModal}
 
       {shouldShowModelSelector && (

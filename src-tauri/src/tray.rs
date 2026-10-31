@@ -2061,28 +2061,80 @@ fn collect_model(app_state: &AppState, texts: &TrayTexts) -> Result<TrayModel, A
     let (snapshots, status) = collect_status(app_state, texts)?;
     let entries = if crate::distribution::is_osir() {
         build_osir_menu(texts, &status, &snapshots)
-    } else { build_menu_model(
-        texts,
-        &status,
-        &snapshots,
-        crate::lightweight::is_lightweight_mode(),
-        chrono::Local::now(),
-    ) };
+    } else {
+        build_menu_model(
+            texts,
+            &status,
+            &snapshots,
+            crate::lightweight::is_lightweight_mode(),
+            chrono::Local::now(),
+        )
+    };
     Ok(TrayModel { entries, status })
 }
 
 fn build_osir_menu(texts: &TrayTexts, status: &MenuStatus, apps: &[AppSnapshot]) -> Vec<TrayEntry> {
-    let (account, history, extensions, settings, updates, website) = match tray_language().as_str() {
-        "en" => ("My account", "Codex history", "MCP & Skills", "Settings", "Version & updates", "Open OSIR website"),
-        "ja" => ("アカウント", "Codex 履歴", "MCP とスキル", "設定", "バージョンと更新", "OSIR ウェブサイト"),
-        "tr" => ("Hesabım", "Codex geçmişi", "MCP ve Beceriler", "Ayarlar", "Sürüm ve güncellemeler", "OSIR web sitesini aç"),
-        "zh-TW" => ("個人中心", "Codex 歷史對話", "MCP 與技能", "設定", "版本與更新", "開啟 OSIR 網站"),
-        _ => ("个人中心", "Codex 历史会话", "MCP 与技能", "设置", "版本与更新", "打开 OSIR 网站"),
+    let (account, history, extensions, settings, updates, website) = match tray_language().as_str()
+    {
+        "en" => (
+            "My account",
+            "Codex history",
+            "MCP & Skills",
+            "Settings",
+            "Version & updates",
+            "Open OSIR website",
+        ),
+        "ja" => (
+            "アカウント",
+            "Codex 履歴",
+            "MCP とスキル",
+            "設定",
+            "バージョンと更新",
+            "OSIR ウェブサイト",
+        ),
+        "tr" => (
+            "Hesabım",
+            "Codex geçmişi",
+            "MCP ve Beceriler",
+            "Ayarlar",
+            "Sürüm ve güncellemeler",
+            "OSIR web sitesini aç",
+        ),
+        "zh-TW" => (
+            "個人中心",
+            "Codex 歷史對話",
+            "MCP 與技能",
+            "設定",
+            "版本與更新",
+            "開啟 OSIR 網站",
+        ),
+        _ => (
+            "个人中心",
+            "Codex 历史会话",
+            "MCP 与技能",
+            "设置",
+            "版本与更新",
+            "打开 OSIR 网站",
+        ),
     };
-    let mut entries = vec![TrayEntry::item("show_main", texts.show_main), TrayEntry::Separator];
-    entries.extend(apps.iter().filter(|snapshot| matches!(snapshot.app,
-        AppType::Codex | AppType::Claude | AppType::ClaudeDesktop | AppType::Gemini | AppType::OpenCode
-    )).map(|snapshot| app_entry(texts, snapshot, chrono::Local::now())));
+    let mut entries = vec![
+        TrayEntry::item("show_main", texts.show_main),
+        TrayEntry::Separator,
+    ];
+    entries.extend(
+        apps.iter()
+            .filter(|snapshot| {
+                matches!(
+                    snapshot.app,
+                    AppType::Codex
+                        | AppType::Claude
+                        | AppType::ClaudeDesktop
+                        | AppType::Gemini
+                        | AppType::OpenCode
+                )
+            })
+            .map(|snapshot| app_entry(texts, snapshot, chrono::Local::now())),
+    );
     entries.extend([
         TrayEntry::Separator,
         TrayEntry::item("nav:osir:account", account),
@@ -2092,7 +2144,14 @@ fn build_osir_menu(texts: &TrayTexts, status: &MenuStatus, apps: &[AppSnapshot])
         TrayEntry::item("nav:osir:updates", updates),
         TrayEntry::item("open_website", website),
         TrayEntry::Separator,
-        TrayEntry::item("quit", if status.routing_in_use { texts.quit_stops_routing } else { texts.quit }),
+        TrayEntry::item(
+            "quit",
+            if status.routing_in_use {
+                texts.quit_stops_routing
+            } else {
+                texts.quit
+            },
+        ),
     ]);
     entries
 }
@@ -2801,10 +2860,18 @@ fn parse_nav_id(id: &str) -> Option<TrayNavigation> {
             section: Some(target?.to_string()),
             ..Default::default()
         },
-        "osir" if crate::distribution::is_osir() && matches!(target?, "account" | "history" | "extensions" | "settings" | "updates") => TrayNavigation {
-            section: Some(format!("osir:{}", target?)),
-            ..Default::default()
-        },
+        "osir"
+            if crate::distribution::is_osir()
+                && matches!(
+                    target?,
+                    "account" | "history" | "extensions" | "settings" | "updates"
+                ) =>
+        {
+            TrayNavigation {
+                section: Some(format!("osir:{}", target?)),
+                ..Default::default()
+            }
+        }
         "app" => TrayNavigation {
             app: Some(app(target?)?),
             ..Default::default()
@@ -3114,7 +3181,11 @@ pub fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
     match event_id {
         "show_main" => show_main_window(app),
         "open_website" => {
-            let website = if crate::distribution::is_osir() { "https://osirclaw.com" } else { "https://ccswitch.io" };
+            let website = if crate::distribution::is_osir() {
+                "https://osirclaw.com"
+            } else {
+                "https://ccswitch.io"
+            };
             if let Err(e) = app.opener().open_url(website, None::<String>) {
                 log::error!("打开官方网站失败: {e}");
             }

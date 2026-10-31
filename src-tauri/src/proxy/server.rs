@@ -510,7 +510,13 @@ mod tests {
             None,
         );
         let proxy_info = proxy.start().await.expect("start test proxy");
-        let client = reqwest::Client::new();
+        // Each rejected upgrade closes its connection; do not race a pooled
+        // socket's EOF notification on the next independent route probe.
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .pool_max_idle_per_host(0)
+            .build()
+            .unwrap();
         for path in [
             "/responses",
             "/v1/responses",

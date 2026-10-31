@@ -1717,6 +1717,10 @@
     "modelHelper": "任意: 既定で使いたい Claude モデルを指定。空欄ならシステム既定を使用します。",
     "modelMappingLabel": "モデルマッピング",
     "modelMappingHint": "表示名は /model メニューだけに影響します。1M は Claude Code へのコンテキスト能力宣言です。",
+    "contextWindowLimit": "コンテキストウィンドウ上限",
+    "contextWindowLimitHint": "自動圧縮を無効にした場合にのみモデルウィンドウを設定します。空欄では Claude Code のモデル既定値を使います。",
+    "autoCompactWindow": "自動圧縮ウィンドウ",
+    "autoCompactWindowHint": "Claude Code はこのウィンドウを使って自動圧縮を計算します。既定値は 100,000 トークンです。実際の上限と料金はプロバイダーとモデルによって異なります。",
     "stackModelsLabel": "モデル一覧",
     "addStackModel": "手動で追加",
     "stackModelDefaultHelp": "これらのモデルは Claude Code の /model に表示され、選ぶとこのプロバイダーへ直接送られます。先頭の行がデフォルトモデルで、このカードの ANTHROPIC_MODEL にも書き込まれます。",
@@ -1758,7 +1762,7 @@
     "fetchModelsSuccess": "{{count}}件のモデルを取得",
     "modelMetadataFilled": "{{model}} のコンテキスト長などのパラメータを補完しました（出典：{{source}}）。内容をご確認ください",
     "modelMetadataFilledMany": "{{count}} 件のモデルのコンテキスト長などのパラメータを補完しました（出典：{{source}}）。内容をご確認ください",
-    "gptContextWindowHint": "中継サービスの GPT は多くが ChatGPT サブスクリプション由来で、ウィンドウは 272K しかありません。大きく設定すると圧縮が遅れ、上流に拒否された時点でそのターンが失敗します。このプロバイダーが対応している場合のみ設定してください。",
+    "gptContextWindowHint": "まずは 272K、またはプロバイダーが対応するより小さい値を使用してください。GPT-5.5 は入力が 272K を超えると長文脈料金になります。上限を増やす前に、プロバイダーとモデルの対応範囲と料金を確認してください。",
     "modelMetadataSourcePreset": "プリセット",
     "modelMetadataSourceBoth": "プリセットと models.dev",
     "modelPicker": {
@@ -2037,6 +2041,10 @@
     "configJsonHint": "Gemini CLI の settings.json（MCP サーバーは MCP パネルで管理します）",
     "keyFieldsHint": "エンドポイント、キー、モデル名、認証方式はプロバイダーに合わせて切り替わります。その他の環境変数と settings.json は Gemini CLI のグローバル設定で、保存するとすべてのプロバイダーに適用されます。",
     "inactiveFieldsHint": "旧バージョンがこのプロバイダーに保存した設定で、切り替えでは反映されなくなりました。クリックすると上に追加され、保存後はすべてのプロバイダーに適用されます。",
+    "contextManagementEnabled": "会話履歴を自動圧縮",
+    "contextManagementEnabledHint": "会話履歴が下のウィンドウを超えると、古い内容を自動的に圧縮します。",
+    "historyWindowMaxTokens": "履歴ウィンドウ上限",
+    "historyWindowMaxTokensHint": "自動圧縮が有効な場合、このトークン数に達すると圧縮を開始します。空欄では推奨値 150,000 を使用します。保存後に Gemini CLI を再起動してください。",
     "addToGlobalSettings": "グローバル設定に追加"
   },
   "opencode": {

@@ -1717,6 +1717,10 @@
     "modelHelper": "可选：指定默认使用的 Claude 模型，留空则使用系统默认。",
     "modelMappingLabel": "模型映射",
     "modelMappingHint": "显示名称只影响 /model 菜单；1M 只是给 Claude Code 的上下文能力声明。",
+    "contextWindowLimit": "上下文窗口上限",
+    "contextWindowLimitHint": "仅在关闭自动压缩时设置模型窗口；留空使用 Claude Code 的模型默认值。",
+    "autoCompactWindow": "自动压缩参考窗口",
+    "autoCompactWindowHint": "Claude Code 按此窗口计算自动压缩。默认 100,000 tokens；实际窗口与费用由所选供应商和模型决定，请按供应商配置调整。",
     "stackModelsLabel": "模型列表",
     "addStackModel": "手动添加",
     "stackModelDefaultHelp": "这些模型会出现在 Claude Code 的 /model 里，选中后请求直达这家。第一行是默认模型，也会写成这张卡的 ANTHROPIC_MODEL。",
@@ -1758,7 +1762,7 @@
     "fetchModelsSuccess": "获取到 {{count}} 个模型",
     "modelMetadataFilled": "已补全 {{model}} 的上下文等参数（来源：{{source}}），请核对",
     "modelMetadataFilledMany": "已补全 {{count}} 个模型的上下文等参数（来源：{{source}}），请核对",
-    "gptContextWindowHint": "中转站的 GPT 多来自 ChatGPT 订阅，窗口只有 272K。窗口写大了不会提前压缩，等上游拒收时这一轮会失败；确认这家支持更大窗口再这样填。",
+    "gptContextWindowHint": "建议先使用 272K 或供应商支持的更小窗口。更大窗口可能增加费用，例如 GPT-5.5 的输入超过 272K 后会使用长上下文价格。请确认当前供应商和模型支持后再提高。",
     "modelMetadataSourcePreset": "预设",
     "modelMetadataSourceBoth": "预设和 models.dev",
     "modelPicker": {
@@ -2037,6 +2041,10 @@
     "configJsonHint": "Gemini CLI 的 settings.json（MCP 服务器在 MCP 面板里管理）",
     "keyFieldsHint": "地址、Key、模型名和认证方式随供应商切换；其余环境变量和 settings.json 是 Gemini CLI 全局设置，保存后对所有供应商生效。",
     "inactiveFieldsHint": "这些是旧版存进卡里的设置，现在切换不会写出去。点一下加入上方，保存后对所有供应商生效。",
+    "contextManagementEnabled": "自动压缩对话历史",
+    "contextManagementEnabledHint": "对话历史超过下方窗口后，自动压缩较早的内容。",
+    "historyWindowMaxTokens": "历史窗口上限",
+    "historyWindowMaxTokensHint": "开启自动压缩时，达到此 token 数后开始压缩。留空使用推荐值 150,000；保存后重启 Gemini CLI 生效。",
     "addToGlobalSettings": "加入全局设置"
   },
   "opencode": {

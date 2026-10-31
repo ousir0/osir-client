@@ -201,7 +201,7 @@ fn claude_contract(
             name: &model.name,
         }),
     );
-    with_stack_models(&mut projection, stack);
+    with_stack_models(&mut projection, stack, others);
     if !stack.is_empty() {
         let others: Vec<_> = others
             .iter()
@@ -214,16 +214,19 @@ fn claude_contract(
 }
 
 const CLAUDE_MAX_CONTEXT_ENV: &str = "CLAUDE_CODE_MAX_CONTEXT_TOKENS";
+const CLAUDE_AUTO_COMPACT_ENV: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
 
 /// `/model` 选择器的配置（顶层关键字段）。`replaceBuiltInOptions` 让选择器只剩 Default 和
 /// 这里列的行：内置的 Opus / Sonnet / Haiku 行都指向默认那家的模型，留着就是几行重复，
 /// 还会把那个模型自己的行去重吃掉。四档别名仍然要写，Default、`--model opus` 和子代理靠它们。
 const CLAUDE_MODEL_PICKER: &str = "modelPicker";
 
-/// 发布了 Stack 模型时：`/model` 换成 Stack 模型列表；`CLAUDE_CODE_MAX_CONTEXT_TOKENS` 改由
-/// Stack 模型决定，取非 1M 模型里最小的窗口（等于默认 200K 时不写）。四档别名也写成 Stack id，
-/// 同样受 MAX 约束；1M 的 Stack 模型不受 MAX 影响。没有发布 Stack 模型时契约和原来逐字节一致。
-fn with_stack_models(projection: &mut ClaudeProjection, stack: &[StackModel]) {
+/// 发布 Stack 模型时，MAX 继续描述非 1M 模型窗口，自动压缩阈值取所有成员供应商的最小值。
+fn with_stack_models(
+    projection: &mut ClaudeProjection,
+    stack: &[StackModel],
+    others: &[&Provider],
+) {
     if stack.is_empty() {
         return;
     }
@@ -250,6 +253,23 @@ fn with_stack_models(projection: &mut ClaudeProjection, stack: &[StackModel]) {
     if let Some(window) = smallest.filter(|window| *window != stack::CLAUDE_DEFAULT_WINDOW) {
         projection.exclusive.insert(
             CLAUDE_MAX_CONTEXT_ENV.to_string(),
+            Value::String(window.to_string()),
+        );
+    }
+    let compact_window = stack
+        .iter()
+        .map(|model| model.auto_compact_window)
+        .chain(others.iter().flat_map(|provider| {
+            stack::claude_models(&provider.id, provider)
+                .into_iter()
+                .map(|model| model.auto_compact_window)
+                .collect::<Vec<_>>()
+        }))
+        .filter(|window| *window >= 100_000)
+        .min();
+    if let Some(window) = compact_window {
+        projection.exclusive.insert(
+            CLAUDE_AUTO_COMPACT_ENV.to_string(),
             Value::String(window.to_string()),
         );
     }
@@ -3336,7 +3356,8 @@ mod mode_tests {
 
     /// 回到直连后：值和用户的原文件相同；非关键字段的顺序不变（关键字段可能挪到末尾）。
     fn assert_back_to_user_settings() {
-        let original: Value = serde_json::from_str(USER_SETTINGS).unwrap();
+        let mut original: Value = serde_json::from_str(USER_SETTINGS).unwrap();
+        original["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = json!("100000");
         let live = settings();
         assert_eq!(live, original);
         let keys = |value: &Value| -> Vec<String> {
@@ -5662,7 +5683,9 @@ model_provider = "c"
             json!({
                 "model": { "compressionThreshold": 0.5 },
                 "security": { "auth": { "selectedType": "gemini-api-key" } },
-                "mcpServers": { "fs": { "command": "fs" } }
+                "mcpServers": { "fs": { "command": "fs" } },
+                "experimental": {"contextManagement": true},
+                "contextManagement": {"historyWindow": {"maxTokens": 150000}}
             })
         );
 
@@ -5677,10 +5700,10 @@ model_provider = "c"
             assert!(env.contains(line), "{env}");
         }
         assert!(!env.contains("VERTEX"), "{env}");
-        assert_eq!(
-            gemini_settings(),
-            serde_json::from_str::<Value>(GEMINI_USER_SETTINGS).unwrap()
-        );
+        let mut expected: Value = serde_json::from_str(GEMINI_USER_SETTINGS).unwrap();
+        expected["experimental"] = json!({"contextManagement": true});
+        expected["contextManagement"] = json!({"historyWindow": {"maxTokens": 150000}});
+        assert_eq!(gemini_settings(), expected);
         assert_eq!(direct(&state, &AppType::Gemini).as_deref(), Some("a"));
     }
 
@@ -6449,6 +6472,7 @@ model_provider = "c"
         assert_eq!(options["label"], "claude-sonnet-4-6（A）");
         assert_eq!(options["description"], "claude-sonnet-4-6 · 200K");
         let env = settings()["env"].clone();
+        assert_eq!(env[CLAUDE_AUTO_COMPACT_ENV], "100000");
         assert!(env.get(DISCOVERY_ENV).is_none(), "{env}");
         for role in ["HAIKU", "SONNET", "OPUS", "FABLE"] {
             assert_eq!(
@@ -6718,7 +6742,10 @@ model_provider = "c"
         assert_eq!(view().direct_provider_id.as_deref(), Some("a"));
         assert_eq!(in_use(&state, &AppType::Claude).as_deref(), Some("a"));
         assert!(stack_state().is_empty());
-        assert_back_to_user_settings();
+        assert_eq!(
+            settings(),
+            serde_json::from_str::<Value>(USER_SETTINGS).unwrap()
+        );
 
         // 不存在的、不能走代理的官方订阅：拒绝，记下的那家不变。
         set_route(&state, &AppType::Claude, "missing")

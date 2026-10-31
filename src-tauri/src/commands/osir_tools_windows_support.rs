@@ -2,7 +2,7 @@
 use serde::Deserialize;
 
 pub(crate) const CODEX_PACKAGE: &str = "OpenAI.Codex";
-pub(crate) const CODEX_PUBLISHER: &str = "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B";
+pub(crate) const CODEX_PUBLISHER: &str = "CN=OpenAI OpCo, LLC, O=OpenAI OpCo, LLC, C=US";
 pub(crate) const STORE_URL: &str = "https://apps.microsoft.com/detail/9PLM9XGG6VKS";
 
 pub(crate) fn package_url(arch: &str) -> Result<&'static str, String> {

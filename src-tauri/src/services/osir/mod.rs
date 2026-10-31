@@ -21,6 +21,7 @@ pub mod managed;
 pub mod models;
 pub mod sync;
 pub mod usage;
+pub mod windows_codex_package;
 
 pub mod session;
 

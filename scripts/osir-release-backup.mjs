@@ -125,6 +125,7 @@ function acceptanceArtifacts(manifest) {
     "packagedInstallerScreenshot",
     "packagedWindowScreenshot",
     "packagedRendererReport",
+    "packagedMacAcceptance",
   ].flatMap((field) => (manifest[field] ? [manifest[field]] : []));
   const screenshots = manifest.packagedRendererScreenshots;
   requireThat(
@@ -139,6 +140,7 @@ function acceptanceArtifacts(manifest) {
     "Renderer acceptance must bind its report and all four PNG screenshots.",
   );
   artifacts.push(...(screenshots ?? []));
+  artifacts.push(...(manifest.packagedMacScreenshots ?? []));
   const names = new Set();
   for (const item of artifacts) {
     requireThat(
@@ -304,9 +306,13 @@ export async function backupRelease({
       if (!existsSync(local))
         missingEvidence.push(join(dirname(entry), item.path));
       else {
-        const info = copyChecked(local, join(tree, dirname(entry), item.path));
+        const destination = join(tree, dirname(entry), item.path);
+        const info = existsSync(destination)
+          ? copyInfo(destination)
+          : copyChecked(local, destination);
         requireThat(
-          info.sha256 === item.sha256,
+          info.sha256 === item.sha256 &&
+            inspectArtifact(local).sha256 === item.sha256,
           "Native acceptance evidence differs from manifest.",
         );
       }

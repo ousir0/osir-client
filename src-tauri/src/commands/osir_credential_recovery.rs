@@ -52,6 +52,25 @@ fn recover_saved<B: CredentialBackend>(
     provider_id: &str,
     vault: &KeyVault<B>,
 ) -> ManagedCredentialRecovery {
+    recover_saved_with_interaction(db, app, provider_id, vault, true)
+}
+
+fn recover_saved_silently<B: CredentialBackend>(
+    db: &Database,
+    app: &AppType,
+    provider_id: &str,
+    vault: &KeyVault<B>,
+) -> ManagedCredentialRecovery {
+    recover_saved_with_interaction(db, app, provider_id, vault, false)
+}
+
+fn recover_saved_with_interaction<B: CredentialBackend>(
+    db: &Database,
+    app: &AppType,
+    provider_id: &str,
+    vault: &KeyVault<B>,
+    allow_interaction: bool,
+) -> ManagedCredentialRecovery {
     use crate::services::osir::key_vault::KeyVaultError;
     use CredentialRecoveryStage::*;
     let Ok(_operation) = crate::services::osir::key_vault::recovery_lock() else {
@@ -72,9 +91,15 @@ fn recover_saved<B: CredentialBackend>(
     else {
         return ManagedCredentialRecovery::at(InvalidConnection);
     };
-    // The only interactive read: the binding and immutable reference come from
-    // the fresh native row, never from a renderer-supplied credential tuple.
-    let stage = match vault.load_for_user(&binding.reference, &binding.binding) {
+    // The binding and immutable reference come from the fresh native row,
+    // never from a renderer-supplied credential tuple.
+    let result = match vault.load(&binding.reference, &binding.binding) {
+        Err(KeyVaultError::InteractionRequired) if allow_interaction => {
+            vault.load_for_user(&binding.reference, &binding.binding)
+        }
+        result => result,
+    };
+    let stage = match result {
         Ok(Some(_)) => Restored,
         Ok(None) => Missing,
         Err(KeyVaultError::InteractionRequired) => ConfirmationRequired,
@@ -105,10 +130,10 @@ fn recover_saved<B: CredentialBackend>(
     ManagedCredentialRecovery::at(Restored)
 }
 
-/// Invoke only from the user's explicit "恢复连接凭据" action. Startup,
-/// background refresh, page reads, launch and proxy requests never call this.
+/// Manual retry after startup recovery; never called by page reads or proxy requests.
 #[tauri::command]
 pub async fn osir_recover_connection_credential(
+    handle: tauri::AppHandle,
     state: State<'_, AppState>,
     app_type: String,
     provider_id: String,
@@ -122,14 +147,57 @@ pub async fn osir_recover_connection_credential(
         return Err("连接参数无效".into());
     }
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let Ok(vault) = managed::vault() else {
             return ManagedCredentialRecovery::at(CredentialRecoveryStage::Unavailable);
         };
         recover_saved(&db, &app, &provider_id, &vault)
     })
     .await
-    .map_err(|_| "恢复连接凭据未完成，请重试".to_string())
+    .map_err(|_| "恢复连接凭据未完成，请重试".to_string())?;
+    if !result.restored {
+        crate::client_telemetry::record_credential_failure(handle);
+    }
+    Ok(result)
+}
+
+/// One bounded startup pass that only reads the credential store silently.
+/// Locked items remain available for the user's explicit recovery action.
+pub(crate) fn recover_connections_at_startup(db: &Database) {
+    let Ok(vault) = managed::vault() else { return };
+    for app in [
+        AppType::Codex,
+        AppType::Claude,
+        AppType::ClaudeDesktop,
+        AppType::OpenCode,
+        AppType::Gemini,
+    ] {
+        let Ok(providers) = db.get_all_providers(app.as_str()) else {
+            continue;
+        };
+        for provider in providers.values() {
+            if provider
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.osir_binding.as_ref())
+                .is_none()
+            {
+                continue;
+            }
+            if managed::validate_managed_provider_shape(&app, provider).is_err() {
+                continue;
+            }
+            let result = recover_saved_silently(db, &app, &provider.id, &vault);
+            if matches!(
+                result.stage,
+                CredentialRecoveryStage::ConfirmationRequired
+                    | CredentialRecoveryStage::Unavailable
+            ) {
+                log::warn!("OSIR startup connection recovery deferred");
+                return;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -298,6 +366,24 @@ mod tests {
             serde_json::to_value(row).unwrap(),
             serde_json::to_value(&f.provider).unwrap()
         );
+    }
+
+    #[test]
+    fn readable_saved_credential_recovers_without_interactive_access() {
+        let f = fixture();
+        f.memory.0.locked.store(false, Ordering::SeqCst);
+        assert!(recover_saved(&f.db, &AppType::Claude, &f.provider.id, &f.vault).restored);
+        assert_eq!(f.memory.0.interactive_reads.load(Ordering::SeqCst), 0);
+        assert_no_mutation(&f);
+    }
+
+    #[test]
+    fn startup_recovery_never_requests_interactive_keychain_access() {
+        let f = fixture();
+        let result = recover_saved_silently(&f.db, &AppType::Claude, &f.provider.id, &f.vault);
+        assert_eq!(result.stage, CredentialRecoveryStage::ConfirmationRequired);
+        assert_eq!(f.memory.0.interactive_reads.load(Ordering::SeqCst), 0);
+        assert_no_mutation(&f);
     }
 
     #[test]

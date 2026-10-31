@@ -1717,6 +1717,10 @@
     "modelHelper": "Optional: Specify default Claude model to use, leave blank to use system default.",
     "modelMappingLabel": "Model Mapping",
     "modelMappingHint": "Display names only affect the /model menu; 1M is only a Claude Code context-capability declaration.",
+    "contextWindowLimit": "Context window limit",
+    "contextWindowLimitHint": "Sets the model window only when automatic compaction is disabled. Leave blank to use Claude Code's model default.",
+    "autoCompactWindow": "Automatic compaction window",
+    "autoCompactWindowHint": "Claude Code uses this window to calculate automatic compaction. The default is 100,000 tokens; actual limits and pricing depend on your provider and model.",
     "stackModelsLabel": "Models",
     "addStackModel": "Add manually",
     "stackModelDefaultHelp": "These models appear in Claude Code's /model menu and picking one sends requests straight to this provider. The first row is the default model and is also written as this card's ANTHROPIC_MODEL.",
@@ -1758,7 +1762,7 @@
     "fetchModelsSuccess": "Found {{count}} models",
     "modelMetadataFilled": "Filled in context window and other parameters for {{model}} (source: {{source}}). Please double-check.",
     "modelMetadataFilledMany": "Filled in context window and other parameters for {{count}} models (source: {{source}}). Please double-check.",
-    "gptContextWindowHint": "GPT on relays usually comes from ChatGPT subscriptions, whose window is only 272K. A larger window delays compaction until the upstream rejects the request and the turn fails; only use it if this provider supports it.",
+    "gptContextWindowHint": "Start with 272K or the provider's smaller supported window. Larger windows may cost more: GPT-5.5 uses long-context pricing above 272K input tokens. Confirm support and pricing for this provider and model before increasing it.",
     "modelMetadataSourcePreset": "preset",
     "modelMetadataSourceBoth": "preset and models.dev",
     "modelPicker": {
@@ -2037,6 +2041,10 @@
     "configJsonHint": "Gemini CLI's settings.json (MCP servers are managed in the MCP panel)",
     "keyFieldsHint": "The endpoint, key, model name and auth type follow the provider; the other environment variables and settings.json are Gemini CLI global settings and apply to every provider after saving.",
     "inactiveFieldsHint": "Saved in this provider by an older version; switching no longer applies them. Click one to add it above; after saving it applies to every provider.",
+    "contextManagementEnabled": "Automatic history compaction",
+    "contextManagementEnabledHint": "Compress older conversation history when it grows beyond the configured window.",
+    "historyWindowMaxTokens": "History window limit",
+    "historyWindowMaxTokensHint": "Compression starts after this many tokens while enabled. Leave blank for the recommended 150,000. Restart Gemini CLI to apply.",
     "addToGlobalSettings": "Add to global settings"
   },
   "opencode": {

@@ -17,7 +17,7 @@ struct Home {
 }
 impl Home {
     fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
         let previous_settings = get_settings();
         let previous_env = ["HOME", "USERPROFILE", "CC_SWITCH_TEST_HOME"]
             .into_iter()

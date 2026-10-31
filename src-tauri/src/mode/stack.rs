@@ -49,6 +49,7 @@ const KEY_MAX_LEN: usize = 24;
 
 /// Claude Code 在没有 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 时按这个窗口算。
 pub const CLAUDE_DEFAULT_WINDOW: u64 = 200_000;
+pub const CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW: u64 = 100_000;
 
 /// 支持 Stack 模型的应用。
 pub fn supports_stack(app: &AppType) -> bool {
@@ -270,6 +271,8 @@ pub struct StackModel {
     pub one_m: bool,
     /// 非 1M 模型的窗口：行里的 `CLAUDE_CODE_MAX_CONTEXT_TOKENS`，没有是 200K。
     pub window: u64,
+    /// 行里的自动压缩参考窗口，没有是 100K。
+    pub auto_compact_window: u64,
 }
 
 /// Claude 行发布的模型：配了 Stack 模型列表（`meta.stackModels`）就是列表，清空了就什么都不
@@ -397,6 +400,15 @@ fn stack_models(key: &str, provider: &Provider, found: Vec<Found>) -> Vec<StackM
         })
         .filter(|window| *window > 0)
         .unwrap_or(CLAUDE_DEFAULT_WINDOW);
+    let auto_compact_window = claude_env(provider)
+        .and_then(|env| env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW"))
+        .and_then(|value| match value {
+            Value::Number(number) => number.as_u64(),
+            Value::String(text) => text.trim().parse().ok(),
+            _ => None,
+        })
+        .filter(|window| *window >= 100_000)
+        .unwrap_or(CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW);
     found
         .into_iter()
         .map(|found| {
@@ -410,6 +422,7 @@ fn stack_models(key: &str, provider: &Provider, found: Vec<Found>) -> Vec<StackM
                 upstream: found.upstream,
                 one_m: found.one_m,
                 window,
+                auto_compact_window,
             }
         })
         .collect()
@@ -1357,6 +1370,7 @@ mod tests {
                     description: "glm-5.2 · 1M".to_string(),
                     one_m: true,
                     window: 128_000,
+                    auto_compact_window: CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW,
                 },
                 StackModel {
                     id: "ccs-claude-zhipu--glm-4.7-air".to_string(),
@@ -1366,6 +1380,7 @@ mod tests {
                     description: "glm-4.7-air · 128K".to_string(),
                     one_m: false,
                     window: 128_000,
+                    auto_compact_window: CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW,
                 },
             ]
         );

@@ -298,7 +298,8 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
       const invoke = window.__TAURI_INTERNALS__.invoke;
       const distribution = await invoke('get_update_distribution');
       const account = await invoke('osir_account_session');
-      return {updatesEnabled: distribution.updatesEnabled, signedOut: account.connected === false, recovery: account.recovery};
+      const codexDesktop = await invoke('osir_codex_desktop_detection');
+      return {updatesEnabled: distribution.updatesEnabled, signedOut: account.connected === false, recovery: account.recovery, codexDesktop};
     })()`);
     assert.equal(
       native.updatesEnabled,
@@ -315,10 +316,17 @@ export async function checkRenderer(port, directory, phase, windowHandle) {
         native.recovery,
       ),
     );
+    assert.ok(
+      ["detected", "not_found", "inspection_failed"].includes(
+        native.codexDesktop?.status,
+      ),
+      "Windows Codex Desktop detection must not report the platform as unsupported",
+    );
     report.nativeIpc = {
       passed: true,
       updatesEnabled: true,
       freshAccount: true,
+      codexDesktopDetection: native.codexDesktop.status,
     };
     for (const [width, height] of [
       [1100, 720],

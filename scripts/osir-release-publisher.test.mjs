@@ -19,6 +19,33 @@ import {
 } from "./osir-release-publisher.mjs";
 
 // Public minisign-verify 0.2.5 vector; no private key or actual signing.
+test("public verification deduplicates URLs but rejects conflicting identities before fetching", async () => {
+  const artifact = {
+    url: "https://osirclaw.com/test",
+    sha256: createHash("sha256").update("test").digest("hex"),
+    size_bytes: 4,
+  };
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    return { ok: true, url: artifact.url, body: [Buffer.from("test")] };
+  };
+  const receipt = await verifyPublicReleaseArtifacts(
+    { release_id: "test", artifacts: [artifact, { ...artifact }] },
+    { fetchImpl },
+  );
+  assert.equal(calls, 1);
+  assert.equal(receipt.artifacts.length, 2);
+  calls = 0;
+  await assert.rejects(
+    verifyPublicReleaseArtifacts(
+      { artifacts: [artifact, { ...artifact, size_bytes: 5 }] },
+      { fetchImpl },
+    ),
+    /Conflicting/,
+  );
+  assert.equal(calls, 0);
+});
 const pubkey = Buffer.from(
   "untrusted comment: minisign public key E7620F1842B4E81F\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3\n",
 ).toString("base64");

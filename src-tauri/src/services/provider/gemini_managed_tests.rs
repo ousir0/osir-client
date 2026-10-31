@@ -28,7 +28,7 @@ struct IsolatedHome {
 
 impl IsolatedHome {
     fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
         let previous = [
             "HOME",
             "USERPROFILE",
@@ -125,6 +125,8 @@ fn assert_live(expected_user_settings: Value) {
     let mut expected = expected_user_settings;
     expected["security"]["auth"]["selectedType"] = json!("gemini-api-key");
     expected["model"]["name"] = json!("fixture-model");
+    expected["experimental"] = json!({"contextManagement": true});
+    expected["contextManagement"] = json!({"historyWindow": {"maxTokens": 150000}});
     assert_eq!(
         serde_json::from_slice::<Value>(&settings).unwrap(),
         expected

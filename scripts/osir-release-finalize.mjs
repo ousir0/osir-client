@@ -16,6 +16,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { prepareDevSigning } from "./osir-dev-signing.mjs";
 import { buildDmg } from "./osir-dmg.mjs";
+import { configuredChannel } from "./osir-build.mjs";
+import { verifyReleaseDiagnostics } from "./osir-release-diagnostics.mjs";
 import { assertRendererEvidence } from "./osir-packaged-renderer-check.mjs";
 import {
   inspectArtifact,
@@ -125,7 +127,8 @@ export async function finalize({ input, output, channel, target }) {
     packagedWindowScreenshot,
     packagedInstallerScreenshot,
     packagedRendererReport,
-    packagedRendererScreenshots;
+    packagedRendererScreenshots,
+    finalDiagnostics;
   if (windows) {
     ensure(
       pending.peArchitectureVerified === true &&
@@ -340,6 +343,14 @@ export async function finalize({ input, output, channel, target }) {
       "Unstable code identity.",
     );
     const binary = join(app, "Contents/MacOS/osir_client");
+    finalDiagnostics = verifyReleaseDiagnostics(binary, {
+      config: {
+        ...configuredChannel(channel, config),
+        version: pending.version,
+      },
+      updatesEnabled: true,
+      bundleType: "app",
+    });
     ensure(
       run("/usr/bin/lipo", ["-archs", binary]).trim() ===
         (target.startsWith("aarch64") ? "arm64" : "x86_64"),
@@ -360,6 +371,7 @@ export async function finalize({ input, output, channel, target }) {
   const verified = verifyUpdaterArtifact(updater, signature, config.pubkey);
   const metadata = {
     ...pending,
+    ...(finalDiagnostics ? { releaseDiagnostics: finalDiagnostics } : {}),
     finalizerToolSha256: inspectArtifact(fileURLToPath(import.meta.url)).sha256,
     channel,
     target,
@@ -389,6 +401,54 @@ export async function finalize({ input, output, channel, target }) {
         }
       : { localSigningIdentity, localSigningRequirement }),
   };
+  if (!windows && pending.packagedMacAcceptance) {
+    const records = [pending.packagedMacAcceptance];
+    const reportRecord = records[0];
+    ensure(
+      /^[a-zA-Z0-9._-]+$/.test(reportRecord.name) &&
+        !reportRecord.name.includes(".."),
+      "Invalid Mac acceptance path.",
+    );
+    const reportPath = join(input, reportRecord.name);
+    ensure(
+      inspectArtifact(reportPath).sha256 === reportRecord.sha256,
+      "Mac acceptance report hash differs.",
+    );
+    const report = JSON.parse(readFileSync(reportPath, "utf8"));
+    ensure(
+      report.passed === true &&
+        report.sourceSha256 === pending.sourceProvenance.sourceSha256 &&
+        report.gitHead === pending.sourceProvenance.git.head &&
+        report.target === target,
+      "Mac acceptance source differs.",
+    );
+    const screenshots = Object.values(report.stages ?? {}).flatMap((stage) =>
+      stage.screenshot ? [stage.screenshot] : [],
+    );
+    records.push(...screenshots);
+    for (const record of records) {
+      ensure(
+        /^[a-zA-Z0-9._-]+$/.test(record.name) && !record.name.includes(".."),
+        "Invalid Mac evidence path.",
+      );
+      const info = inspectArtifact(join(input, record.name));
+      ensure(
+        info.sha256 === record.sha256 && info.size_bytes === record.bytes,
+        "Mac evidence bytes differ.",
+      );
+      cpSync(join(input, record.name), join(output, record.name), {
+        errorOnExist: true,
+        force: false,
+      });
+    }
+    metadata.packagedMacScreenshots = screenshots;
+    metadata.nativeAcceptance = {
+      path: reportRecord.name,
+      sha256: reportRecord.sha256,
+      bytes: reportRecord.bytes,
+      scope: "native-intel-ci-before-local-signing",
+    };
+  }
   if (!windows)
     Object.assign(
       metadata,

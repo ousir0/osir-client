@@ -154,6 +154,7 @@ async function main() {
         "app",
         "--",
         "--locked",
+        "--timings",
         "-j",
         "1",
       ],

@@ -2,15 +2,15 @@
 //! 文件的样子」。
 //!
 //! - 显示：在内存里对当前 live 做一次切换投影（和切换用同一个补丁）：`.env` 的关键字段换成
-//!   这个供应商的，`settings.json` 只换认证方式和模型名，其余是 live 原样。
+//!   这个供应商的，`settings.json` 换认证、模型和历史窗口设置，其余是 live 原样。
 //! - 保存：关键字段写回这个供应商的行（行里其余内容原样保留）；其余改动是 Gemini CLI 的全局
 //!   设置，经引擎写进 live，只改用户动过的键。编辑的是直连模式下的当前供应商时，关键字段
 //!   在同一次写入里也换进 live。
 //! - 三方比较：每个改动都带着打开编辑器时的原值，live 里已经被别的程序改成了第三个值就算
 //!   冲突，由用户选保留哪一边。
 //!
-//! 改动的粒度：`.env` 按变量；settings.json 按叶子（两边都是对象就往下比）。认证方式和模型名
-//! 是关键字段，不算全局改动；认证方式由供应商类型决定，编辑器里改了也不存。
+//! 改动的粒度：`.env` 按变量；settings.json 按叶子（两边都是对象就往下比）。认证、模型和历史
+//! 窗口是关键字段；认证方式由供应商类型决定，编辑器里改了也不存。
 
 use std::path::Path;
 
@@ -372,7 +372,7 @@ pub(crate) fn plan_save(
     })
 }
 
-/// 把编辑器里的关键字段存回行：`env` 的关键字段、`config.model.name` 换成编辑器的，其余
+/// 把编辑器里的供应商字段存回行：认证凭据、模型名和历史窗口换成编辑器的，其余
 /// 内容原样保留（降级后旧版会整份使用这些行）。认证方式由供应商类型决定，不存。
 fn store_into_row(stored_row: Option<&Value>, edited: &Value) -> Value {
     let mut row = stored_row
@@ -394,33 +394,26 @@ fn store_into_row(stored_row: Option<&Value>, edited: &Value) -> Value {
     }
     root.insert("env".to_string(), Value::Object(env));
 
-    let model_name = edited
-        .pointer("/config/model/name")
-        .filter(|name| !name.is_null())
-        .cloned();
     let mut config = root
         .get("config")
         .filter(|config| config.is_object())
         .cloned();
-    match model_name {
-        Some(name) => {
-            let config = config.get_or_insert_with(|| Value::Object(Map::new()));
-            let model = config
-                .as_object_mut()
-                .expect("config is an object")
-                .entry("model")
-                .or_insert_with(|| Value::Object(Map::new()));
-            if !model.is_object() {
-                *model = Value::Object(Map::new());
+    for segments in [
+        &["model", "name"][..],
+        &["experimental", "contextManagement"][..],
+        &["contextManagement", "historyWindow", "maxTokens"][..],
+    ] {
+        let path: Vec<String> = segments.iter().map(|segment| segment.to_string()).collect();
+        let edited_config = config_of(edited);
+        match value_at(&edited_config, &KeyPath(path.clone())).filter(|value| !value.is_null()) {
+            Some(value) => {
+                let config = config.get_or_insert_with(|| Value::Object(Map::new()));
+                restore(config, &path, value.clone());
             }
-            model
-                .as_object_mut()
-                .expect("model is an object")
-                .insert("name".to_string(), name);
-        }
-        None => {
-            if let Some(config) = config.as_mut() {
-                remove_pruning(config, &["model".to_string(), "name".to_string()]);
+            None => {
+                if let Some(config) = config.as_mut() {
+                    remove_pruning(config, &path);
+                }
             }
         }
     }
@@ -539,6 +532,45 @@ mod tests {
                 "env": {"HTTPS_PROXY": "x", "GEMINI_API_KEY": "b"},
                 "config": {"model": {"maxSessionTurns": 3}, "mcpServers": {"fs": {}}},
             })
+        );
+    }
+
+    #[test]
+    fn context_settings_are_saved_per_supplier_and_reprojected_after_reopen() {
+        let stored = json!({"config": {
+            "experimental": {"other": true},
+            "contextManagement": {"historyWindow": {"retainedTokens": 50000}},
+            "mcpServers": {"keep": {}}
+        }});
+        let mut edited = stored.clone();
+        edited["config"]["experimental"]["contextManagement"] = json!(false);
+        edited["config"]["contextManagement"]["historyWindow"]["maxTokens"] = json!(120000);
+        let plan = plan_save(Some(&stored), &edited, &stored, ConflictPolicy::Refuse).unwrap();
+        assert!(plan.edits.settings.is_empty());
+        assert_eq!(
+            plan.row_settings["config"],
+            json!({
+                "experimental": {"other": true, "contextManagement": false},
+                "contextManagement": {"historyWindow": {"retainedTokens": 50000, "maxTokens": 120000}},
+                "mcpServers": {"keep": {}}
+            })
+        );
+        let projection = GeminiProjection::of(&plan.row_settings, false);
+        assert_eq!(projection.context_management, Some(json!(false)));
+        assert_eq!(projection.history_window_max_tokens, Some(json!(120000)));
+        let reset = plan_save(
+            Some(&plan.row_settings),
+            &json!({"config":{}}),
+            &edited,
+            ConflictPolicy::Refuse,
+        )
+        .unwrap();
+        let projection = GeminiProjection::of(&reset.row_settings, false);
+        assert_eq!(projection.context_management, Some(json!(true)));
+        assert_eq!(projection.history_window_max_tokens, Some(json!(150000)));
+        assert_eq!(
+            reset.row_settings["config"]["mcpServers"],
+            json!({"keep": {}})
         );
     }
 

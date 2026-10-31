@@ -51,7 +51,7 @@ export function OsirClientTelemetrySettings() {
         <SettingsRow
           label="匿名客户端统计"
           htmlFor="osir-anonymous-statistics"
-          description="分享版本、平台与活跃情况，不关联账户。"
+          description="分享版本、平台、活跃情况和异常分类，不关联账户。"
           control={
             <Checkbox
               id="osir-anonymous-statistics"
@@ -76,7 +76,7 @@ export function OsirClientTelemetrySettings() {
         />
         <div className="space-y-2 px-4 py-3 text-caption text-fg-2">
           <p>
-            两项均默认关闭，可分别选择。不上传本地文件、密钥或对话内容，不影响正常使用。
+            新安装默认开启，可随时关闭。不上传本地文件、密钥、对话内容或错误原文，不影响正常使用。
           </p>
           <details>
             <summary className="cursor-pointer">了解统计范围</summary>

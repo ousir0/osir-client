@@ -1717,6 +1717,10 @@
     "modelHelper": "İsteğe bağlı: Kullanılacak varsayılan Claude modelini belirtin, sistem varsayılanını kullanmak için boş bırakın.",
     "modelMappingLabel": "Model Eşleme",
     "modelMappingHint": "Görünen adlar yalnızca /model menüsünü etkiler; 1M yalnızca bir Claude Code bağlam yeteneği bildirimidir.",
+    "contextWindowLimit": "Bağlam penceresi sınırı",
+    "contextWindowLimitHint": "Model penceresini yalnızca otomatik sıkıştırma kapalıyken ayarlar. Boş bırakıldığında Claude Code'un model varsayılanı kullanılır.",
+    "autoCompactWindow": "Otomatik sıkıştırma penceresi",
+    "autoCompactWindowHint": "Claude Code otomatik sıkıştırmayı bu pencereye göre hesaplar. Varsayılan 100.000 tokendır; gerçek sınırlar ve fiyatlar sağlayıcıya ve modele bağlıdır.",
     "stackModelsLabel": "Modeller",
     "addStackModel": "Manuel olarak ekle",
     "stackModelDefaultHelp": "Bu modeller Claude Code'nin /model menüsünde görünür ve bir tanesini seçtiğinizde istekler doğrudan bu sağlayıcıya gönderilir. İlk satır varsayılan modeldir ve bu kartın ANTHROPIC_MODEL'i olarak da yazılır.",
@@ -1758,7 +1762,7 @@
     "fetchModelsSuccess": "Bulunan {{count}} modelleri",
     "modelMetadataFilled": "{{model}} için bağlam penceresi ve diğer parametrelerle doldurulmuştur (kaynak: {{source}}). Lütfen tekrar kontrol edin.",
     "modelMetadataFilledMany": "{{count}} modelleri için bağlam penceresi ve diğer parametrelerle doldurulmuştur (kaynak: {{source}}). Lütfen tekrar kontrol edin.",
-    "gptContextWindowHint": "Aktarım hizmetlerindeki GPT genellikle bağlam penceresi yalnızca 272K olan ChatGPT aboneliklerini kullanır. Daha büyük bir pencere, üst hizmet isteği reddedip tur başarısız olana kadar sıkıştırmayı geciktirir; bunu yalnızca sağlayıcınız destekliyorsa kullanın.",
+    "gptContextWindowHint": "272K veya sağlayıcının desteklediği daha küçük bir değerle başlayın. Daha büyük pencereler maliyeti artırabilir: GPT-5.5, 272K giriş token'ını aşınca uzun bağlam fiyatlandırması kullanır. Artırmadan önce sağlayıcı ve model desteğini ve fiyatları doğrulayın.",
     "modelMetadataSourcePreset": "önceden ayarlanmış",
     "modelMetadataSourceBoth": "ön ayar ve models.dev",
     "modelPicker": {
@@ -2030,6 +2034,10 @@
     "configJsonHint": "Gemini CLI'nin settings.json'u (MCP sunucuları MCP panelinde yönetilir)",
     "keyFieldsHint": "Uç nokta, anahtar, model adı ve kimlik doğrulama türü sağlayıcıyı takip eder; diğer ortam değişkenleri ve settings.json, Gemini CLI genel ayarlarıdır ve kaydedildikten sonra her sağlayıcı için geçerlidir.",
     "inactiveFieldsHint": "Bu sağlayıcıya daha eski bir sürümle kaydedilmiş; geçiş artık bunları uygulamamaktadır. Yukarıya eklemek için birini tıklayın; kaydettikten sonra her sağlayıcı için geçerlidir.",
+    "contextManagementEnabled": "Konuşma geçmişini otomatik sıkıştır",
+    "contextManagementEnabledHint": "Konuşma geçmişi aşağıdaki pencereyi aşınca eski içerik otomatik sıkıştırılır.",
+    "historyWindowMaxTokens": "Geçmiş penceresi sınırı",
+    "historyWindowMaxTokensHint": "Otomatik sıkıştırma açıkken bu token sayısına ulaşınca sıkıştırma başlar. Önerilen 150.000 değeri için boş bırakın. Kaydettikten sonra Gemini CLI'ı yeniden başlatın.",
     "addToGlobalSettings": "Genel ayarlara ekle"
   },
   "opencode": {

@@ -55,6 +55,63 @@ fn metadata_excludes_secrets_and_private_snapshot_roundtrips() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_snapshot_acl_and_hardlink_protection() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, *},
+    };
+    let (_tmp, s) = fixture();
+    let snapshot = s.before_write().unwrap();
+    let payload = s.dir(&snapshot.id).unwrap().join("0.bin");
+    windows::verify_path(&s.root).unwrap();
+    windows::verify_path(&payload).unwrap();
+    assert_eq!(s.before_write().unwrap().id, snapshot.id);
+    let alias = s.root.join("alias.bin");
+    fs::hard_link(&payload, &alias).unwrap();
+    assert!(matches!(s.payload(&snapshot), Err(BackupError::UnsafePath)));
+    fs::remove_file(alias).unwrap();
+    // Deliberately broaden the saved payload ACL; no further private read or
+    // automatic reuse is allowed, even though its bytes and hash are unchanged.
+    let sddl: Vec<u16> = "D:P(A;;FA;;;WD)\0".encode_utf16().collect();
+    let wide: Vec<u16> = payload.as_os_str().encode_wide().chain(Some(0)).collect();
+    unsafe {
+        let mut descriptor = std::ptr::null_mut();
+        assert_ne!(
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                1,
+                &mut descriptor,
+                std::ptr::null_mut()
+            ),
+            0
+        );
+        let ok = SetFileSecurityW(
+            wide.as_ptr(),
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            descriptor,
+        );
+        LocalFree(descriptor);
+        assert_ne!(ok, 0);
+    }
+    assert!(matches!(s.payload(&snapshot), Err(BackupError::UnsafePath)));
+    assert!(matches!(s.before_write(), Err(BackupError::UnsafePath)));
+    assert_eq!(fs::read(&s.paths[0]).unwrap(), b"fixture-secret");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_public_backup_directory_is_refused() {
+    let (_tmp, s) = fixture();
+    fs::create_dir_all(&s.root).unwrap();
+    // The inherited user-profile ACL includes administrators; it must never be
+    // accepted as a new private snapshot directory without explicit protection.
+    assert!(matches!(s.before_write(), Err(BackupError::UnsafePath)));
+    assert_eq!(fs::read(&s.paths[0]).unwrap(), b"fixture-secret");
+}
+
 #[test]
 fn preview_hash_change_refuses_restore_without_writing() {
     let (_tmp, s) = fixture();

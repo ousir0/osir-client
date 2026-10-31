@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(
             plan.row_settings,
             json!({
-                "env": { "ANTHROPIC_BASE_URL": "https://new.example", "API_TIMEOUT_MS": "300000" },
+                "env": { "ANTHROPIC_BASE_URL": "https://new.example", "API_TIMEOUT_MS": "300000", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000" },
                 "hooks": { "Stop": ["from backfill"] }
             })
         );

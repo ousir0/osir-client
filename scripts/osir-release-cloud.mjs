@@ -530,6 +530,8 @@ export async function runCloudRelease(
     createPlan = createReleasePlan,
     serviceMetadata = createServiceReleaseMetadata,
     verifyPublic = verifyPublicReleaseArtifacts,
+    beforePublish = async () => {},
+    expectedCurrentRelease,
     root = ROOT,
     report = (message) => process.stderr.write(message + "\n"),
   } = {},
@@ -662,6 +664,11 @@ export async function runCloudRelease(
       return current;
     });
     const expectedCurrent = currentBefore?.release_id ?? null;
+    requireThat(
+      expectedCurrentRelease === undefined ||
+        expectedCurrentRelease === expectedCurrent,
+      "Current release differs from the reviewed expected release.",
+    );
     state.expected_current_release_id = expectedCurrent;
     persist();
     const buildDirectory = await step(
@@ -848,6 +855,10 @@ export async function runCloudRelease(
         verificationPath,
         await verifyPublic(plan, { fetchImpl, metadataPath }),
       );
+    });
+    await step("pre-publication-gates", async () => {
+      assertPlan();
+      await beforePublish({ plan, buildDirectory, metadataPath, runDirectory });
     });
     await step("publish-with-expected-current", async () => {
       assertPlan();

@@ -22,6 +22,9 @@ use std::{
 const MAX_FILE: u64 = 4 * 1024 * 1024;
 const MAX_META: u64 = 32768;
 const MAX_SNAPSHOTS: usize = 100;
+#[cfg(windows)]
+#[path = "tool_backup_windows.rs"]
+mod windows;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tool {
@@ -621,6 +624,8 @@ fn safe_path(path: &Path) -> Result<()> {
         }
         cursor.push(c);
         match fs::symlink_metadata(&cursor) {
+            #[cfg(windows)]
+            Ok(m) if windows::is_reparse(&m) => return Err(BackupError::UnsafePath),
             Ok(m) if m.file_type().is_symlink() || (cursor != path && !m.is_dir()) => {
                 return Err(BackupError::UnsafePath)
             }
@@ -635,6 +640,8 @@ fn read(path: &Path, limit: u64, private: bool) -> Result<Option<Vec<u8>>> {
     safe_path(path)?;
     let mut options = fs::OpenOptions::new();
     options.read(true);
+    #[cfg(windows)]
+    windows::read_options(&mut options);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -659,7 +666,9 @@ fn read(path: &Path, limit: u64, private: bool) -> Result<Option<Vec<u8>>> {
             return Err(BackupError::UnsafePath);
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    windows::verify_file(&f, private)?;
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = private;
         return Err(BackupError::UnsafePath);
@@ -693,13 +702,18 @@ fn private_dir(path: &Path) -> Result<()> {
             return Err(BackupError::UnsafePath);
         }
     }
+    #[cfg(not(windows))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
-    match builder.create(path) {
+    #[cfg(windows)]
+    let created = windows::create_private_directory(path);
+    #[cfg(not(windows))]
+    let created = builder.create(path);
+    match created {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => {
             #[cfg(unix)]
@@ -713,14 +727,19 @@ fn private_dir(path: &Path) -> Result<()> {
         }
         Err(_) => return Err(BackupError::Storage),
     }
+    #[cfg(windows)]
+    windows::verify_path(path)?;
     Ok(())
 }
 fn private_write(path: &Path, bytes: &[u8]) -> Result<()> {
     safe_path(path)?;
-    stage_write(path, bytes, Some(0o600), true)
-        .map_err(|_| BackupError::Storage)?
-        .commit()
-        .map_err(|_| BackupError::Storage)
+    let staged = stage_write(path, bytes, Some(0o600), true).map_err(|_| BackupError::Storage)?;
+    #[cfg(windows)]
+    windows::verify_path(staged.tmp_path())?;
+    staged.commit().map_err(|_| BackupError::Storage)?;
+    #[cfg(windows)]
+    windows::verify_path(path)?;
+    Ok(())
 }
 fn json_write(path: &Path, value: &impl Serialize) -> Result<()> {
     private_write(

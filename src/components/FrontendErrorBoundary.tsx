@@ -1,4 +1,5 @@
 import React from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, TriangleAlert } from "lucide-react";
 import i18n from "@/i18n";
 import { reportFrontendError } from "@/lib/frontendLogger";
@@ -20,6 +21,9 @@ export class FrontendErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    if ("__TAURI_INTERNALS__" in window) {
+      void invoke("osir_client_report_frontend_failure").catch(() => {});
+    }
     reportFrontendError(
       "react.error_boundary",
       error,

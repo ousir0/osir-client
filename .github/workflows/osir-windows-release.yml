@@ -77,11 +77,37 @@ jobs:
           rustup target add x86_64-pc-windows-msvc --toolchain $env:RUSTUP_TOOLCHAIN
           if ($LASTEXITCODE -ne 0) { throw 'Windows target installation failed' }
 
+      - name: Restore pnpm download cache
+        # pnpm must exist before setup-node locates its content-addressed store.
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Restore Rust dependency compilation cache
+        id: rust-cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          prefix-key: osir-native-v1
+          key: windows-2022-x64-${{ inputs.channel }}
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST ImageOS ImageVersion
+          workspaces: src-tauri -> target
+          cache-bin: false
+          cache-workspace-crates: false
+          cache-on-failure: false
+
       - name: Install frozen frontend dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Validate unsigned Windows packaging configuration
         run: node scripts/osir-build-windows.mjs $env:OSIR_CHANNEL --check
+
+      - name: Verify native Windows configuration backup lifecycle and ACLs
+        timeout-minutes: 90
+        run: |
+          cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib tool_backup -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows backup lifecycle tests failed' }
 
       - name: Build unsigned NSIS installer and embedded application
         timeout-minutes: 90
@@ -109,6 +135,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+
+      - name: Upload Cargo compilation timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: osir-timings-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: src-tauri/target/cargo-timings/
+          if-no-files-found: warn
+          retention-days: 7
 
   macos-intel:
     name: Intel Mac application for local finalization
@@ -160,6 +195,25 @@ jobs:
           xcode-select -p
           xcrun --show-sdk-path
 
+      - name: Restore pnpm download cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Restore Rust dependency compilation cache
+        id: rust-cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          prefix-key: osir-native-v1
+          key: macos-15-intel-${{ inputs.channel }}
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST ImageOS ImageVersion
+          workspaces: src-tauri -> target
+          cache-bin: false
+          cache-workspace-crates: false
+          cache-on-failure: false
+
       - name: Install frozen frontend dependencies
         run: pnpm install --frozen-lockfile
 
@@ -203,3 +257,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+
+      - name: Upload Cargo compilation timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: osir-timings-intel-${{ github.run_id }}-${{ github.run_attempt }}
+          path: src-tauri/target/cargo-timings/
+          if-no-files-found: warn
+          retention-days: 7

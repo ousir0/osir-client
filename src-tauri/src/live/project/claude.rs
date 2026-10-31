@@ -14,6 +14,8 @@ use crate::live::residue;
 
 /// 旧 Bedrock API Key 预设把 Key 写在顶层 `apiKey`，Claude Code 读的是这个变量。
 const BEDROCK_BEARER_ENV: &str = "AWS_BEARER_TOKEN_BEDROCK";
+const AUTO_COMPACT_WINDOW_ENV: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
+const DEFAULT_AUTO_COMPACT_WINDOW: u64 = 100_000;
 
 /// 一个供应商在 `settings.json` 里拥有的键。
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -61,6 +63,20 @@ impl ClaudeProjection {
                     .entry(BEDROCK_BEARER_ENV.to_string())
                     .or_insert(key);
             }
+        }
+        let api_configured = projection.top.contains_key("apiKey")
+            || [
+                "ANTHROPIC_BASE_URL",
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN",
+            ]
+            .iter()
+            .any(|key| projection.env.contains_key(*key));
+        if api_configured {
+            projection
+                .exclusive
+                .entry(AUTO_COMPACT_WINDOW_ENV.to_string())
+                .or_insert_with(|| Value::String(DEFAULT_AUTO_COMPACT_WINDOW.to_string()));
         }
         projection
     }
@@ -544,8 +560,27 @@ mod tests {
         );
         assert_eq!(
             Value::Object(projection.exclusive),
-            json!({ "ENABLE_TOOL_SEARCH": "true" })
+            json!({
+                "ENABLE_TOOL_SEARCH": "true",
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"
+            })
         );
+    }
+
+    #[test]
+    fn api_provider_gets_a_conservative_auto_compaction_window_and_keeps_override() {
+        let default = ClaudeProjection::of(&json!({
+            "env": { "ANTHROPIC_BASE_URL": "https://gateway.example" }
+        }));
+        assert_eq!(default.exclusive[AUTO_COMPACT_WINDOW_ENV], json!("100000"));
+
+        let custom = ClaudeProjection::of(&json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": "https://gateway.example",
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "150000"
+            }
+        }));
+        assert_eq!(custom.exclusive[AUTO_COMPACT_WINDOW_ENV], json!("150000"));
     }
 
     #[test]
@@ -595,7 +630,8 @@ mod tests {
                     "ANTHROPIC_AUTH_TOKEN": "sk-kimi",
                     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
                     "API_TIMEOUT_MS": "300000",
-                    "CLAUDE_CODE_DISABLE_ARTIFACT": "1"
+                    "CLAUDE_CODE_DISABLE_ARTIFACT": "1",
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"
                 },
                 "hooks": { "Stop": [] }
             }))
@@ -717,13 +753,18 @@ mod tests {
                 "env": {
                     "ANTHROPIC_BASE_URL": "https://new.example",
                     "API_TIMEOUT_MS": "300000",
-                    "ENABLE_TOOL_SEARCH": "true"
+                    "ENABLE_TOOL_SEARCH": "true",
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"
                 }
             })
         );
         assert_eq!(
             store_into_row(&json!({ "env": "oops" }), &edited)["env"],
-            json!({ "ANTHROPIC_BASE_URL": "https://new.example", "ENABLE_TOOL_SEARCH": "true" })
+            json!({
+                "ANTHROPIC_BASE_URL": "https://new.example",
+                "ENABLE_TOOL_SEARCH": "true",
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"
+            })
         );
     }
 

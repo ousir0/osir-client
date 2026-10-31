@@ -540,7 +540,18 @@ export async function verifyPublicReleaseArtifacts(
     );
     metadataDigest = metadata.sha256;
   }
-  for (const artifact of plan.artifacts)
+  const unique = new Map();
+  for (const artifact of plan.artifacts) {
+    const previous = unique.get(artifact.url);
+    requireThat(
+      !previous ||
+        (previous.sha256 === artifact.sha256 &&
+          previous.size_bytes === artifact.size_bytes),
+      "Conflicting public artifact records for the same URL.",
+    );
+    unique.set(artifact.url, artifact);
+  }
+  for (const artifact of unique.values())
     await verifyPublicArtifact(fetchImpl, artifact);
   return {
     schema_version: 1,

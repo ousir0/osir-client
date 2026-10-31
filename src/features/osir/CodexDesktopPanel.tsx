@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { isWindows } from "@/lib/platform";
 import { Download, Check, Folder, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { connectionError } from "./errors";
@@ -55,7 +56,8 @@ type LocalReport = Pick<
 > & {
   recoveryRequired: boolean;
   updateBlockedReason?: string | null;
-  installMethod?: "microsoft_store";
+  platform?: "macos" | "windows";
+  installMethod?: "microsoft_store" | "windows_msix";
 };
 type InstallReport = {
   step: string;
@@ -382,6 +384,8 @@ export function CodexDesktopPanel({
   });
   const active = working || !!status?.operationId;
   const systemInstall = local.data?.installMethod === "microsoft_store";
+  const windowsPackageInstall =
+    local.data?.platform === "windows" || isWindows();
   useEffect(() => {
     if (systemInstall && source === "osir_mirror") setSource("official");
   }, [systemInstall, source, setSource]);
@@ -468,12 +472,14 @@ export function CodexDesktopPanel({
       ? "正在检测安装状态…"
       : detection.isError
         ? "检测失败，请重试"
-        : {
-            detected: "已检测到安装",
-            not_found: "未在标准目录发现安装",
-            inspection_failed: "暂不能确定安装状态",
-            unsupported: "当前平台暂未接入检测",
-          }[detection.data.status];
+        : detection.data.status === "not_found" && windowsPackageInstall
+          ? "当前 Windows 用户尚未安装 Codex"
+          : {
+              detected: "已检测到安装",
+              not_found: "未在标准目录发现安装",
+              inspection_failed: "暂不能确定安装状态",
+              unsupported: "当前平台不支持本地检测",
+            }[detection.data.status];
   async function recover() {
     const reports = await invoke<InstallReport[]>(
       "osir_codex_install_recover",
@@ -551,7 +557,9 @@ export function CodexDesktopPanel({
     if (result.step !== "completed")
       throw new Error("安装未完成，请检查本地状态并恢复未完成的安装。");
     setInstallConfirmation(null);
-    return "Codex 安装完成，会话与配置已保留。";
+    return windowsPackageInstall
+      ? "Windows 已确认 Codex 安装完成。"
+      : "Codex 安装完成，会话与配置已保留。";
   }
   async function cancelOperation() {
     const operationId = status?.operationId;
@@ -605,7 +613,9 @@ export function CodexDesktopPanel({
           <p className="osir-desktop-note">
             {systemInstall
               ? "检测本机版本，通过 Microsoft Store 安装或更新 Codex。"
-              : "检测本机版本，下载或更新 Codex。"}
+              : windowsPackageInstall
+                ? "检测本机版本，通过 Windows 安装服务安装或更新 Codex。"
+                : "检测本机版本，下载或更新 Codex。"}
           </p>
         </div>
         <button
@@ -658,12 +668,16 @@ export function CodexDesktopPanel({
             }}
           >
             <option value="auto">自动选择</option>
-            {!systemInstall && <option value="osir_mirror">OSIR 下载源</option>}
+            {!systemInstall && (
+              <option value="osir_mirror">
+                {windowsPackageInstall ? "GitHub 镜像" : "OSIR 下载源"}
+              </option>
+            )}
             <option value="official">官方更新源</option>
           </select>
         </label>
       </div>
-      {desktop && !systemInstall && (
+      {desktop && !systemInstall && !windowsPackageInstall && (
         <label className="osir-desktop-target">
           安装位置
           <select
@@ -701,8 +715,11 @@ export function CodexDesktopPanel({
                 {release.release.version} · 构建 {release.release.build}
               </strong>
               <span>
-                {CODEX_INSTALL_SOURCES[release.actualSource ?? source]} · 约{" "}
-                {Math.ceil(release.release.fullSize / 1024 / 1024)} MB
+                {windowsPackageInstall &&
+                (release.actualSource ?? source) === "osir_mirror"
+                  ? "GitHub 镜像"
+                  : CODEX_INSTALL_SOURCES[release.actualSource ?? source]}{" "}
+                · 约 {Math.ceil(release.release.fullSize / 1024 / 1024)} MB
               </span>
               {!canInstall && !active && (
                 <p className="osir-desktop-note">
@@ -925,7 +942,9 @@ export function CodexDesktopPanel({
                           : local.data?.installedBuild
                             ? systemInstall
                               ? `已检测到系统安装 · 版本 ${selectedVersion || "未知"}`
-                              : `上次校验通过 · 构建 ${local.data.installedBuild}`
+                              : windowsPackageInstall
+                                ? `已检测到 Windows 安装 · 版本 ${selectedVersion || "未知"}`
+                                : `上次校验通过 · 构建 ${local.data.installedBuild}`
                             : "所选目录尚未安装"}
                   </dd>
                 </div>
@@ -953,7 +972,7 @@ export function CodexDesktopPanel({
                 外部安装或更新后，请重新检测。
               </p>
               <div className="osir-desktop-actions">
-                {!local.data?.recoveryRequired && (
+                {!windowsPackageInstall && !local.data?.recoveryRequired && (
                   <button
                     type="button"
                     disabled={active || confirmationOpen}
@@ -963,25 +982,27 @@ export function CodexDesktopPanel({
                     恢复未完成的安装
                   </button>
                 )}
-                <button
-                  type="button"
-                  disabled={active || confirmationOpen || !local.data}
-                  onClick={() =>
-                    void run(async () => {
-                      await invoke("osir_codex_install_local", {
-                        action: "reveal",
-                        ...(targetPath ? { targetPath } : {}),
-                      });
-                      return "已打开安装目录。";
-                    })
-                  }
-                >
-                  <Folder size={14} aria-hidden="true" />
-                  打开安装目录
-                </button>
+                {!windowsPackageInstall && (
+                  <button
+                    type="button"
+                    disabled={active || confirmationOpen || !local.data}
+                    onClick={() =>
+                      void run(async () => {
+                        await invoke("osir_codex_install_local", {
+                          action: "reveal",
+                          ...(targetPath ? { targetPath } : {}),
+                        });
+                        return "已打开安装目录。";
+                      })
+                    }
+                  >
+                    <Folder size={14} aria-hidden="true" />
+                    打开安装目录
+                  </button>
+                )}
               </div>
             </section>
-            {!systemInstall && (
+            {!systemInstall && !windowsPackageInstall && (
               <section
                 className="osir-desktop-restore"
                 aria-label="历史版本与恢复点"
@@ -1063,7 +1084,9 @@ export function CodexDesktopPanel({
             message={
               systemInstall
                 ? "安装和更新由 Microsoft Store 完成，完成后请返回重新检测。"
-                : `将从${installConfirmation ? CODEX_INSTALL_SOURCES[installConfirmation.actualSource] : ""}下载 ${installConfirmation?.version ?? ""}（构建 ${installConfirmation?.build ?? ""}），安装至 ${installConfirmation?.targetPath ?? ""}。请先退出此 Codex；更新前会备份现有版本，并保留会话与配置。${failed && message ? "\n" + message : ""}`
+                : windowsPackageInstall
+                  ? `将从${installConfirmation?.actualSource === "osir_mirror" ? "GitHub 镜像" : "官方源"}下载并验证约 ${Math.ceil((release?.release.fullSize ?? 0) / 1024 / 1024)} MB 的安装包，再由 Windows 为当前用户安装或更新 Codex。请先退出 Codex。${failed && message ? "\n" + message : ""}`
+                  : `将从${installConfirmation ? CODEX_INSTALL_SOURCES[installConfirmation.actualSource] : ""}下载 ${installConfirmation?.version ?? ""}（构建 ${installConfirmation?.build ?? ""}），安装至 ${installConfirmation?.targetPath ?? ""}。请先退出此 Codex；更新前会备份现有版本，并保留会话与配置。${failed && message ? "\n" + message : ""}`
             }
             confirmText={systemInstall ? "打开商店" : "确认安装"}
             cancelText="取消"
