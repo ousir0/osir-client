@@ -389,6 +389,12 @@ async fn installed_codex_app_server_lists_and_routes_duplicate_models_through_re
     );
     rpc.turn(MODEL, &project, "OSIR_ACCEPTANCE_KEY_A").await;
     rpc.turn(&second, &project, "OSIR_ACCEPTANCE_KEY_B").await;
+    // Keep the real app-server running with the same selected model. The next
+    // request must resolve the updated provider row, not its previous key.
+    let mut replacement = provider("key-a", &url_b, "synthetic-key-b");
+    replacement.sort_index = Some(1);
+    ProviderService::update(&state, AppType::Codex, None, replacement).unwrap();
+    rpc.turn(MODEL, &project, "OSIR_ACCEPTANCE_KEY_B").await;
     let rows = captured.lock().await;
     assert!(
         rows.iter().any(|row| row.upstream == "KEY_A")
@@ -402,18 +408,50 @@ async fn installed_codex_app_server_lists_and_routes_duplicate_models_through_re
     );
     assert_eq!(
         rows.len(),
-        2,
+        3,
         "a model selection must not retry/fail over to another key"
+    );
+    assert_eq!(
+        rows[2].upstream, "KEY_B",
+        "same model after key replacement must use the new upstream"
     );
     drop(rows);
     rpc.child
         .kill()
         .await
         .expect("stop only this test-owned app-server");
+    ProviderService::update_sort_order(
+        &state,
+        AppType::Codex,
+        vec![
+            crate::services::provider::ProviderSortUpdate {
+                id: "key-b".into(),
+                sort_index: 0,
+            },
+            crate::services::provider::ProviderSortUpdate {
+                id: "key-a".into(),
+                sort_index: 1,
+            },
+        ],
+    )
+    .unwrap();
+    let mut reordered = Rpc::start(&binary, home.dir.path(), &project);
+    reordered.request("initialize", json!({"clientInfo":{"name":"osir-order-acceptance","version":"1.0.0"},"capabilities":{"experimentalApi":true}})).await;
+    reordered
+        .send(json!({"method":"initialized","params":{}}))
+        .await;
+    let listed = reordered
+        .request("model/list", json!({"limit":100,"includeHidden":true}))
+        .await;
+    assert_eq!(
+        listed["data"][0]["model"], second,
+        "real model selector must honor provider order after restart"
+    );
+    reordered.child.kill().await.unwrap();
     state.proxy_service.stop().await.unwrap();
     upstream_b.abort();
     upstream_a.abort();
-    println!("OSIR_STACK_ACCEPTANCE provider_writer=real proxy=real model_list=real turns=2 image_preserved=true same_model_keys_isolated=true upstream_origins=loopback");
+    println!("OSIR_STACK_ACCEPTANCE provider_writer=real proxy=real model_list=real turns=3 image_preserved=true same_model_keys_isolated=true replaced_key_live=true reordered_model_list=true upstream_origins=loopback");
 }
 
 #[tokio::test(flavor = "current_thread")]

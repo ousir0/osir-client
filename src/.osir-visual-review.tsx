@@ -153,6 +153,17 @@ const codexProvider: Provider = {
     },
   },
 };
+const sortFixture = new URLSearchParams(location.search).has("provider-sort");
+const codexProviders: Record<string, Provider> = {
+  [codexProvider.id]: codexProvider,
+};
+if (sortFixture) {
+  const second = structuredClone(codexProvider);
+  second.id = "visual-codex-second";
+  second.name = "合成备用连接";
+  second.meta!.osirBinding!.binding.provider_id = second.id;
+  codexProviders[second.id] = second;
+}
 const resources: Record<string, unknown> = {
   profile,
   groups: [
@@ -633,8 +644,16 @@ mockIPC(
                 },
               }
             : args.app === "codex"
-              ? { [codexProvider.id]: codexProvider }
+              ? codexProviders
               : {};
+      case "update_providers_sort_order":
+        if (!sortFixture || args.app !== "codex")
+          throw new Error("合成排序未启用");
+        for (const update of args.updates) {
+          if (!codexProviders[update.id]) throw new Error("未知合成供应商");
+          codexProviders[update.id].sortIndex = update.sortIndex;
+        }
+        return true;
       case "get_claude_desktop_status":
         return {
           supported: true,

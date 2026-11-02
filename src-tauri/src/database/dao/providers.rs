@@ -17,6 +17,35 @@ type OmoProviderRow = (
 );
 
 impl Database {
+    /// Update only ordering columns, atomically, without rewriting credentials
+    /// or metadata. A stale/deleted row must not leave a partially sorted list.
+    pub(crate) fn update_provider_sort_indices(
+        &self,
+        app: &str,
+        updates: &[(String, Option<usize>)],
+    ) -> Result<(), AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let mut seen = HashSet::new();
+        for (id, index) in updates {
+            if !seen.insert(id) {
+                return Err(AppError::Config("供应商排序包含重复项".into()));
+            }
+            let changed = tx
+                .execute(
+                    "UPDATE providers SET sort_index = ?1 WHERE app_type = ?2 AND id = ?3",
+                    params![index, app, id],
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            if changed != 1 {
+                return Err(AppError::Config("供应商列表已变化，请刷新后重试".into()));
+            }
+        }
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))
+    }
+
     /// Detach Codex providers bound to these deleted local accounts, atomically.
     /// Only this device's account IDs are passed in: provider rows sync across
     /// devices, and a row bound to another device's account must stay bound.

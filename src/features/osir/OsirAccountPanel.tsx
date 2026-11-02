@@ -422,7 +422,7 @@ export function OsirAccountPanel({
                   : recovery === "retryable"
                     ? "账户服务暂时不可用，已保留登录信息。请检查网络后重试恢复。"
                     : recovery === "unlock_required"
-                      ? "已保存的登录暂未恢复。可重试恢复或重新授权。"
+                      ? "登录信息已保留。点击恢复登录，在系统提示中允许访问即可。"
                       : recovery === "blocked"
                         ? "已保存的登录无法恢复，请重新授权。"
                         : "在浏览器中安全授权，完成后自动返回客户端"}

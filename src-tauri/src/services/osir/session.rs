@@ -935,6 +935,15 @@ impl<B: CredentialBackend + 'static> AuthManager<B> {
         // validated native grant, including during startup restoration.
         self.preserve_refresh_session(record.clone(), 0)?;
         cancellation.armed = false;
+        // Explicit system recovery may have granted a one-time read of an
+        // older signing identity's item. Adopt the already-authorized grant in
+        // a fresh item owned by this signed app, so the next cold start can
+        // read it silently. Never run this path during startup/background reads.
+        let record = if interactive {
+            self.adopt_recovered_grant(record, 0).await?
+        } else {
+            record
+        };
         if record.expires_at <= chrono::Utc::now().timestamp() + 60 {
             self.rotate(record, 0).await?;
         } else {
@@ -953,6 +962,56 @@ impl<B: CredentialBackend + 'static> AuthManager<B> {
         self.check(0)?;
         cancellation.armed = false;
         Ok(self.status())
+    }
+    async fn adopt_recovered_grant(
+        &self,
+        previous: Arc<SecretRecord>,
+        generation: u64,
+    ) -> Result<Arc<SecretRecord>, SessionError> {
+        let next = Arc::new(SecretRecord {
+            access_token: previous.access_token.clone(),
+            refresh_token: previous.refresh_token.clone(),
+            expires_at: previous.expires_at,
+            account_id: previous.account_id.clone(),
+            origin: previous.origin.clone(),
+            scope: previous.scope.clone(),
+            slot: Some(uuid::Uuid::new_v4().simple().to_string()),
+        });
+        let result = next.clone();
+        let credentials = self.credentials.clone();
+        let journal = self.journal.clone();
+        let state = self.state.clone();
+        let gate = self.keychain_gate.clone();
+        tokio::task::spawn_blocking(move || {
+            let _gate = gate.lock().unwrap();
+            if state.lock().unwrap().generation != generation {
+                return Err(SessionError::Superseded);
+            }
+            // Create first: failure preserves the previous active reference.
+            credentials.create_for_user(&next)?;
+            let activated = (|| {
+                let mut current = state.lock().unwrap();
+                if current.generation != generation {
+                    return Err(SessionError::Superseded);
+                }
+                journal.write_slot(Some(&next.account_id), next.slot.as_deref(), true)?;
+                current.cleanup_account = Some(next.account_id.clone());
+                current.cleanup_slot = next.slot.clone();
+                current.record = Some(next.clone());
+                Ok(())
+            })();
+            if let Err(error) = activated {
+                let _ = credentials.delete_slot(&next.account_id, next.slot.as_deref());
+                return Err(error);
+            }
+            // Old-item cleanup is silent and best effort. Never revoke: both
+            // records represent the same existing grant, not a new login.
+            let _ = credentials.delete_slot(&previous.account_id, previous.slot.as_deref());
+            Ok(())
+        })
+        .await
+        .map_err(|_| SessionError::Storage)??;
+        Ok(result)
     }
     /// Compatibility native entry; the supplied id cannot bypass the journal.
     pub async fn restore(&self, account: &str) -> Result<SessionStatus, SessionError> {
@@ -1756,17 +1815,20 @@ assert Handler.index == 11 and not Handler.failed
             assert_eq!(status.recovery, SessionRecovery::Idle);
             assert_eq!(status.profile.unwrap().id, 7);
         }
+        let recovered_slot = restarted.journal.read().unwrap().unwrap().slot;
+        assert!(recovered_slot.is_some());
         assert_eq!(
             restarted
                 .credentials
-                .load_for_refresh("7")
+                .load_slot_for_refresh("7", recovered_slot.as_deref())
                 .unwrap()
                 .unwrap()
                 .refresh_token,
             saved.refresh_token
         );
-        // Both startup and explicit recovery reuse saved credentials unchanged.
-        assert_eq!(backend.writes.load(std::sync::atomic::Ordering::SeqCst), 3);
+        // Recovery adopts the same grant under this application's identity;
+        // startup itself does not rewrite the credential store.
+        assert_eq!(backend.writes.load(std::sync::atomic::Ordering::SeqCst), 4);
         assert!(
             backend
                 .interactive_reads
@@ -2263,6 +2325,58 @@ assert Handler.index == 11 and not Handler.failed
         .unwrap();
         manager.journal = Arc::new(SessionJournal::persistent(origin, directory));
         manager
+    }
+    #[tokio::test]
+    async fn recovered_grant_adopts_fresh_slot_and_preserves_original_on_failure() {
+        use std::sync::atomic::Ordering::SeqCst;
+        for fail in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let backend = Memory::default();
+            let manager = persistent_manager(directory.path(), backend.clone());
+            let previous = Arc::new(record());
+            manager.credentials.store(&previous).unwrap();
+            manager
+                .preserve_refresh_session(previous.clone(), 0)
+                .unwrap();
+            let mut recovering = persistent_manager(
+                directory.path(),
+                Memory {
+                    fail,
+                    ..backend.clone()
+                },
+            );
+            recovering.state = manager.state.clone();
+            let result = recovering.adopt_recovered_grant(previous.clone(), 0).await;
+            let journal = recovering.journal.read().unwrap().unwrap();
+            assert!(journal.active);
+            if fail {
+                assert!(result.is_err());
+                assert_eq!(journal.slot, None);
+                assert!(recovering
+                    .credentials
+                    .load_for_startup("7", None)
+                    .unwrap()
+                    .is_some());
+            } else {
+                let adopted = result.unwrap();
+                assert!(journal.slot.is_some());
+                assert_eq!(journal.slot, adopted.slot);
+                let stored = recovering
+                    .credentials
+                    .load_for_startup("7", journal.slot.as_deref())
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(stored.access_token, previous.access_token);
+                assert_eq!(stored.refresh_token, previous.refresh_token);
+                assert!(recovering
+                    .credentials
+                    .load_for_startup("7", None)
+                    .unwrap()
+                    .is_none());
+                assert_eq!(backend.interactive_creates.load(SeqCst), 1);
+                assert_eq!(backend.interactive_reads.load(SeqCst), 0);
+            }
+        }
     }
     #[tokio::test]
     async fn browser_login_save_allows_authorization_but_token_refresh_remains_silent() {

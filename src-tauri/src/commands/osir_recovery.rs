@@ -110,9 +110,9 @@ impl Journal {
         }
     }
     pub(crate) fn ensure_clear(&self) -> Result<(), String> {
-        match fs::symlink_metadata(&self.path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            _ => Err("先前凭据恢复尚未完成，请勿重复保存".into()),
+        match self.read_entry()? {
+            None => Ok(()),
+            Some(_) => Err("先前凭据恢复尚未完成，请勿重复保存".into()),
         }
     }
     pub(crate) fn record(&self, metadata: &KeyMetadata, phase: Phase) -> Result<(), String> {
@@ -163,16 +163,25 @@ impl Journal {
         self.write_entry(&entry)
     }
     fn write_entry(&self, entry: &Entry) -> Result<(), String> {
+        let bytes = serde_json::to_vec(entry).map_err(|_| "恢复日志不可用")?;
+        self.write_bytes(&bytes)
+    }
+    fn write_bytes(&self, bytes: &[u8]) -> Result<(), String> {
         let dir = self.path.parent().ok_or("恢复日志路径无效")?;
         fs::create_dir_all(dir).map_err(|_| "恢复日志不可用")?;
         self.reject_symlink()?;
-        let bytes = serde_json::to_vec(entry).map_err(|_| "恢复日志不可用")?;
         if bytes.len() > MAX_JOURNAL_BYTES {
             return Err("恢复日志超出限制".into());
         }
-        crate::config::stage_write(&self.path, &bytes, Some(0o600), true)
-            .and_then(|staged| staged.commit())
+        let staged = crate::config::stage_write(&self.path, bytes, Some(0o600), true)
             .map_err(|_| "恢复日志不可用")?;
+        #[cfg(windows)]
+        if crate::services::osir::windows_durable::commit(staged.tmp_path(), &self.path).is_err() {
+            let _ = fs::remove_file(staged.tmp_path());
+            return Err("恢复日志不可用".into());
+        }
+        #[cfg(not(windows))]
+        staged.commit().map_err(|_| "恢复日志不可用")?;
         self.sync_directory()
     }
     fn reject_symlink(&self) -> Result<(), String> {
@@ -190,9 +199,13 @@ impl Journal {
                 .and_then(|file| file.sync_all())
                 .map_err(|_| "恢复日志同步失败".to_string())
         }
-        // Fail closed on platforms without a supported directory fsync. A
-        // successful rename alone must not be advertised as durable recovery.
-        #[cfg(not(unix))]
+        // Windows write_bytes already used a write-through same-volume rename.
+        #[cfg(windows)]
+        {
+            let _ = directory;
+            Ok(())
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = directory;
             Err("此平台不支持恢复日志目录同步".into())
@@ -201,6 +214,13 @@ impl Journal {
 
     pub(crate) fn clear(&self) -> Result<(), String> {
         self.reject_symlink()?;
+        // Persist a cleared marker using the same write-through publication.
+        // A plain DeleteFile would not supply an equivalent durability fence.
+        #[cfg(windows)]
+        {
+            return self.write_bytes(b"null");
+        }
+        #[cfg(not(windows))]
         match fs::remove_file(&self.path) {
             Ok(()) => self.sync_directory(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -232,7 +252,11 @@ impl Journal {
         if bytes.len() > MAX_JOURNAL_BYTES {
             return Err("恢复日志超出限制".into());
         }
-        let entry: Entry = serde_json::from_slice(&bytes).map_err(|_| "恢复日志格式无效")?;
+        let entry: Option<Entry> =
+            serde_json::from_slice(&bytes).map_err(|_| "恢复日志格式无效")?;
+        let Some(entry) = entry else {
+            return Ok(None);
+        };
         if !matches!(
             (entry.version, entry.previous.is_some()),
             (1, false) | (2, true)
@@ -371,6 +395,22 @@ mod tests {
             .unwrap();
         journal.record(&metadata, Phase::Stored).unwrap();
         (dir, journal, vault, metadata, memory)
+    }
+    #[test]
+    fn cleared_marker_allows_next_operation_without_treating_it_as_pending() {
+        let (_dir, journal, vault, metadata, _memory) = fixture();
+        fs::write(&journal.path, b"null").unwrap();
+        journal.ensure_clear().unwrap();
+        journal
+            .recover(&vault, |_, _| {
+                panic!("a cleared journal has no key to clean")
+            })
+            .unwrap();
+        journal.record(&metadata, Phase::Intent).unwrap();
+        assert!(journal.ensure_clear().is_err());
+        assert_eq!(journal.read_entry().unwrap().unwrap().phase, Phase::Intent);
+        journal.clear().unwrap();
+        journal.ensure_clear().unwrap();
     }
     fn replacement_fixture() -> (
         tempfile::TempDir,

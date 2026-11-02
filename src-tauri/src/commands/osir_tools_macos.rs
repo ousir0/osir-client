@@ -377,9 +377,14 @@ async fn launch_checked_desktop(
     if let Some(instance) = existing.as_ref() {
         force_terminate_instance(app, id, instance).await?;
     }
-    // A reopen event also restores minimized/closed windows. No -n: reuse
-    // the validated copy instead of creating another account/profile instance.
-    let output = system_output("/usr/bin/open", &["-a"], path, Duration::from_secs(5))
+    // Only after the verified instance has exited, bypass LaunchServices'
+    // stale registration. Normal opens keep reusing the existing application.
+    let args: &[&str] = if restart && existing.is_some() {
+        &["-n", "-a"]
+    } else {
+        &["-a"]
+    };
+    let output = system_output("/usr/bin/open", args, path, Duration::from_secs(5))
         .await
         .map_err(|_| format!("{} 启动未完成，请重试", desktop_label(id)))?;
     if !output.status.success() {

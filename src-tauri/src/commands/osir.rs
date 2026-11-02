@@ -934,7 +934,8 @@ pub async fn osir_replace_connection_key(
                     .ok_or_else(|| AppError::InvalidInput("此连接不是账户托管连接".into()))?;
                 if previous.binding.account_id != binding.account_id
                     || previous.binding.account_origin != binding.account_origin
-                    || previous.binding.key_id == binding.key_id
+                    || (previous.binding.key_id == binding.key_id
+                        && previous.binding.group_id == binding.group_id)
                 {
                     return Err(AppError::InvalidInput(
                         "账户或密钥已改变，请重新加载".into(),

@@ -1782,3 +1782,44 @@
 .osir-account-session-actions > button {
   flex-shrink: 0;
 }
+.osir-provider-sortable {
+  position: relative;
+}
+.osir-provider-sortable .osir-provider-head {
+  padding-left: 30px;
+}
+.osir-shell .osir-provider-drag {
+  position: absolute;
+  top: 22px;
+  left: 6px;
+  width: 20px;
+  min-width: 20px;
+  height: 24px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  color: var(--osir-text-muted, #64748b);
+  opacity: 0.3;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
+}
+.osir-provider-sortable:hover .osir-provider-drag,
+.osir-provider-drag:focus-visible {
+  opacity: 0.85;
+}
+.osir-provider-drag:active {
+  cursor: grabbing;
+}
+.osir-provider-drag:focus-visible {
+  outline: 2px solid var(--osir-blue, #2563eb);
+  outline-offset: 2px;
+}
+@media (max-width: 940px) {
+  .osir-provider-sortable .osir-provider-head {
+    column-gap: 8px;
+    padding-right: 12px;
+  }
+}

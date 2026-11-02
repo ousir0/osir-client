@@ -49,6 +49,15 @@ export interface ResourceReply<T> {
 }
 export const accountQueryRoot = ["osir-account"] as const;
 export const accountSessionKey = [...accountQueryRoot, "session"] as const;
+// These fixed native messages describe read-only, transient failures. Never
+// retry authorization, mutations, invalid data or an obsolete account.
+export function isRetryableAccountRead(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : error;
+  return (
+    message === "账户资源同步失败，请重试" ||
+    message === "账户请求繁忙，请稍后重试"
+  );
+}
 const native = () =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -259,8 +268,11 @@ export function useAccountResource<T>(
       return reply;
     },
     enabled: native() && visible && !!session.data?.connected && enabled,
-    retry: false,
-    retryOnMount: false,
+    retry: (failures, error) => failures < 1 && isRetryableAccountRead(error),
+    // Native failures cool down for five seconds. A bounded retry after that
+    // window also covers a hidden drawer becoming active again.
+    retryDelay: 5_250,
+    retryOnMount: isRetryableAccountRead(client.getQueryState(queryKey)?.error),
     staleTime:
       resource === "profile"
         ? 120_000

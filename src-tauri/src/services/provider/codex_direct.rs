@@ -823,6 +823,7 @@ pub(crate) fn plan(
             if let Some(identity) = &identity_state {
                 bind_stack_model_references(provider, identity, &mut top, &mut nested, catalog)?;
             }
+            order_stack_catalog(provider, stack, catalog);
         }
         // Per-provider/native overrides contain upstream IDs. Only the device's
         // explicit aggregate selection may choose a reviewer across providers.
@@ -1228,6 +1229,40 @@ fn stack_catalog(
         }
     }
     Ok(Some(catalog))
+}
+
+/// Reorder display only. Model IDs, the default route and key ownership stay
+/// stable, including when several providers publish the same upstream model.
+fn order_stack_catalog(route: &Provider, stack: &[Member], catalog: &mut Value) {
+    use crate::mode::stack::{decode, Decoded};
+    if route.sort_index.is_none() && stack.iter().all(|m| m.provider.sort_index.is_none()) {
+        return;
+    }
+    let mut order: Vec<_> = stack
+        .iter()
+        .map(|m| (&m.provider, Some(m.key.as_str())))
+        .collect();
+    if !order.iter().any(|(p, _)| p.id == route.id) {
+        order.insert(0, (route, None));
+    }
+    order.sort_by_key(|(p, _)| p.sort_index.unwrap_or(999999));
+    let rank = |row: &Value| -> usize {
+        let Some(slug) = row.get("slug").and_then(Value::as_str) else {
+            return usize::MAX;
+        };
+        match decode(&AppType::Codex, slug) {
+            Decoded::Stack { key, .. } => order.iter().position(|(_, k)| *k == Some(key)),
+            Decoded::Plain => order.iter().position(|(p, _)| p.id == route.id),
+            _ => None,
+        }
+        .unwrap_or(usize::MAX)
+    };
+    if let Some(rows) = catalog.get_mut("models").and_then(Value::as_array_mut) {
+        rows.sort_by_key(rank);
+        for (index, row) in rows.iter_mut().enumerate() {
+            row["priority"] = serde_json::json!(index + 1);
+        }
+    }
 }
 
 fn apply_route_display_names(catalog: &mut Value, route: &Provider) {

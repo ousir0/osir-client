@@ -292,7 +292,7 @@ export function ManagedConnectionDetails({
       )}
       {metadata?.groupChanged && (
         <p role="alert" className="osir-error">
-          此密钥在网站上的分组已变化，本地连接仍保留原分组。请核对网站分组后重新添加连接。
+          此密钥在网站上的分组已变化。点击“更换密钥”，重新选择该密钥并保存以同步新分组。
         </p>
       )}
       {readable && query.isFetching ? (

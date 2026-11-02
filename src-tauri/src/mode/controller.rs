@@ -907,16 +907,19 @@ async fn try_enter_with_route(
             app.as_str()
         ));
     }
-    let explicit = match route {
-        Some(id) => {
-            let target = provider(state, app, id)?.ok_or_else(|| format!("供应商不存在: {id}"))?;
-            reject_unsupported_official(app, &target)?;
-            Some(target)
-        }
-        None => None,
-    };
     let result = match lock_settled(state, app).await {
-        Ok(_guard) => enter_locked(state, app, op::ENTER, Some(stack_mode), explicit).await,
+        Ok(_guard) => {
+            let explicit = match route {
+                Some(id) => {
+                    let target =
+                        provider(state, app, id)?.ok_or_else(|| format!("供应商不存在: {id}"))?;
+                    reject_unsupported_official(app, &target)?;
+                    Some(target)
+                }
+                None => None,
+            };
+            enter_locked(state, app, op::ENTER, Some(stack_mode), explicit).await
+        }
         Err(error) => Err(error.to_string()),
     };
     if result.is_err() {
@@ -1511,10 +1514,10 @@ async fn switch_route_checked(
     reject_stacked: bool,
 ) -> Result<(), String> {
     require_proxy_app(app)?;
+    let _guard = lock_settled(state, app).await.map_err(|e| e.to_string())?;
     let target =
         provider(state, app, provider_id)?.ok_or_else(|| format!("供应商不存在: {provider_id}"))?;
     reject_unsupported_official(app, &target)?;
-    let _guard = lock_settled(state, app).await.map_err(|e| e.to_string())?;
     if reject_stacked && current::is_proxy(app) && settled_stack(app)?.enabled {
         return Err(
             "聚合模式不做故障转移，请先换回路由模式 (The Aggregation mode has no failover; switch back to the routing mode first)"
@@ -1532,10 +1535,10 @@ pub async fn set_route(
     provider_id: &str,
 ) -> Result<RouteSwitchResult, String> {
     require_proxy_app(app)?;
+    let _guard = lock_settled(state, app).await.map_err(|e| e.to_string())?;
     let target =
         provider(state, app, provider_id)?.ok_or_else(|| format!("供应商不存在: {provider_id}"))?;
     reject_unsupported_official(app, &target)?;
-    let _guard = lock_settled(state, app).await.map_err(|e| e.to_string())?;
     let mode = current::mode_state(app);
     if mode.is_proxy() {
         return switch_route_locked(state, app, &target).await;
@@ -9189,6 +9192,97 @@ model_provider = "c"
             .map(|m| m["slug"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(slugs, vec!["gpt-a", "ccs-deepseek/deepseek-v5"]);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn provider_sort_updates_codex_catalog_without_changing_default_or_ids() {
+        use crate::services::provider::ProviderSortUpdate;
+        let _home = Home::new();
+        seed_codex("", None);
+        let state = state_with(AppType::Codex, &codex_stack_rows(), "a").await;
+        enter(&state, &AppType::Codex, true).await.unwrap();
+        set_codex_member(&state, "deepseek", true).await;
+        let before = codex_catalog();
+        let default = codex_doc()["model"].clone();
+        let before_stack = settled_stack(&AppType::Codex).unwrap();
+        ProviderService::update_sort_order(
+            &state,
+            AppType::Codex,
+            vec![
+                ProviderSortUpdate {
+                    id: "deepseek".into(),
+                    sort_index: 0,
+                },
+                ProviderSortUpdate {
+                    id: "a".into(),
+                    sort_index: 1,
+                },
+            ],
+        )
+        .unwrap();
+        let after = codex_catalog();
+        assert_eq!(after["models"][0]["slug"], before["models"][1]["slug"]);
+        assert_eq!(after["models"][1]["slug"], before["models"][0]["slug"]);
+        assert_eq!(after["models"][0]["priority"], 1);
+        assert_eq!(codex_doc()["model"], default);
+        assert_eq!(settled_stack(&AppType::Codex).unwrap(), before_stack);
+        assert_eq!(
+            stack_views(&state, &AppType::Codex).unwrap().members[0].provider_id,
+            "deepseek"
+        );
+        // Missing/deleted rows reject the complete update, including earlier rows.
+        assert!(ProviderService::update_sort_order(
+            &state,
+            AppType::Codex,
+            vec![
+                ProviderSortUpdate {
+                    id: "a".into(),
+                    sort_index: 0
+                },
+                ProviderSortUpdate {
+                    id: "deleted".into(),
+                    sort_index: 1
+                },
+            ]
+        )
+        .is_err());
+        assert_eq!(codex_catalog(), after);
+        assert_eq!(
+            state
+                .db
+                .get_provider_by_id("a", "codex")
+                .unwrap()
+                .unwrap()
+                .sort_index,
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn route_switch_waiting_for_lock_uses_the_latest_saved_provider() {
+        let _home = Home::new();
+        seed_codex("", None);
+        let state = state_with(AppType::Codex, &codex_stack_rows(), "a").await;
+        enter(&state, &AppType::Codex, false).await.unwrap();
+        let guard = lock_settled(&state, &AppType::Codex).await.unwrap();
+        let mut switch = Box::pin(set_route(&state, &AppType::Codex, "deepseek"));
+        tokio::select! {
+            _ = &mut switch => panic!("switch must wait for the existing writer"),
+            _ = tokio::task::yield_now() => (),
+        }
+        let mut updated = state
+            .db
+            .get_provider_by_id("deepseek", "codex")
+            .unwrap()
+            .unwrap();
+        updated.settings_config["modelCatalog"] =
+            json!({"models":[{"model":"updated-under-lock"}]});
+        state.db.save_provider("codex", &updated).unwrap();
+        drop(guard);
+        switch.await.unwrap();
+        assert_eq!(codex_catalog()["models"][0]["slug"], "updated-under-lock");
     }
 
     #[tokio::test]

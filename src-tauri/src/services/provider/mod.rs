@@ -8443,15 +8443,37 @@ impl ProviderService {
     ) -> Result<bool, AppError> {
         let _switch_guard = crate::mode::controller::lock_settled_blocking(state, &app_type)?;
         let _osir_write_guard = managed_update::lock_open_code(state, &app_type);
-        let mut providers = state.db.get_all_providers(app_type.as_str())?;
-
-        for update in updates {
-            if let Some(provider) = providers.get_mut(&update.id) {
-                provider.sort_index = Some(update.sort_index);
-                state.db.save_provider(app_type.as_str(), provider)?;
+        let providers = state.db.get_all_providers(app_type.as_str())?;
+        let previous = updates
+            .iter()
+            .map(|update| {
+                providers
+                    .get(&update.id)
+                    .map(|row| (row.id.clone(), row.sort_index))
+                    .ok_or_else(|| AppError::Config("供应商列表已变化，请刷新后重试".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let next = updates
+            .into_iter()
+            .map(|update| (update.id, Some(update.sort_index)))
+            .collect::<Vec<_>>();
+        state
+            .db
+            .update_provider_sort_indices(app_type.as_str(), &next)?;
+        if app_type == AppType::Codex {
+            let result = futures::executor::block_on(crate::mode::controller::resync_route_locked(
+                state, &app_type,
+            ));
+            if let Err(error) = result {
+                // A started journal owns recovery; do not undo its inputs.
+                if !crate::mode::operation::has_pending(app_type.as_str()) {
+                    state
+                        .db
+                        .update_provider_sort_indices(app_type.as_str(), &previous)?;
+                }
+                return Err(AppError::Message(error));
             }
         }
-
         Ok(true)
     }
 

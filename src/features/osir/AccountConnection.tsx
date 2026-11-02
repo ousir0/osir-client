@@ -31,8 +31,13 @@ type AccountKey = {
 };
 type KeyPage = { items: AccountKey[]; total: number };
 
-function keyAvailability(key: AccountKey, currentKeyId?: number) {
-  if (key.id === currentKeyId) return "当前连接正在使用";
+function keyAvailability(
+  key: AccountKey,
+  currentKeyId?: number,
+  currentGroupId?: number | null,
+) {
+  if (key.id === currentKeyId && key.group_id === currentGroupId)
+    return "当前连接正在使用";
   const expiry = key.expires_at ? Date.parse(key.expires_at) : null;
   if (expiry !== null && !Number.isFinite(expiry)) return "有效期无法确认";
   if (expiry !== null && expiry <= Date.now()) return "已过期";
@@ -125,7 +130,7 @@ function AccountConnectionForm({
   const keys = useAccountResource<KeyPage>(
     "keys",
     { page, page_size: 20, ...(search ? { search } : {}) },
-    !preview,
+    !preview && active && keyTab === "existing",
   );
   const [keyId, setKeyId] = useState<number>();
   const initialName = replacementProvider?.name || reconnectName || "OSIR API";
@@ -169,6 +174,14 @@ function AccountConnectionForm({
     Number.isSafeInteger(currentKeyId) && currentKeyId > 0
       ? currentKeyId
       : undefined;
+  const previousGroup =
+    replacementProvider?.meta?.osirBinding?.binding?.group_id;
+  const previousGroupId =
+    previousGroup === null
+      ? null
+      : typeof previousGroup === "number" && Number.isSafeInteger(previousGroup)
+        ? previousGroup
+        : undefined;
   const context = useRef({ generation, active: true });
   context.current.generation = generation;
   useEffect(() => {
@@ -209,7 +222,8 @@ function AccountConnectionForm({
       : pageKeys;
   const selected = allKeys.find((key) => key.id === keyId);
   const usable =
-    selected !== undefined && keyAvailability(selected, previousKeyId) === null;
+    selected !== undefined &&
+    keyAvailability(selected, previousKeyId, previousGroupId) === null;
   useEffect(() => {
     if (
       !active ||
@@ -530,7 +544,11 @@ function AccountConnectionForm({
               ref={keyListRef}
             >
               {allKeys.map((key) => {
-                const unavailable = keyAvailability(key, previousKeyId);
+                const unavailable = keyAvailability(
+                  key,
+                  previousKeyId,
+                  previousGroupId,
+                );
                 return (
                   <label
                     key={key.id}

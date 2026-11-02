@@ -487,7 +487,7 @@ pub fn run() {
         }));
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         let startup_page_handled = AtomicBool::new(false);
         builder = builder.on_page_load(move |webview, payload| {
@@ -498,6 +498,7 @@ pub fn run() {
                 && !crate::settings::get_settings().silent_startup
             {
                 let _ = webview.window().show();
+                let _ = webview.window().set_focus();
                 log::info!("主页面加载完成，主窗口已显示");
             }
         });

@@ -2,6 +2,80 @@ use super::*;
 use serde_json::json;
 use std::os::unix::fs::symlink;
 
+#[tokio::test]
+async fn cold_desktop_launch_waits_for_registration_and_retries_refused_activation() {
+    use std::cell::Cell;
+    let polls = Cell::new(0);
+    let activations = Cell::new(0);
+    let result = wait_for_desktop_foreground(
+        "codex",
+        true,
+        false,
+        Duration::from_secs(5),
+        || {
+            polls.set(polls.get() + 1);
+            let ready = activations.get() == 2;
+            std::future::ready(Ok(if polls.get() == 1 {
+                vec![]
+            } else {
+                vec![AppEvidence {
+                    pid: 42,
+                    window: ready,
+                    onscreen: ready,
+                    active: ready,
+                }]
+            }))
+        },
+        |pid| {
+            assert_eq!(pid, 42);
+            activations.set(activations.get() + 1);
+            std::future::ready(if activations.get() == 1 {
+                Err(ACTIVATION_DENIED.into())
+            } else {
+                Ok(())
+            })
+        },
+    )
+    .await
+    .unwrap();
+    assert!(result.foreground);
+    assert!(result.isolated);
+    assert!(!result.already_running);
+    assert_eq!(
+        activations.get(),
+        2,
+        "activation attempts must be throttled"
+    );
+    assert!(polls.get() >= 7);
+}
+
+#[tokio::test]
+async fn desktop_launch_requires_a_foreground_window_and_keeps_terminal_errors() {
+    for (activation, expected) in [
+        (Ok(()), "尚未确认前台窗口"),
+        (Err(ACTIVATION_DENIED.to_string()), ACTIVATION_DENIED),
+        (Err("应用身份已变化".to_string()), "应用身份已变化"),
+    ] {
+        let result = wait_for_desktop_foreground(
+            "codex",
+            false,
+            false,
+            Duration::ZERO,
+            || {
+                std::future::ready(Ok(vec![AppEvidence {
+                    pid: 42,
+                    window: true,
+                    onscreen: false,
+                    active: false,
+                }]))
+            },
+            |_| std::future::ready(activation.clone()),
+        )
+        .await;
+        assert!(result.unwrap_err().contains(expected));
+    }
+}
+
 #[test]
 fn cooperative_activation_yields_before_request_and_propagates_system_rejection() {
     let calls = std::cell::RefCell::new(Vec::new());

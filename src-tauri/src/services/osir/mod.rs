@@ -22,6 +22,8 @@ pub mod models;
 pub mod sync;
 pub mod usage;
 pub mod windows_codex_package;
+#[cfg(windows)]
+pub(crate) mod windows_durable;
 
 pub mod session;
 

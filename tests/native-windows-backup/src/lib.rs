@@ -11,6 +11,8 @@ type Result<T> = std::result::Result<T, BackupError>;
 mod path_safety;
 #[path = "../../../src-tauri/src/services/osir/tool_backup_windows.rs"]
 mod windows;
+#[path = "../../../src-tauri/src/services/osir/windows_durable.rs"]
+mod windows_durable;
 
 #[cfg(test)]
 mod tests {
@@ -33,6 +35,34 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+    #[test]
+    fn credential_journal_write_through_replaces_and_clears_in_unicode_directory() {
+        use std::io::Write;
+        let fixture = Fixture::new();
+        let target = fixture.0.join("凭据恢复.json");
+        let tmp = fixture.0.join("凭据恢复.tmp");
+        for payload in [
+            b"{\"phase\":\"intent\"}".as_slice(),
+            b"{\"phase\":\"committed\"}",
+            b"null",
+        ] {
+            let mut file = fs::File::create(&tmp).unwrap();
+            file.write_all(payload).unwrap();
+            file.sync_all().unwrap();
+            drop(file);
+            windows_durable::commit(&tmp, &target).unwrap();
+            assert_eq!(fs::read(&target).unwrap(), payload);
+            assert!(!tmp.exists());
+        }
+        let other = fixture.0.join("other");
+        fs::create_dir(&other).unwrap();
+        fs::write(&tmp, b"retained").unwrap();
+        assert!(windows_durable::commit(&tmp, &other.join("entry")).is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"null");
+        assert!(windows_durable::commit(&tmp, &other).is_err());
+        assert_eq!(fs::read(&tmp).unwrap(), b"retained");
+        assert!(other.is_dir());
     }
     #[test]
     fn absolute_and_verbatim_paths_inspect_root_then_real_ancestors() {

@@ -6,7 +6,7 @@ use objc2_06::{
     sel,
 };
 use objc2_foundation_03::NSString;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{c_void, CStr};
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -327,10 +327,38 @@ async fn confirm_desktop_launch(
     isolated: bool,
     already_running: bool,
 ) -> Result<OsirToolLaunch, String> {
-    let deadline = Instant::now() + Duration::from_secs(7);
-    let mut activated = HashSet::new();
+    wait_for_desktop_foreground(
+        id,
+        isolated,
+        already_running,
+        Duration::from_secs(15),
+        || desktop_snapshot(app, id, path, profile_pid),
+        |pid| activate_pid(app, id, path, pid),
+    )
+    .await
+}
+
+// Keep the polling policy separate from Cocoa so cold-start timing and system
+// refusals can be exercised without launching or terminating a user's app.
+async fn wait_for_desktop_foreground<S, A, SF, AF>(
+    id: &str,
+    isolated: bool,
+    already_running: bool,
+    timeout: Duration,
+    mut snapshot: S,
+    mut activate: A,
+) -> Result<OsirToolLaunch, String>
+where
+    S: FnMut() -> SF,
+    A: FnMut(i32) -> AF,
+    SF: std::future::Future<Output = Result<Vec<AppEvidence>, String>>,
+    AF: std::future::Future<Output = Result<(), String>>,
+{
+    let deadline = Instant::now() + timeout;
+    let mut activated = HashMap::<i32, Instant>::new();
+    let mut denied = false;
     loop {
-        let applications = desktop_snapshot(app, id, path, profile_pid).await?;
+        let applications = snapshot().await?;
         for application in &applications {
             if application.window && application.onscreen && application.active {
                 return Ok(OsirToolLaunch {
@@ -342,11 +370,26 @@ async fn confirm_desktop_launch(
                     restarted: false,
                 });
             }
-            if activated.insert(application.pid) {
-                activate_pid(app, id, path, application.pid).await?;
+            // A cold Electron process can be registered before it can accept
+            // activation or create a window. Retry that transient refusal at
+            // most once a second within this single, bounded launch request.
+            let now = Instant::now();
+            if activated
+                .get(&application.pid)
+                .is_none_or(|last| now.duration_since(*last) >= Duration::from_secs(1))
+            {
+                activated.insert(application.pid, now);
+                match activate(application.pid).await {
+                    Ok(()) => denied = false,
+                    Err(error) if error == ACTIVATION_DENIED => denied = true,
+                    Err(error) => return Err(error),
+                }
             }
         }
         if Instant::now() >= deadline {
+            if denied {
+                return Err(ACTIVATION_DENIED.into());
+            }
             return Err(format!(
                 "{} 启动请求已发送，但尚未确认前台窗口；请检查应用后重试",
                 desktop_label(id)

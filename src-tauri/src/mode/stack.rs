@@ -694,6 +694,10 @@ pub fn members(
             model_ids,
         });
     }
+    // Stable sort preserves legacy join order until the user orders providers.
+    if app == &AppType::Codex {
+        members.sort_by_key(|member| member.provider.sort_index.unwrap_or(999999));
+    }
     Ok(members)
 }
 
