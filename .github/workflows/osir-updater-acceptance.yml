@@ -2,6 +2,10 @@ name: Published OSIR updater acceptance
 on:
   workflow_dispatch:
     inputs:
+      probe_only:
+        type: boolean
+        default: false
+        required: false
       version:
         required: true
         type: string
@@ -15,6 +19,7 @@ permissions:
   contents: read
 jobs:
   windows-update:
+    if: ${{ !inputs.probe_only }}
     runs-on: windows-2022
     timeout-minutes: 20
     env:
@@ -39,6 +44,7 @@ jobs:
           path: updater-evidence/
           if-no-files-found: error
   macos-update:
+    if: ${{ !inputs.probe_only }}
     runs-on: macos-15-intel
     timeout-minutes: 20
     env:
@@ -57,3 +63,9 @@ jobs:
           name: published-macos-updater-${{ github.run_id }}
           path: updater-evidence/
           if-no-files-found: error
+  macos-ui-probe:
+    if: inputs.probe_only
+    runs-on: macos-15-intel
+    steps:
+      - name: Check existing UI automation permission without changing system controls
+        run: swift -e 'import ApplicationServices; print("AX_TRUSTED=\(AXIsProcessTrusted())")'
