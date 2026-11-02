@@ -34,6 +34,7 @@ with sqlite3.connect(sys.argv[1]) as db:
  assert db.execute('pragma quick_check').fetchone()==('ok',)
  db.execute('create table osir_updater_acceptance(value text not null)')
  db.execute("insert into osir_updater_acceptance values('014-to-015-preserved')")
+ db.execute("insert into providers(id,app_type,name,settings_config,meta,sort_index) values(?,?,?,?,?,?)",('updater-fixture','codex','更新验收供应商','{"model":"fixture-model"}','{}',42))
  db.commit()
 '@ | Set-Content (Join-Path $root 'prepare.py') -Encoding utf8NoBOM
  & python (Join-Path $root 'prepare.py') $db
@@ -60,6 +61,7 @@ import sqlite3,sys
 with sqlite3.connect(sys.argv[1]) as db:
  assert db.execute('pragma quick_check').fetchone()==('ok',)
  assert db.execute('select value from osir_updater_acceptance').fetchall()==[('014-to-015-preserved',)]
+ assert db.execute("select name,settings_config,meta,sort_index,is_current from providers where id='updater-fixture' and app_type='codex'").fetchone()==('更新验收供应商','{"model":"fixture-model"}','{}',42,0)
 '@ | Set-Content (Join-Path $root 'verify.py') -Encoding utf8NoBOM
  & python (Join-Path $root 'verify.py') $db
  if($LASTEXITCODE -ne 0){throw 'Updated data not preserved'}

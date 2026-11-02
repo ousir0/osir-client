@@ -31,6 +31,7 @@ try:
   assert conn.execute('pragma quick_check').fetchone()==('ok',)
   conn.execute('create table osir_updater_acceptance(value text not null)')
   conn.execute("insert into osir_updater_acceptance values('014-to-015-preserved')")
+  conn.execute("insert into providers(id,app_type,name,settings_config,meta,sort_index) values(?,?,?,?,?,?)",('updater-fixture','codex','更新验收供应商','{"model":"fixture-model"}','{}',42))
   conn.commit()
  process=subprocess.Popen([str(binary)],stdout=log,stderr=log)
  subprocess.run([str(helper),str(process.pid),str(app)],check=True,timeout=115)
@@ -47,6 +48,7 @@ try:
  with sqlite3.connect(db) as conn:
   assert conn.execute('pragma quick_check').fetchone()==('ok',)
   assert conn.execute('select value from osir_updater_acceptance').fetchall()==[('014-to-015-preserved',)]
+  assert conn.execute("select name,settings_config,meta,sort_index,is_current from providers where id='updater-fixture' and app_type='codex'").fetchone()==('更新验收供应商','{"model":"fixture-model"}','{}',42,0)
  time.sleep(5)
  probe=root/'window-probe'
  subprocess.run(['swiftc',str(Path(__file__).with_name('osir-macos-window-probe.swift')),'-o',str(probe)],check=True)
