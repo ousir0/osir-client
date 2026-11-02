@@ -21,11 +21,18 @@ subprocess.run(['swiftc',str(Path(__file__).with_name('osir-updater-click.swift'
 log=(out/'app.log').open('w')
 process=subprocess.Popen([str(binary)],stdout=log,stderr=log)
 try:
- for _ in range(60):
+ ready=False
+ for _ in range(90):
   assert process.poll() is None
-  if db.exists():break
+  if db.exists():
+   try:
+    with sqlite3.connect(f'file:{db}?mode=ro',uri=True) as conn:
+     ready=conn.execute("select count(*) from sqlite_master where type='table' and name in ('providers','settings')").fetchone()==(2,)
+    if ready:break
+   except sqlite3.Error:pass
   time.sleep(1)
- assert db.exists()
+ assert ready,'Baseline database did not finish schema initialization'
+ time.sleep(3)
  process.terminate();process.wait(15)
  with sqlite3.connect(db) as conn:
   assert conn.execute('pragma quick_check').fetchone()==('ok',)

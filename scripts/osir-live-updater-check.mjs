@@ -26,9 +26,15 @@ async function connect(){
  throw Error('Shipped application renderer did not become available');
 }
 function call(method,params={}){return new Promise((r,j)=>{const id=++serial;const timer=setTimeout(()=>{pending.delete(id);j(Error('CDP request timed out'));},15000);pending.set(id,row=>{clearTimeout(timer);pending.delete(id);row.error?j(Error(row.error.message)):r(row.result);});socket.send(JSON.stringify({id,method,params}));});}
-async function evaluate(expression){const row=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});assert.ok(!row.exceptionDetails,'Native IPC failed');return row.result?.value;}
+async function evaluate(expression){const row=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});assert.ok(!row.exceptionDetails,'Native IPC failed: '+String(row.exceptionDetails?.exception?.description??row.exceptionDetails?.text??'').slice(0,240));return row.result?.value;}
 try{
  await connect();
+ let ready=false;
+ for(let i=0;i<90;i++){
+  ready=await evaluate(`!!window.__TAURI_INTERNALS__?.invoke && !!document.querySelector('.osir-welcome-login')`);
+  if(ready)break;await delay(1000);
+ }
+ assert.ok(ready,'Baseline renderer initialization did not complete');
  const version=await evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:app|version')`);assert.equal(version,expected);
  const distribution=await evaluate(`window.__TAURI_INTERNALS__.invoke('get_update_distribution')`);assert.equal(distribution.kind,'osir');assert.equal(distribution.updatesEnabled,true);
  if(mode==='update'){
