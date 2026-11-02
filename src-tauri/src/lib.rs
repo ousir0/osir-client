@@ -2561,7 +2561,13 @@ fn relaunch_macos_bundle(env: &tauri::Env) {
         return;
     };
     let mut command = std::process::Command::new("/usr/bin/open");
-    command.arg("-n").arg(bundle);
+    command.arg("-n");
+    // LaunchServices does not inherit the caller's environment. Preserve only
+    // explicit configuration paths; never put credentials in process arguments.
+    for assignment in macos_relaunch_path_environment(std::env::vars_os()) {
+        command.arg("--env").arg(assignment);
+    }
+    command.arg(bundle);
     let args: Vec<_> = env.args_os.iter().skip(1).collect();
     if !args.is_empty() {
         command.arg("--args").args(args);
@@ -2573,12 +2579,64 @@ fn relaunch_macos_bundle(env: &tauri::Env) {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn macos_relaunch_path_environment(
+    environment: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> Vec<std::ffi::OsString> {
+    const PATHS: &[&str] = &[
+        "HOME",
+        "CFFIXED_USER_HOME",
+        "CC_SWITCH_TEST_HOME",
+        "OSIR_TEST_HOME",
+        "OSIR_DEV_HOME",
+        "OSIR_DEV_KEYCHAIN",
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "OPENCODE_CONFIG_DIR",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+    ];
+    environment
+        .into_iter()
+        .filter(|(key, value)| PATHS.iter().any(|name| key == name) && !value.is_empty())
+        .map(|(mut key, value)| {
+            key.push("=");
+            key.push(value);
+            key
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         classify_exit_request, error_for_log, redact_url_for_log, redact_url_for_log_with_secrets,
         redact_url_origin_for_log, runtime_log_level_allows, ExitRequestAction,
     };
+
+    #[test]
+    fn macos_relaunch_preserves_only_explicit_configuration_paths() {
+        use std::ffi::OsString;
+        let environment = [
+            ("CC_SWITCH_TEST_HOME", "/tmp/隔离 home"),
+            ("CODEX_HOME", "/tmp/codex"),
+            ("OSIR_DEV_KEYCHAIN", "/tmp/dev.keychain-db"),
+            ("XDG_DATA_HOME", ""),
+            ("OSIR_TOKEN", "fixture-token"),
+            ("OPENAI_API_KEY", "fixture-key"),
+            ("PATH", "/tmp/untrusted"),
+        ]
+        .map(|(key, value)| (OsString::from(key), OsString::from(value)));
+        assert_eq!(
+            super::macos_relaunch_path_environment(environment),
+            [
+                "CC_SWITCH_TEST_HOME=/tmp/隔离 home",
+                "CODEX_HOME=/tmp/codex",
+                "OSIR_DEV_KEYCHAIN=/tmp/dev.keychain-db",
+            ]
+            .map(OsString::from)
+        );
+    }
 
     #[cfg(unix)]
     #[test]

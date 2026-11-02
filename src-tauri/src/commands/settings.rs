@@ -3,6 +3,31 @@
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
+// IPC callers share a single installation, even if multiple windows invoke it.
+// Dropping the lease also releases it after an error or cancelled future.
+struct UpdateInstallationLease;
+static UPDATE_INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+impl UpdateInstallationLease {
+    fn acquire() -> Result<Self, String> {
+        UPDATE_INSTALLING
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .map(|_| Self)
+            .map_err(|_| "正在更新，请等待完成。".to_string())
+    }
+}
+
+impl Drop for UpdateInstallationLease {
+    fn drop(&mut self) {
+        UPDATE_INSTALLING.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
 #[derive(Clone, serde::Serialize)]
 struct UpdateDownloadProgress {
@@ -276,6 +301,7 @@ pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
 #[tauri::command]
 pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> {
     crate::update_distribution::ensure_update_available(app.config())?;
+    let _installation = UpdateInstallationLease::acquire()?;
     let builder = app.updater_builder();
     // Windows 上 updater 以 `msiexec /passive /promptrestart` 安装 MSI。passive 没有模态框、
     // 未指定重启选项时，安装目录里有文件被占用，Windows Installer 会不经确认直接重启系统
@@ -288,13 +314,17 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
         .build()
         .map_err(|e| format!("初始化更新器失败: {e}"))?;
 
-    let Some(update) = updater
-        .check()
-        .await
-        .map_err(|e| format!("检查更新失败: {e}"))?
+    let Some(mut update) =
+        tokio::time::timeout(std::time::Duration::from_secs(30), updater.check())
+            .await
+            .map_err(|_| "检查更新超时，请稍后重试。".to_string())?
+            .map_err(|e| format!("检查更新失败: {e}"))?
     else {
         return Ok(false);
     };
+    // Large releases may take several minutes on slow connections. Bound the
+    // download separately from the small metadata request, before any cleanup.
+    update.timeout = Some(std::time::Duration::from_secs(20 * 60));
 
     log::info!("开始下载应用更新: {}", update.version);
     let progress_handle = app.clone();
@@ -403,6 +433,15 @@ pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::merge_settings_for_save;
+
+    #[test]
+    fn update_installation_rejects_overlap_and_releases_after_failure() {
+        let lease = super::UpdateInstallationLease::acquire().unwrap();
+        assert!(super::UpdateInstallationLease::acquire().is_err());
+        drop(lease);
+        let retry = super::UpdateInstallationLease::acquire().unwrap();
+        drop(retry);
+    }
     use crate::settings::{
         AppSettings, CodexOfficialHistoryUnifyMigration, CodexProviderTemplateMigration,
         CodexThirdPartyHistoryProviderBucketMigration, LocalMigrations, S3SyncSettings,

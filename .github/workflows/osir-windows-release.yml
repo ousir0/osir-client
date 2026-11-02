@@ -167,6 +167,16 @@ jobs:
           cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib services::osir::windows_codex_package::tests -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'Windows Codex package identity tests failed' }
 
+      - name: Verify provider switching, credential recovery and update ownership
+        run: |
+          $filters = @('mode::controller', 'services::provider', 'services::osir::session', 'commands::osir::recovery::tests', 'update_installation_rejects_overlap')
+          foreach ($filter in $filters) {
+            $result = cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib $filter -- --test-threads=1 | Out-String
+            $code = $LASTEXITCODE
+            Write-Host $result
+            if ($code -ne 0 -or $result -notmatch "test result: ok\. [1-9][0-9]* passed;") { throw "Native regression failed or selected no tests: $filter" }
+          }
+
       - name: Build unsigned NSIS installer and embedded application
         timeout-minutes: 90
         run: node scripts/osir-build-windows.mjs $env:OSIR_CHANNEL

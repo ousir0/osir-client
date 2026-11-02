@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "启动时自动恢复已保存的连接凭据；需要系统授权的连接可手动恢复。修复 Windows Codex 检测与安装，支持按供应商设置模型上下文。新安装默认开启匿名统计，可随时关闭；异常统计不含错误原文、密钥和对话内容。"
+  "notes": "修复 OSIRAPI 分组加载与密钥切换后的模型路由，改善已保存登录凭据恢复、客户端首次打开和 Codex 重启。Codex 聚合支持拖动供应商调整模型顺序。补强 Windows 凭据恢复日志和更新流程，Windows 安装包继续采用小型运行库引导程序。"
 }
