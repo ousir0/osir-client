@@ -53,6 +53,8 @@ with sqlite3.connect(sys.argv[1]) as db:
  if((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedExecutableSha256){throw 'Installed bytes differ'}
  & node "$PSScriptRoot/osir-live-updater-check.mjs" $port verify $out $ExpectedVersion
  if($LASTEXITCODE -ne 0){throw 'Updated renderer failed'}
+ $next.Refresh()
+ if($next.MainWindowHandle -eq 0 -or $next.MainWindowTitle -ne 'OSIR Client'){throw 'Updated application has no visible product window'}
  @'
 import sqlite3,sys
 with sqlite3.connect(sys.argv[1]) as db:
