@@ -48,6 +48,11 @@ try:
   assert conn.execute('pragma quick_check').fetchone()==('ok',)
   assert conn.execute('select value from osir_updater_acceptance').fetchall()==[('014-to-015-preserved',)]
  time.sleep(5)
+ probe=root/'window-probe'
+ subprocess.run(['swiftc',str(Path(__file__).with_name('osir-macos-window-probe.swift')),'-o',str(probe)],check=True)
+ window=json.loads(subprocess.check_output([str(probe),str(new_pid),'com.osir.client'],text=True))
+ assert window['bundlePath']==str(app) and window['windows'],'Updated application has no visible product window'
+ (out/'updated-window.json').write_text(json.dumps(window,indent=2))
  subprocess.run(['screencapture','-x',str(out/'updated.png')],check=True)
  (out/'result.json').write_text(json.dumps(dict(passed=True,fromVersion='0.1.4',toVersion=expected,oldPid=process.pid,newPid=new_pid,installedSha256=executable_sha,realUiClick=True,automaticRestart=True,syntheticDataPreserved=True,accountAuthorizationCovered=False),indent=2))
 finally:
