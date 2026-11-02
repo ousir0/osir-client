@@ -3,6 +3,23 @@ name: OSIR Windows x64 and Intel Mac build (manual artifacts)
 on:
   workflow_dispatch:
     inputs:
+      updater_only:
+        type: boolean
+        default: false
+        required: false
+      probe_only:
+        type: boolean
+        default: false
+        required: false
+      version:
+        type: string
+        required: false
+      windows_executable_sha256:
+        type: string
+        required: false
+      intel_executable_sha256:
+        type: string
+        required: false
       channel:
         description: OSIR channel; artifacts require local finalization before publication
         required: true
@@ -47,7 +64,7 @@ concurrency:
 jobs:
   windows-backup-preflight:
     name: Fast native Windows backup path and ACL gate
-    if: ${{ !inputs.acceptance_only }}
+    if: ${{ !inputs.acceptance_only && !inputs.updater_only && !inputs.probe_only }}
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
@@ -481,3 +498,55 @@ jobs:
           path: src-tauri/target/cargo-timings/
           if-no-files-found: warn
           retention-days: 7
+
+  windows-update:
+    if: ${{ inputs.updater_only && !inputs.probe_only }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      CI: 'true'
+      EXPECTED_VERSION: ${{ inputs.version }}
+      EXPECTED_SHA: ${{ inputs.windows_executable_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Click update in the published 0.1.4 app and verify automatic restart
+        shell: pwsh
+        run: ./scripts/osir-live-updater-windows.ps1 -ExpectedVersion $env:EXPECTED_VERSION -ExpectedExecutableSha256 $env:EXPECTED_SHA
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: published-windows-updater-${{ github.run_id }}
+          path: updater-evidence/
+          if-no-files-found: error
+  macos-update:
+    if: ${{ inputs.updater_only && !inputs.probe_only }}
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    env:
+      CI: 'true'
+      EXPECTED_VERSION: ${{ inputs.version }}
+      EXPECTED_SHA: ${{ inputs.intel_executable_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Click update in the published 0.1.4 app and verify automatic restart
+        run: python3 scripts/osir-live-updater-macos.py "$EXPECTED_VERSION" "$EXPECTED_SHA"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: published-macos-updater-${{ github.run_id }}
+          path: updater-evidence/
+          if-no-files-found: error
+  macos-ui-probe:
+    if: inputs.probe_only
+    runs-on: macos-15-intel
+    steps:
+      - name: Check existing UI automation permission without changing system controls
+        run: swift -e 'import ApplicationServices; print("AX_TRUSTED=\(AXIsProcessTrusted())")'
