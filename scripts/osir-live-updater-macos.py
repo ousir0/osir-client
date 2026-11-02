@@ -10,7 +10,7 @@ assert not db.exists(),'Preexisting app data: refusing to use it'
 feed=json.load(urllib.request.urlopen('https://osirclaw.com/api/v1/osir-client/updater/prod.json'))
 assert feed['version']==expected
 archive=root/'old.tar.gz'
-subprocess.run(['curl','--fail','--max-time','240','--output',str(archive),'https://osirclaw.com/api/v1/osir-client/download/prod-0.1.4/darwin-x86_64/updater'],check=True)
+subprocess.run(['curl','--fail','--max-time','240','--output',str(archive),'https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.4/OSIR-Client-prod-0.1.4-x86_64-apple-darwin.app.tar.gz'],check=True)
 assert hashlib.sha256(archive.read_bytes()).hexdigest()=='3af56b2488dfdc6c22514256236b329a2e62a31c9c75d160b7adb036b39378ce'
 subprocess.run(['tar','-xzf',str(archive),'-C',str(root)],check=True)
 app=root/'OSIR Client.app';binary=app/'Contents/MacOS/osir_client'

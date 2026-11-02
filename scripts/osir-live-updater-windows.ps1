@@ -12,7 +12,7 @@ if(Get-Process osir_client -ErrorAction SilentlyContinue){throw 'Preexisting OSI
 $feed=Invoke-RestMethod 'https://osirclaw.com/api/v1/osir-client/updater/prod.json'
 if($feed.version -ne $ExpectedVersion){throw 'Published update differs from expected release'}
 $baseline=Join-Path $root 'baseline.exe'
-& curl.exe --fail --max-time 240 --output $baseline 'https://osirclaw.com/api/v1/osir-client/download/prod-0.1.4/windows-x86_64/installer'
+& curl.exe --fail --max-time 240 --output $baseline 'https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.4/OSIR-Client-prod-0.1.4-x86_64-pc-windows-msvc-setup.exe'
 if($LASTEXITCODE -ne 0 -or (Get-FileHash $baseline -Algorithm SHA256).Hash.ToLowerInvariant() -ne '636ffcc3f2ca4f4d078cdf64c25fbbe9b23a4fdf87e02da294a7d0627bb5692a'){throw 'Baseline installer verification failed'}
 $p=Start-Process $baseline -ArgumentList ('/S /D='+$install) -Wait -PassThru
 if($p.ExitCode -ne 0){throw 'Baseline installation failed'}
