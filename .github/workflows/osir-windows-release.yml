@@ -3,6 +3,11 @@ name: OSIR Windows x64 and Intel Mac build (manual artifacts)
 on:
   workflow_dispatch:
     inputs:
+      updater_platform:
+        type: choice
+        default: both
+        options: [both, windows, macos]
+        required: false
       updater_only:
         type: boolean
         default: false
@@ -500,7 +505,7 @@ jobs:
           retention-days: 7
 
   windows-update:
-    if: ${{ inputs.updater_only && !inputs.probe_only }}
+    if: ${{ inputs.updater_only && !inputs.probe_only && inputs.updater_platform != 'macos' }}
     runs-on: windows-2022
     timeout-minutes: 20
     env:
@@ -525,7 +530,7 @@ jobs:
           path: updater-evidence/
           if-no-files-found: error
   macos-update:
-    if: ${{ inputs.updater_only && !inputs.probe_only }}
+    if: ${{ inputs.updater_only && !inputs.probe_only && inputs.updater_platform != 'windows' }}
     runs-on: macos-15-intel
     timeout-minutes: 20
     env:

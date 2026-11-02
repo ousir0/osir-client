@@ -2,7 +2,15 @@ import AppKit
 import ApplicationServices
 import Foundation
 let args = CommandLine.arguments
-guard args.count == 3, let pid = Int32(args[1]), let app = NSRunningApplication(processIdentifier:pid), app.bundleIdentifier == "com.osir.client", app.bundleURL?.path == args[2] else { fatalError("Owned app identity mismatch") }
+guard args.count == 3, let pid = Int32(args[1]) else { fatalError("Owned app arguments invalid") }
+let expectedURL = URL(fileURLWithPath:args[2]).resolvingSymlinksInPath().standardizedFileURL
+let registrationDeadline=Date().addingTimeInterval(30)
+var ownedApp:NSRunningApplication?
+while Date()<registrationDeadline {
+ if let candidate=NSRunningApplication(processIdentifier:pid), candidate.bundleIdentifier == "com.osir.client", candidate.bundleURL?.resolvingSymlinksInPath().standardizedFileURL == expectedURL { ownedApp=candidate;break }
+ Thread.sleep(forTimeInterval:0.25)
+}
+guard let app=ownedApp else { fatalError("Owned app identity was not registered within 30 seconds") }
 guard AXIsProcessTrusted() else { fatalError("Accessibility permission unavailable; no permission settings changed") }
 app.activate(options:[.activateIgnoringOtherApps,.activateAllWindows])
 let root=AXUIElementCreateApplication(pid)
