@@ -311,6 +311,15 @@ jobs:
           $expected = 'd442a3d7d5c229f45e5e11995711ac2619c8dbc89e3fa2bc185287dc8db8e76e'
           & curl.exe --fail --location --max-time 480 --retry 2 --output $package $url
           if ($LASTEXITCODE -ne 0) { throw 'Official Codex download failed' }
+          $observedHash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant()
+          $observedSignature = Get-AuthenticodeSignature -LiteralPath $package
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($package)
+          try {
+            $reader = [IO.StreamReader]::new($archive.GetEntry('AppxManifest.xml').Open())
+            try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+          } finally { $archive.Dispose() }
+          Write-Host ([ordered]@{bytes=(Get-Item $package).Length;sha256=$observedHash;signature=[string]$observedSignature.Status;subject=[string]$observedSignature.SignerCertificate.Subject;issuer=[string]$observedSignature.SignerCertificate.Issuer;name=[string]$manifest.Package.Identity.Name;version=[string]$manifest.Package.Identity.Version} | ConvertTo-Json -Compress)
           if ((Get-Item $package).Length -ne 1004631986 -or (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Codex package size/hash mismatch' }
           $sig = Get-AuthenticodeSignature -LiteralPath $package
           if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -ne 'CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B' -or $sig.SignerCertificate.Issuer -notmatch 'Microsoft') { throw 'Official Codex signature rejected' }
