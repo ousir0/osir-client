@@ -60,6 +60,8 @@ with sqlite3.connect(sys.argv[1]) as db:
 import sqlite3,sys
 with sqlite3.connect(sys.argv[1]) as db:
  assert db.execute('pragma quick_check').fetchone()==('ok',)
+ assert db.execute('pragma user_version').fetchone()==(24,)
+ assert db.execute("select count(*) from sqlite_master where type='table' and name='osir_model_credentials'").fetchone()==(1,)
  assert db.execute('select value from osir_updater_acceptance').fetchall()==[('015-to-016-preserved',)]
  assert db.execute("select name,settings_config,meta,sort_index,is_current from providers where id='updater-fixture' and app_type='codex'").fetchone()==('更新验收供应商','{"model":"fixture-model"}','{}',42,0)
 '@ | Set-Content (Join-Path $root 'verify.py') -Encoding utf8NoBOM

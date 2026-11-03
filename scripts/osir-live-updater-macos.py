@@ -54,6 +54,8 @@ try:
  subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True)
  with sqlite3.connect(db) as conn:
   assert conn.execute('pragma quick_check').fetchone()==('ok',)
+  assert conn.execute('pragma user_version').fetchone()==(24,)
+  assert conn.execute("select count(*) from sqlite_master where type='table' and name='osir_model_credentials'").fetchone()==(1,)
   assert conn.execute('select value from osir_updater_acceptance').fetchall()==[('015-to-016-preserved',)]
   assert conn.execute("select name,settings_config,meta,sort_index,is_current from providers where id='updater-fixture' and app_type='codex'").fetchone()==('更新验收供应商','{"model":"fixture-model"}','{}',42,0)
  time.sleep(5)
