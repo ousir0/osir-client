@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use super::{
     auth::AuthConfig,
     credentials::CredentialBackend,
-    key_vault::{KeyTool, KeyVault, GATEWAY_ORIGIN},
+    key_vault::{KeyTool, KeyVault, LocalCredentialBackend, GATEWAY_ORIGIN},
 };
 pub use crate::provider::ManagedBinding;
 use crate::{
@@ -16,23 +16,28 @@ use crate::{
     provider::{AuthBindingSource, Provider},
 };
 
-static IDENTITY: OnceLock<String> = OnceLock::new();
+static STORAGE: OnceLock<(String, std::sync::Arc<crate::database::Database>)> = OnceLock::new();
 fn invalid() -> AppError {
     AppError::Config("OSIR managed credential configuration is invalid or unavailable".into())
 }
 
 /// Call from native setup with app.config().identifier, never from IPC input.
 /// Does not depend on account login and must not be reset on logout.
-pub fn initialize(identity: &str) -> Result<(), AppError> {
-    KeyVault::new(&trusted_account_origin()?, identity).map_err(|_| invalid())?;
-    if let Some(current) = IDENTITY.get() {
-        return if current == identity {
-            Ok(())
-        } else {
-            Err(invalid())
-        };
+pub fn initialize(
+    identity: &str,
+    db: std::sync::Arc<crate::database::Database>,
+) -> Result<(), AppError> {
+    KeyVault::with_backend(
+        &trusted_account_origin()?,
+        identity,
+        LocalCredentialBackend::new(db.clone()),
+    )
+    .map_err(|_| invalid())?;
+    let current = STORAGE.get_or_init(|| (identity.to_owned(), db.clone()));
+    if current.0 != identity || !std::sync::Arc::ptr_eq(&current.1, &db) {
+        return Err(invalid());
     }
-    IDENTITY.set(identity.to_owned()).map_err(|_| invalid())
+    Ok(())
 }
 pub fn trusted_account_origin() -> Result<String, AppError> {
     Ok(AuthConfig::default()
@@ -40,10 +45,12 @@ pub fn trusted_account_origin() -> Result<String, AppError> {
         .map_err(|_| invalid())?
         .origin())
 }
-pub fn vault() -> Result<KeyVault, AppError> {
-    KeyVault::new(
+pub fn vault() -> Result<KeyVault<LocalCredentialBackend>, AppError> {
+    let (identity, db) = STORAGE.get().ok_or_else(invalid)?;
+    KeyVault::with_backend(
         &trusted_account_origin()?,
-        IDENTITY.get().ok_or_else(invalid)?,
+        identity,
+        LocalCredentialBackend::new(db.clone()),
     )
     .map_err(|_| invalid())
 }

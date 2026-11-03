@@ -5,18 +5,21 @@
 //! Persist only KeyReference in the provider DB, after store succeeds. Each
 //! store creates an immutable random reference: commit the DB replacement before
 //! deleting its previous reference; remove the new reference if the DB write fails.
-//! The OS keychain is the integrity boundary; this module detects malformed or
-//! mismatched records, not an attacker able to replace a valid keychain secret.
+//! Runtime model keys persist in the provider SQLite database. The system
+//! keychain is a legacy migration source. Local storage has the same trust
+//! boundary as CC Switch provider settings; validate every binding before use.
 use super::credentials::{CredentialBackend, NativeKeychain};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, OnceLock};
 use url::Url;
 use uuid::Uuid;
 
+pub use super::local_key_store::LocalCredentialBackend;
+
 pub const GATEWAY_ORIGIN: &str = "https://api.osirclaw.com";
 const VERSION: u8 = 1;
 const MAX_SECRET: usize = 16384;
-const MAX_RECORD: usize = 32768;
+pub(super) const MAX_RECORD: usize = 32768;
 const MAX_RECOVERED_GRANTS: usize = 128;
 
 // Process-local only, shared across vault handles. Populated exclusively by a
@@ -68,6 +71,10 @@ pub struct KeyReference {
     id: String,
 }
 impl KeyReference {
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
     fn validate(&self) -> Result<(), KeyVaultError> {
         let id = Uuid::parse_str(&self.id).map_err(|_| KeyVaultError::InvalidFormat)?;
         if self.version != VERSION || id.get_version_num() != 4 || id.to_string() != self.id {
@@ -200,14 +207,6 @@ impl<B: CredentialBackend> KeyVault<B> {
         reference.validate()?;
         self.validate_binding(binding)?;
         validate_secret(secret.expose())?;
-        if self
-            .backend
-            .read(&self.service, &reference.id)
-            .map_err(|_| KeyVaultError::Storage)?
-            .is_some()
-        {
-            return Err(KeyVaultError::InvalidFormat);
-        }
         let wire = StoredRecord {
             version: VERSION,
             reference: reference.clone(),
@@ -219,7 +218,7 @@ impl<B: CredentialBackend> KeyVault<B> {
             return Err(KeyVaultError::InvalidFormat);
         }
         self.backend
-            .write_interactive(&self.service, &reference.id, &bytes)
+            .create_model_key(&self.service, &reference.id, &bytes)
             .map_err(|_| KeyVaultError::Storage)?;
         Ok(KeyMetadata {
             reference,
@@ -256,7 +255,9 @@ impl<B: CredentialBackend> KeyVault<B> {
         let Some(record) = self.read_record_inner(reference, expected, true)? else {
             return Ok(None);
         };
-        self.remember(reference, expected, &record.secret)?;
+        if self.backend.cache_model_key_reads() {
+            self.remember(reference, expected, &record.secret)?;
+        }
         NativeKeySecret::new(record.secret).map(Some)
     }
 
@@ -384,6 +385,9 @@ impl<B: CredentialBackend> KeyVault<B> {
             return Err(KeyVaultError::BindingMismatch);
         }
         validate_secret(&record.secret)?;
+        self.backend
+            .commit_model_key_read(&self.service, &reference.id, &bytes)
+            .map_err(|_| KeyVaultError::Storage)?;
         Ok(Some(record))
     }
     fn validate_binding(&self, binding: &KeyBinding) -> Result<(), KeyVaultError> {

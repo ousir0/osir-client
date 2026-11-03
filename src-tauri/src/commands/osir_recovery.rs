@@ -86,9 +86,10 @@ pub(crate) fn recover_database<B: CredentialBackend>(
     db: &crate::database::Database,
     vault: &KeyVault<B>,
 ) -> Result<(), String> {
-    // Keep the DB lock through deletion; a concurrent commit cannot introduce
-    // a reference after the absence check and before vault cleanup.
-    let conn = db.conn.lock().map_err(|_| "恢复数据库不可用")?;
+    // Never retain Database.conn across vault IO: local model credentials now
+    // share this connection. The SQLite backend re-checks live references
+    // under its own deletion lock before writing a tombstone, so a concurrent
+    // restore cannot turn an active grant into orphan cleanup.
     if let Some(entry) = journal.read_entry()? {
         let tool = match entry.binding.tool {
             crate::services::osir::key_vault::KeyTool::Codex => "codex",
@@ -101,7 +102,10 @@ pub(crate) fn recover_database<B: CredentialBackend>(
             return Err("工具配置恢复尚未完成，已保留新旧凭据".into());
         }
     }
-    journal.recover(vault, |_, reference| referenced(&conn, reference))
+    journal.recover(vault, |_, reference| {
+        let conn = db.conn.lock().map_err(|_| "恢复数据库不可用")?;
+        referenced(&conn, reference)
+    })
 }
 impl Journal {
     pub(crate) fn new(directory: &Path) -> Self {
@@ -321,7 +325,7 @@ mod tests {
     use super::*;
     use crate::services::osir::{
         credentials::CredentialError,
-        key_vault::{KeyTool, NativeKeySecret, GATEWAY_ORIGIN},
+        key_vault::{KeyTool, LocalCredentialBackend, NativeKeySecret, GATEWAY_ORIGIN},
     };
     use std::collections::HashMap;
     use std::sync::{
@@ -395,6 +399,45 @@ mod tests {
             .unwrap();
         journal.record(&metadata, Phase::Stored).unwrap();
         (dir, journal, vault, metadata, memory)
+    }
+
+    #[test]
+    fn database_recovery_cleans_local_vault_without_relocking_the_database() {
+        let db = crate::database::Database::memory().unwrap();
+        let db = std::sync::Arc::new(db);
+        let vault = KeyVault::with_backend(
+            "https://osirclaw.com",
+            "com.osir.recovery.local-fixture",
+            LocalCredentialBackend::with_legacy(db.clone(), Memory::default()),
+        )
+        .unwrap();
+        let binding = KeyBinding {
+            account_origin: "https://osirclaw.com".into(),
+            account_id: "fixture-account".into(),
+            key_id: 3,
+            group_id: Some(8),
+            tool: KeyTool::Codex,
+            provider_id: "fixture-provider".into(),
+            gateway_origin: GATEWAY_ORIGIN.into(),
+        };
+        let metadata = vault
+            .store(
+                &binding,
+                &NativeKeySecret::new("fixture-local-recovery-secret".into()).unwrap(),
+            )
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let journal = Journal::new(directory.path());
+        journal.record(&metadata, Phase::Stored).unwrap();
+
+        let _operation = lock().unwrap();
+        recover_database(&journal, &db, &vault).unwrap();
+
+        assert!(journal.read_entry().unwrap().is_none());
+        assert!(vault
+            .load(&metadata.reference, &metadata.binding)
+            .unwrap()
+            .is_none());
     }
     #[test]
     fn cleared_marker_allows_next_operation_without_treating_it_as_pending() {

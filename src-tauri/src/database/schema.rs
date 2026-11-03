@@ -45,6 +45,8 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        Self::create_osir_model_credentials_table(conn)?;
+
         // 2. Provider Endpoints 表
         conn.execute(
             "CREATE TABLE IF NOT EXISTS provider_endpoints (
@@ -441,6 +443,22 @@ impl Database {
         Ok(())
     }
 
+    fn create_osir_model_credentials_table(conn: &Connection) -> Result<(), AppError> {
+        // Same local DB lifecycle as provider settings; NULL records prevent
+        // deleted grants from returning through legacy keychain migration.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS osir_model_credentials (
+                service TEXT NOT NULL,
+                account TEXT NOT NULL,
+                payload BLOB,
+                PRIMARY KEY (service, account)
+            )",
+            [],
+        )
+        .map(|_| ())
+        .map_err(|e| AppError::Database(e.to_string()))
+    }
+
     /// 应用 Schema 迁移
     pub(crate) fn apply_schema_migrations(&self) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
@@ -619,6 +637,10 @@ impl Database {
                             )?;
                         }
                         Self::set_user_version(conn, 23)?;
+                    }
+                    23 => {
+                        Self::create_osir_model_credentials_table(conn)?;
+                        Self::set_user_version(conn, 24)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -3894,6 +3916,27 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrate_v23_to_v24_creates_local_osir_key_store() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        Database::create_tables_on_conn(&conn)?;
+        conn.execute_batch("DROP TABLE osir_model_credentials;")?;
+        Database::set_user_version(&conn, 23)?;
+
+        Database::apply_schema_migrations_on_conn(&conn)?;
+
+        assert_eq!(Database::get_user_version(&conn)?, 24);
+        assert!(Database::table_exists(&conn, "osir_model_credentials")?);
+        for column in ["service", "account", "payload"] {
+            assert!(Database::has_column(
+                &conn,
+                "osir_model_credentials",
+                column
+            )?);
+        }
+        Ok(())
+    }
 
     #[test]
     fn migrate_v12_to_v13_adds_input_token_semantics_columns() -> Result<(), AppError> {

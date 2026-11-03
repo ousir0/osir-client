@@ -94,6 +94,36 @@ pub trait CredentialBackend: Send + Sync {
         self.read(service, account)
     }
     fn remove(&self, service: &str, account: &str) -> Result<(), CredentialError>;
+
+    /// Immutable model grants; OSIR's local backend overrides this with one
+    /// add-only SQLite INSERT. Account token rotation does not use this method.
+    fn create_model_key(
+        &self,
+        service: &str,
+        account: &str,
+        bytes: &[u8],
+    ) -> Result<(), CredentialError> {
+        if self.read(service, account)?.is_some() {
+            return Err(CredentialError::Storage);
+        }
+        self.write_interactive(service, account, bytes)
+    }
+
+    /// Called only after KeyVault validates the complete record and expected
+    /// binding. A failed durable migration must not publish a usable grant.
+    fn commit_model_key_read(
+        &self,
+        _service: &str,
+        _account: &str,
+        _bytes: &[u8],
+    ) -> Result<(), CredentialError> {
+        Ok(())
+    }
+
+    /// Durable local grants must observe DB restore/deletion on every read.
+    fn cache_model_key_reads(&self) -> bool {
+        true
+    }
 }
 pub struct NativeKeychain;
 

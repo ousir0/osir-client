@@ -775,6 +775,8 @@ pub fn run() {
 
             tauri::async_runtime::block_on(distribution::configure_proxy(&db))?;
             let app_state = AppState::new(db);
+            services::osir::managed::initialize(&app.config().identifier, app_state.db.clone())
+                .map_err(std::io::Error::other)?;
 
             // 设置 AppHandle 用于代理故障转移时的 UI 更新
             app_state.proxy_service.set_app_handle(app.handle().clone());
@@ -1321,8 +1323,6 @@ pub fn run() {
             );
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             let osir_account_directory = app.path().app_local_data_dir()?;
-            services::osir::managed::initialize(&app.config().identifier)
-                .map_err(std::io::Error::other)?;
             let osir_account_state = commands::OsirAccountState::new_persistent(
                 &app.config().identifier, &osir_account_directory,
             ).map_err(std::io::Error::other)?;

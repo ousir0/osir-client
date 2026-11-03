@@ -17,6 +17,7 @@ mod history;
 pub mod history_inspect;
 pub mod history_repair;
 pub mod key_vault;
+mod local_key_store;
 pub mod managed;
 pub mod models;
 pub mod sync;

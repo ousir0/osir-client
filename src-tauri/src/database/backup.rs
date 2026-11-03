@@ -85,6 +85,7 @@ fn import_authorizer(context: rusqlite::hooks::AuthContext<'_>) -> rusqlite::hoo
 
 /// Tables whose data rows are skipped when exporting for WebDAV sync.
 const SYNC_SKIP_TABLES: &[&str] = &[
+    "osir_model_credentials",
     "proxy_request_logs",
     "stream_check_logs",
     "provider_health",
@@ -97,6 +98,7 @@ const SYNC_SKIP_TABLES: &[&str] = &[
 /// Tables whose local data is preserved from the live database during WebDAV import.
 /// Excludes ephemeral tables like provider_health that can safely rebuild at runtime.
 const SYNC_PRESERVE_TABLES: &[&str] = &[
+    "osir_model_credentials",
     "proxy_request_logs",
     "stream_check_logs",
     "proxy_live_backup",
@@ -2227,6 +2229,45 @@ mod tests {
             cursor,
             ("/local/sessions/manual-backup.jsonl".into(), 11, 22, 33,)
         );
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn full_backup_restores_local_osir_keys_but_sync_never_exports_them() -> Result<(), AppError> {
+        let _test_home = TestHomeGuard::new();
+        let source = Database::memory()?;
+        source.conn.lock().unwrap().execute(
+            "INSERT INTO osir_model_credentials (service, account, payload)
+             VALUES ('fixture.service', 'fixture-account', X'73796E7468657469632D736563726574')",
+            [],
+        )?;
+
+        let full = source.export_sql_string()?;
+        let restored = Database::memory()?;
+        restored.import_sql_string(&full)?;
+        let restored_payload: Vec<u8> = restored.conn.lock().unwrap().query_row(
+            "SELECT payload FROM osir_model_credentials WHERE account = 'fixture-account'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(restored_payload, b"synthetic-secret");
+
+        let sync = source.export_sql_string_for_sync()?;
+        assert!(!sync.contains("synthetic-secret"));
+        let local = Database::memory()?;
+        local.conn.lock().unwrap().execute(
+            "INSERT INTO osir_model_credentials (service, account, payload)
+             VALUES ('fixture.service', 'fixture-account', X'73796E7468657469632D736563726574')",
+            [],
+        )?;
+        local.import_sql_string_for_sync(&sync)?;
+        let preserved: Vec<u8> = local.conn.lock().unwrap().query_row(
+            "SELECT payload FROM osir_model_credentials WHERE account = 'fixture-account'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(preserved, b"synthetic-secret");
         Ok(())
     }
 
