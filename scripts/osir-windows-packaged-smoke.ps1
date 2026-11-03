@@ -468,7 +468,7 @@ try {
 
     $stage = 'crossVersionUpgrade'
     $baselineInstaller = $env:OSIR_UPGRADE_BASELINE
-    Assert-Smoke ($manifest.version -eq '0.1.5') 'This acceptance requires target 0.1.5.'
+    Assert-Smoke ($manifest.version -eq '0.1.6') 'This acceptance requires target 0.1.6.'
     Assert-Smoke ((Get-Hash $baselineInstaller) -eq 'b409637fd7a05d1835c7190d1c7224193af2f8fcc48763fbfe1dcae2cd82b1c5') 'Published 0.1.3 installer differs from the pinned baseline.'
     Invoke-Installer $baselineInstaller ("/S /D=" + $installDir)
     Assert-Smoke ((Get-Hash $mainExe) -eq 'e2846166db5fad1a6a9a8e6265f8ab6d644b9d23eb62b8a194a1b627ca15a42d') 'Installed 0.1.3 executable differs from the published baseline.'
@@ -595,7 +595,7 @@ print('Published baseline database preserved')
     & python $upgradeFixture verify (Join-Path $isolatedToolHome '.osir_client/osir_client.db')
     Assert-Smoke ($LASTEXITCODE -eq 0) 'Cross-version installer upgrade lost the synthetic baseline row.'
     $report.stages.crossVersionUpgrade = [ordered]@{
-        passed = $true; fromVersion = '0.1.3'; toVersion = '0.1.5'
+        passed = $true; fromVersion = '0.1.3'; toVersion = '0.1.6'
         kind = 'published-installer-to-new-installer-UPDATE-isolated-home'
         baselineInstallerSha256 = 'b409637fd7a05d1835c7190d1c7224193af2f8fcc48763fbfe1dcae2cd82b1c5'
         baselineWindowObserved = $true; newRendererAndNativeIpcPassed = $true
