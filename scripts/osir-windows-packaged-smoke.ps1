@@ -698,7 +698,7 @@ print("Synthetic migration fixture verified")
     $diagnostic = Invoke-UserDiagnostics 'installed' (Get-Hash $mainExe)
     Assert-Smoke ($diagnostic.powershell -like '5.1.*') 'Diagnostics did not run under Windows PowerShell 5.1.'
     Assert-Smoke ($diagnostic.executable.isExpectedBuild -eq $true -and $diagnostic.startupTest.aliveAfter12Seconds -eq $true -and $diagnostic.startupTest.windowObserved -eq $true) 'Diagnostics did not observe the installed build opening.'
-    Assert-Smoke ($diagnostic.codexQuerySucceeded -eq $true -and @($diagnostic.codexPackages | Where-Object { $_.Version -eq '26.1027.3384.0' }).Count -eq 1) 'Diagnostics did not record the real installed Codex.'
+    Assert-Smoke ($diagnostic.codexQuerySucceeded -eq $true -and @($diagnostic.codexPackages | Where-Object { $_.Version -eq '26.1027.6604.0' }).Count -eq 1) 'Diagnostics did not record the real installed Codex.'
     $detectedConfig = @($diagnostic.configurationDirectories | Where-Object { $_.path -eq $currentConfig })
     Assert-Smoke ($detectedConfig.Count -eq 1 -and $detectedConfig[0].database.sqliteHeader -eq $true) 'Diagnostics did not read synthetic database metadata.'
     $report.stages.userDiagnostics = [ordered]@{
