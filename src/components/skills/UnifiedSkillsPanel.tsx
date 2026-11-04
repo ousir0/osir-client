@@ -92,7 +92,13 @@ import { describeRepoFailures } from "./repoFailures";
 import type { ZipSkippedSkill } from "@/lib/api/skills";
 
 const BACKUP_DIR = "~/.cc-switch/skill-backups";
-const OSIR_SKILLS_APP_IDS: AppId[] = ["codex", "claude", "opencode", "gemini"];
+const OSIR_SKILLS_APP_IDS: AppId[] = [
+  "codex",
+  "claude",
+  "opencode",
+  "gemini",
+  "dsh",
+];
 
 type SkillsView = "installed" | "discover";
 type StatusFilter = "all" | "updates" | "none" | `app:${AppId}`;

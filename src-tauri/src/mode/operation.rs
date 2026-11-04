@@ -391,6 +391,19 @@ pub fn recover_all(
     };
     apps.into_iter()
         .filter_map(|app| {
+            let _native = if app == "dsh" {
+                let paths: Vec<PathBuf> = match state::pending(store, &app) {
+                    Ok(Some(p)) => p.files.into_iter().map(|f| f.path).collect(),
+                    Ok(None) => return None,
+                    Err(e) => return Some((app, Err(e))),
+                };
+                match crate::dsh_config::lock_paths(&paths) {
+                    Ok(locks) => Some(locks),
+                    Err(e) => return Some((app, Err(e))),
+                }
+            } else {
+                None
+            };
             let guard = crate::live::engine::lock_app(&app);
             let commit = |target: &PendingTarget| commit_target(&app, target);
             match recover(store, &guard, &commit) {
@@ -414,6 +427,32 @@ pub fn commit_target(
     app: &str,
     target: &PendingTarget,
 ) -> Result<(), AppError> {
+    if app == "dsh" {
+        if let Some(saved) = target.extra.get("dshSave") {
+            let row: crate::provider::Provider = serde_json::from_value(saved.clone())
+                .map_err(|_| AppError::Config("DeepSeek Harness 恢复记录无效".into()))?;
+            if row.settings_config.pointer("/options/apiKey").is_some() {
+                return Err(AppError::Config(
+                    "DeepSeek Harness 恢复记录含有无效密钥字段".into(),
+                ));
+            }
+            db.save_provider("dsh", &row)?;
+        }
+        if let Some(removal) = target.extra.get("dshRemove") {
+            let id = removal
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| AppError::Config("DeepSeek Harness 恢复记录无效".into()))?;
+            if removal.get("delete").and_then(serde_json::Value::as_bool) == Some(true) {
+                db.delete_provider(app, id)?;
+            } else if let Some(mut row) = db.get_provider_by_id(id, app)? {
+                row.meta
+                    .get_or_insert_with(Default::default)
+                    .live_config_managed = Some(false);
+                db.save_provider(app, &row)?;
+            }
+        }
+    }
     if let Some(id) = target.pointer.as_deref() {
         let app_type: crate::app_config::AppType = app.parse()?;
         crate::settings::set_current_provider(&app_type, Some(id))?;

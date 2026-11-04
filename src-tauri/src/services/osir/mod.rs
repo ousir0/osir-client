@@ -40,3 +40,5 @@ pub(crate) mod image_binding;
 pub mod legacy_connect;
 
 pub mod legacy_snapshot;
+
+pub(crate) mod dsh;

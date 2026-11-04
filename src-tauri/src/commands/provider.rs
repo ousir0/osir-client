@@ -44,7 +44,10 @@ fn unchanged_binding<T: PartialEq>(
 }
 
 fn ensure_live_read_safe(providers: &IndexMap<String, Provider>) -> Result<(), String> {
-    if providers.values().any(|p| osir_binding(p).is_some()) {
+    if providers
+        .values()
+        .any(|p| osir_binding(p).is_some() || p.settings_config.get("_osirDshKey").is_some())
+    {
         // A raw live document carries no reliable per-field ownership. In particular,
         // additive tools can contain several providers and externally edited entries.
         return Err(MANAGED_UNAVAILABLE.into());
@@ -58,6 +61,15 @@ fn ipc_provider(app: &AppType, mut provider: Provider) -> Result<Provider, Strin
         provider.settings_config =
             managed::sanitize_settings(app, &provider, &provider.settings_config)
                 .map_err(|_| MANAGED_UNAVAILABLE.to_string())?;
+    }
+    if app == &AppType::Dsh {
+        if let Some(options) = provider
+            .settings_config
+            .get_mut("options")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            options.remove("apiKey");
+        }
     }
     // Never resolve/materialize credentials for an IPC response.
     Ok(provider)
@@ -1012,6 +1024,9 @@ pub fn read_live_provider_settings(
     app: String,
 ) -> Result<serde_json::Value, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
+    if app_type == AppType::Dsh {
+        return Err(MANAGED_UNAVAILABLE.into());
+    }
     let providers = state
         .db
         .get_all_providers(app_type.as_str())
@@ -1505,6 +1520,21 @@ mod native_query_credentials_tests {
 mod osir_command_guard_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn dsh_ipc_provider_strips_manual_and_legacy_plaintext_keys() {
+        let provider = Provider::with_id(
+            "fixture".into(),
+            "Fixture".into(),
+            json!({"options":{"apiKey":"synthetic-sensitive-value","baseURL":"http://127.0.0.1:9/v1"},"_osirDshKey":"opaque-reference"}),
+            None,
+        );
+        let safe = ipc_provider(&AppType::Dsh, provider).unwrap();
+        assert!(!serde_json::to_string(&safe)
+            .unwrap()
+            .contains("synthetic-sensitive-value"));
+        assert_eq!(safe.settings_config["_osirDshKey"], "opaque-reference");
+    }
 
     #[test]
     fn binding_authority_rejects_forge_remove_replace_and_copy() {

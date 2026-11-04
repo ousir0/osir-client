@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type BackupTool = "codex" | "claude" | "opencode" | "gemini";
+export type BackupTool = "codex" | "claude" | "opencode" | "gemini" | "dsh";
 export type ToolBackupFile = {
   path: string;
   hash: string | null;

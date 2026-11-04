@@ -26,6 +26,7 @@ fn connection_tool(tool: &str) -> Result<crate::app_config::AppType, String> {
         "claude-desktop" => Ok(AppType::ClaudeDesktop),
         "gemini" => Ok(AppType::Gemini),
         "opencode" => Ok(AppType::OpenCode),
+        "dsh" => Ok(AppType::Dsh),
         _ => Err("此工具不支持账户连接".into()),
     }
 }
@@ -623,6 +624,7 @@ pub async fn osir_provider_models(
         "claude" => crate::app_config::AppType::Claude,
         "claude-desktop" => crate::app_config::AppType::ClaudeDesktop,
         "opencode" => crate::app_config::AppType::OpenCode,
+        "dsh" => crate::app_config::AppType::Dsh,
         "gemini" => crate::app_config::AppType::Gemini,
         _ => return Err("不支持此工具".into()),
     };
@@ -722,7 +724,11 @@ pub async fn osir_connect_key(
         return Err(STALE.into());
     }
     check_connected(&state.auth, request.generation)?;
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = if app_type == crate::app_config::AppType::Dsh {
+        format!("osir-{}", uuid::Uuid::new_v4().simple())
+    } else {
+        uuid::Uuid::new_v4().to_string()
+    };
     let binding = KeyBinding {
         account_origin: state.auth.account_origin(),
         account_id,
@@ -735,6 +741,7 @@ pub async fn osir_connect_key(
             crate::app_config::AppType::Claude => KeyTool::ClaudeCode,
             crate::app_config::AppType::ClaudeDesktop => KeyTool::ClaudeDesktop,
             crate::app_config::AppType::OpenCode => KeyTool::OpenCode,
+            crate::app_config::AppType::Dsh => KeyTool::DeepseekHarness,
             crate::app_config::AppType::Gemini => KeyTool::GeminiCli,
             _ => return Err("不支持此工具".into()),
         },
@@ -889,6 +896,7 @@ pub async fn osir_replace_connection_key(
             crate::app_config::AppType::ClaudeDesktop => KeyTool::ClaudeDesktop,
             crate::app_config::AppType::Gemini => KeyTool::GeminiCli,
             crate::app_config::AppType::OpenCode => KeyTool::OpenCode,
+            crate::app_config::AppType::Dsh => KeyTool::DeepseekHarness,
             _ => return Err("此工具不支持账户换钥".into()),
         },
     };

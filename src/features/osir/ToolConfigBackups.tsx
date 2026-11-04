@@ -20,6 +20,7 @@ import {
 import "./tool-config-backups.css";
 
 const tools: Record<BackupTool, string> = {
+  dsh: "DeepSeek Harness",
   codex: "Codex",
   claude: "Claude Code",
   opencode: "OpenCode",
@@ -256,7 +257,9 @@ function ToolBackupPanel({
         </Button>
       </div>
       <p className="osir-tool-backups-note">
-        仅恢复列出的工具配置文件，不包含会话、项目或登录凭据。已保存的供应商和当前选择不会改变，恢复后请在工具页重新应用连接。备份可能包含密钥，请妥善保管；恢复前请关闭相关工具。
+        {tool === "dsh"
+          ? "备份供应商配置和默认模型，不包含 DeepSeek 登录凭据、会话或项目。恢复后请重新核对默认模型；恢复前请关闭 DeepSeek Harness。"
+          : "仅恢复列出的工具配置文件，不包含会话、项目或登录凭据。已保存的供应商和当前选择不会改变，恢复后请在工具页重新应用连接。备份可能包含密钥，请妥善保管；恢复前请关闭相关工具。"}
       </p>
       {busy && <p role="status">正在处理…</p>}
       {reading && <p role="status">正在读取快照…</p>}

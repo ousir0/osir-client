@@ -259,7 +259,9 @@ function AccountConnectionForm({
             result.models
               .filter(
                 (entry) =>
-                  (tool !== "codex" && tool !== "claude-desktop") ||
+                  (tool !== "codex" &&
+                    tool !== "claude-desktop" &&
+                    tool !== "dsh") ||
                   isCodexConversationModel(entry.id, entry),
               )
               .map((entry) => entry.id)

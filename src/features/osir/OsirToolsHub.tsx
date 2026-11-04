@@ -434,6 +434,16 @@ export function OsirToolsHub({
                             </details>
                           )}
                         </div>
+                      ) : item.id === "dsh" && info?.kind === "desktop" ? (
+                        <div className="osir-workbuddy-details">
+                          <p>
+                            桌面版本请在 DeepSeek Harness
+                            中检查更新。命令行版本独立安装与更新。
+                          </p>
+                          {info.path && (
+                            <p className="osir-tools-path">{info.path}</p>
+                          )}
+                        </div>
                       ) : item.id === "claude-desktop" ? (
                         <div className="osir-workbuddy-details">
                           <p>

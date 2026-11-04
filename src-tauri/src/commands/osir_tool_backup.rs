@@ -23,6 +23,7 @@ pub(crate) fn snapshot_before_osir_live_write(
         AppType::Claude => Tool::Claude,
         AppType::OpenCode => Tool::Opencode,
         AppType::Gemini => Tool::Gemini,
+        AppType::Dsh => Tool::Dsh,
         _ => return Ok(()),
     };
     service::ToolBackups::configured(tool)
@@ -46,6 +47,14 @@ async fn worker<T: Send + 'static>(
     let switch_guard = state.proxy_service.lock_switch_for_app(tool.id()).await;
     tokio::task::spawn_blocking(move || {
         let _switch_guard = switch_guard;
+        let _native = if tool == Tool::Dsh {
+            Some(
+                crate::dsh_config::lock_paths(&crate::dsh_config::write_paths())
+                    .map_err(|_| BackupError::ToolBusy)?,
+            )
+        } else {
+            None
+        };
         f(service::ToolBackups::configured(tool))
     })
     .await

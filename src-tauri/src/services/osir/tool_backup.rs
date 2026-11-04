@@ -35,6 +35,7 @@ pub enum Tool {
     Claude,
     Opencode,
     Gemini,
+    Dsh,
 }
 impl Tool {
     pub fn id(self) -> &'static str {
@@ -43,6 +44,7 @@ impl Tool {
             Self::Claude => "claude",
             Self::Opencode => "opencode",
             Self::Gemini => "gemini",
+            Self::Dsh => "dsh",
         }
     }
 }
@@ -156,6 +158,13 @@ impl ToolBackups {
                 let dir = crate::opencode_config::get_opencode_dir();
                 vec![dir.join("opencode.json"), dir.join("opencode.jsonc")]
             }
+            Tool::Dsh => crate::dsh_config::write_paths()
+                .into_iter()
+                .filter(|path| {
+                    path.file_name()
+                        .is_none_or(|name| name != ".credentials.yaml")
+                })
+                .collect(),
             Tool::Gemini => vec![
                 crate::gemini_config::get_gemini_env_path(),
                 crate::gemini_config::get_gemini_settings_path(),

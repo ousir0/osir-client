@@ -72,6 +72,7 @@ impl Home {
 
     fn seed(&self, tool: Tool) {
         match tool {
+            Tool::Dsh => unreachable!("DSH uses dedicated dsh_commands and activation tests"),
             Tool::Codex => {
                 fs::write(self.path(".codex/config.toml"), "# user-owned comment\nmodel = \"old\"\ncli_auth_credentials_store = \"file\"\n[mcp_servers.fixture]\ncommand = \"/usr/bin/false\"\nenabled = false\n[projects.\"/fixture/project\"]\ntrust_level = \"untrusted\"\n").unwrap();
                 fs::write(
@@ -172,6 +173,7 @@ impl Drop for Home {
 }
 fn paths(tool: Tool) -> Vec<&'static str> {
     match tool {
+        Tool::Dsh => unreachable!("DSH uses dedicated dsh_commands and activation tests"),
         Tool::Codex => vec![".codex/config.toml", ".codex/cc-switch-model-catalog.json"],
         Tool::Claude => vec![".claude/settings.json"],
         Tool::Gemini => vec![".gemini/.env", ".gemini/settings.json"],
@@ -180,6 +182,7 @@ fn paths(tool: Tool) -> Vec<&'static str> {
 }
 fn auth_paths(tool: Tool) -> Vec<&'static str> {
     match tool {
+        Tool::Dsh => unreachable!("DSH uses dedicated dsh_commands and activation tests"),
         Tool::Codex => vec![".codex/auth.json"],
         Tool::Claude => vec![".claude/.credentials.json", ".claude.json"],
         Tool::Gemini => vec![".gemini/oauth_creds.json"],
@@ -188,6 +191,7 @@ fn auth_paths(tool: Tool) -> Vec<&'static str> {
 }
 fn app(tool: Tool) -> AppType {
     match tool {
+        Tool::Dsh => unreachable!("DSH uses dedicated dsh_commands and activation tests"),
         Tool::Codex => AppType::Codex,
         Tool::Claude => AppType::Claude,
         Tool::Gemini => AppType::Gemini,
@@ -198,6 +202,7 @@ fn provider(tool: Tool, label: &str) -> Provider {
     let endpoint = format!("http://127.0.0.1:12391/{}/{label}", tool.id());
     let model = format!("osir-fixture-{label}");
     let config = match tool {
+        Tool::Dsh => unreachable!("DSH uses dedicated dsh_commands and activation tests"),
         Tool::Codex => json!({
             "auth": {"OPENAI_API_KEY": format!("synthetic-provider-{label}")},
             "config": format!("model = \"{model}\"\nmodel_provider = \"fixture\"\n[model_providers.fixture]\nname = \"Fixture {label}\"\nbase_url = \"{endpoint}/v1\"\nwire_api = \"responses\"\n"),
@@ -228,6 +233,7 @@ fn file_bytes(home: &Home, tool: Tool) -> Vec<Option<Vec<u8>>> {
 }
 fn assert_user_fields(home: &Home, tool: Tool) {
     match tool {
+        Tool::Dsh => unreachable!("DSH uses dedicated dsh_commands and activation tests"),
         Tool::Codex => {
             let text = fs::read_to_string(home.path(paths(tool)[0])).unwrap();
             assert!(text.contains("# user-owned comment"));

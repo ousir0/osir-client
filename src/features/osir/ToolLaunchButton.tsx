@@ -133,7 +133,9 @@ export function ToolLaunchButton({
   const query = useQueryClient();
   const launching = useIsMutating({ mutationKey: TOOL_ACTION_QUERY }) > 0;
   const target: ToolLaunchTarget =
-    requestedTarget ?? (LOCAL_TOOL_CATALOG[tool].desktop ? "desktop" : "cli");
+    requestedTarget ??
+    installation?.kind ??
+    (LOCAL_TOOL_CATALOG[tool].desktop ? "desktop" : "cli");
   const running =
     target === "desktop" && installation?.runtimeStatus === "running";
   const codexCli = tool === "codex" && target === "cli";

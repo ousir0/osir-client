@@ -34,6 +34,7 @@ fn get_auto_launch() -> Result<AutoLaunch, AppError> {
     let auto_launch = AutoLaunchBuilder::new()
         .set_app_name(app_name)
         .set_app_path(&app_path.to_string_lossy())
+        .set_args(&["--hidden"])
         .build()
         .map_err(|e| AppError::Message(format!("创建 AutoLaunch 失败: {e}")))?;
 

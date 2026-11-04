@@ -126,6 +126,7 @@ impl HistoryRoots {
                 ".pi/agent",
             ),
             ("kimi", "", &["KIMI_CODE_HOME"][..], ".kimi-code"),
+            ("dsh", "", &["DSH_HOME"][..], ".dsh"),
             (
                 "mcode",
                 "",
@@ -228,6 +229,7 @@ pub(crate) fn capture_system_roots(home: &Path, sandbox: &Path) {
         "OMP_PROFILE",
         "PI_PROFILE",
         "KIMI_CODE_HOME",
+        "DSH_HOME",
         "MINIMAX_DATA_DIR",
         "MAVIS_DATA_DIR",
     ]

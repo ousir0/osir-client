@@ -169,7 +169,7 @@ jobs:
 
       - name: Verify provider switching, credential recovery and update ownership
         run: |
-          $filters = @('mode::controller', 'services::provider', 'services::osir::session', 'commands::osir::recovery::tests', 'update_installation_rejects_overlap')
+          $filters = @('mode::controller', 'services::provider', 'services::osir::session', 'commands::osir::recovery::tests', 'dsh_', 'startup::tests', 'update_installation_rejects_overlap')
           foreach ($filter in $filters) {
             $result = cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib $filter -- --test-threads=1 | Out-String
             $code = $LASTEXITCODE

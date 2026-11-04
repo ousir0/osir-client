@@ -25,6 +25,11 @@ export const LOCAL_TOOL_CATALOG: Record<
     description: "Claude 官方桌面应用；与 Claude Code CLI 分开启动",
     desktop: true,
   },
+  dsh: {
+    name: "DeepSeek Harness",
+    description: "供应商切换、默认模型与本机会话",
+    desktop: true,
+  },
   opencode: {
     name: TOOL_NAMES.opencode,
     description: "模型连接、默认模型与本机会话",

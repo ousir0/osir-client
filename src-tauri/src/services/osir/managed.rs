@@ -56,7 +56,7 @@ pub fn vault() -> Result<KeyVault<LocalCredentialBackend>, AppError> {
 }
 pub fn gateway(app: &AppType) -> Result<&'static str, AppError> {
     match app {
-        AppType::Codex | AppType::OpenCode => Ok("https://api.osirclaw.com/v1"),
+        AppType::Codex | AppType::OpenCode | AppType::Dsh => Ok("https://api.osirclaw.com/v1"),
         AppType::Claude | AppType::ClaudeDesktop | AppType::Gemini => Ok(GATEWAY_ORIGIN),
         _ => Err(invalid()),
     }
@@ -68,6 +68,7 @@ fn tool(app: &AppType) -> Result<KeyTool, AppError> {
         AppType::ClaudeDesktop => Ok(KeyTool::ClaudeDesktop),
         AppType::OpenCode => Ok(KeyTool::OpenCode),
         AppType::Gemini => Ok(KeyTool::GeminiCli),
+        AppType::Dsh => Ok(KeyTool::DeepseekHarness),
         _ => Err(invalid()),
     }
 }
@@ -527,6 +528,10 @@ fn resolve_with_vault<B: CredentialBackend>(
         AppType::Gemini => {
             s["env"]["GOOGLE_GEMINI_BASE_URL"] = json!(gateway(app)?);
             s["env"]["GEMINI_API_KEY"] = json!(secret.expose());
+        }
+        AppType::Dsh => {
+            s["options"]["baseURL"] = json!(gateway(app)?);
+            s["options"]["apiKey"] = json!(secret.expose());
         }
         AppType::OpenCode => {
             let native =

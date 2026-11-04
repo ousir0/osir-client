@@ -92,6 +92,9 @@ const OsirToolManagement = lazy(() =>
 const OsirToolsHub = lazy(() =>
   import("./OsirToolsHub").then((module) => ({ default: module.OsirToolsHub })),
 );
+const OsirDsh = lazy(() =>
+  import("./OsirDsh").then((module) => ({ default: module.OsirDsh })),
+);
 const OsirClaudeDesktop = lazy(() =>
   import("./OsirClaudeDesktop").then((module) => ({
     default: module.OsirClaudeDesktop,
@@ -621,9 +624,15 @@ export default function OsirWorkbench() {
   return (
     <div className="osir-shell">
       <aside className="osir-sidebar">
-        <div className="osir-brand" data-tauri-drag-region>
+        <div className="osir-brand" data-osir-drag-region>
           <span className="osir-logo">
-            <img src={osirClientIcon} alt="" width={40} height={40} />
+            <img
+              src={osirClientIcon}
+              alt=""
+              width={40}
+              height={40}
+              draggable={false}
+            />
           </span>
           <div>
             <strong>OSIR API</strong>
@@ -784,7 +793,11 @@ export default function OsirWorkbench() {
         </div>
       </aside>
       <div className="osir-workspace">
-        <div className="osir-workspace-toolbar" aria-label="工作台通知">
+        <div
+          className="osir-workspace-toolbar"
+          aria-label="工作台通知"
+          data-osir-drag-region
+        >
           <OsirAnnouncements variant="bell" />
         </div>
         <main id="content-area" className="osir-main" ref={contentRef}>
@@ -1558,6 +1571,18 @@ export default function OsirWorkbench() {
               </>
             ) : page === "claude-desktop" ? (
               <OsirClaudeDesktop
+                desktop={desktop}
+                onNavigationBlockedChange={setManagementBlocked}
+                onConnectAccount={() =>
+                  requestLeave(() => {
+                    setPage("account");
+                    setUsageGroup(undefined);
+                    setTab("models");
+                  })
+                }
+              />
+            ) : page === "dsh" ? (
+              <OsirDsh
                 desktop={desktop}
                 onNavigationBlockedChange={setManagementBlocked}
                 onConnectAccount={() =>

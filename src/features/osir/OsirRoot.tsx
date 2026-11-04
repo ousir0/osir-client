@@ -8,8 +8,10 @@ import { OsirAccountPanel } from "./OsirAccountPanel";
 import { TOOL_IDS } from "./providerConfig";
 import { useClientTelemetrySession } from "./clientTelemetry";
 import { OsirClientUpdateDialog } from "./OsirClientUpdateDialog";
+import { useOsirWindowDragging } from "./windowDragging";
 
 export default function OsirRoot() {
+  useOsirWindowDragging();
   const session = useAccountSession();
   useClientTelemetrySession(
     !!session.data?.connected && !session.isError,
@@ -25,7 +27,7 @@ export default function OsirRoot() {
     <main className="osir-welcome">
       <div
         className="osir-welcome-drag"
-        data-tauri-drag-region
+        data-osir-drag-region
         aria-hidden="true"
       />
       <div className="osir-welcome-loading" role="status" aria-busy="true">

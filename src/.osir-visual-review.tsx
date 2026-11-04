@@ -463,6 +463,7 @@ mockIPC(
           "codex",
           "claude",
           "claude-desktop",
+          "dsh",
           "opencode",
           "gemini",
           "grok",
@@ -478,7 +479,7 @@ mockIPC(
           .filter(
             (id) =>
               command === "osir_detect_tools" ||
-              ["codex", "claude-desktop", "workbuddy"].includes(id),
+              ["codex", "claude-desktop", "dsh", "workbuddy"].includes(id),
           )
           .map((id) => {
             const installed =
@@ -486,6 +487,7 @@ mockIPC(
                 "codex",
                 "claude",
                 "claude-desktop",
+                "dsh",
                 "opencode",
                 "gemini",
                 "openclaw",
@@ -499,7 +501,7 @@ mockIPC(
               path: null,
               status: installed ? "installed" : "not_installed",
               error: null,
-              kind: ["codex", "workbuddy", "claude-desktop"].includes(id)
+              kind: ["codex", "workbuddy", "claude-desktop", "dsh"].includes(id)
                 ? "desktop"
                 : "cli",
               runtimeStatus: !installed
@@ -605,6 +607,21 @@ mockIPC(
           },
         ];
       case "get_providers":
+        if (args.app === "dsh")
+          return {
+            "synthetic-dsh": {
+              id: "synthetic-dsh",
+              name: "DeepSeek 工作连接",
+              settingsConfig: {
+                api: "openai-completions",
+                options: { baseURL: "https://example.invalid/v1" },
+                _osirDshKey: "synthetic-reference",
+                models: { "synthetic-chat": { name: "synthetic-chat" } },
+                defaultModel: "synthetic-chat",
+              },
+              meta: { liveConfigManaged: true },
+            },
+          };
         return args.app === "claude"
           ? { [provider.id]: provider }
           : args.app === "claude-desktop"
@@ -670,6 +687,7 @@ mockIPC(
           gatewayTokenConfigured: true,
         };
       case "get_current_provider":
+        if (args.app === "dsh") return "synthetic-dsh";
         return args.app === "claude"
           ? provider.id
           : args.app === "codex"

@@ -157,3 +157,15 @@ export function showFetchModelsError(
   // 通用兜底
   toast.error(t("providerForm.fetchModelsFailed"));
 }
+
+export async function fetchDshModelsForProvider(
+  providerId: string,
+  baseUrl: string,
+  apiFormat: string,
+): Promise<FetchedModel[]> {
+  return invoke("fetch_dsh_models_for_provider", {
+    providerId,
+    baseUrl,
+    apiFormat,
+  });
+}

@@ -15,6 +15,10 @@
   height: 44px;
   padding: 7px 24px 0;
 }
+[data-osir-drag-region] {
+  user-select: none;
+  -webkit-user-select: none;
+}
 .osir-workspace > .osir-main {
   padding-top: 12px;
   /* Lazy pages reset at the top instead of retaining a prior page's anchor. */

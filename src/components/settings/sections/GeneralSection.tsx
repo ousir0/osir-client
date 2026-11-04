@@ -204,10 +204,16 @@ export function GeneralSection({
           />
           {settings.launchOnStartup && (
             <SettingsSwitchRow
-              label={t("settings.silentStartup")}
+              label={
+                osirClient ? "后台自启时隐藏窗口" : t("settings.silentStartup")
+              }
               help={{
-                title: t("settings.silentStartup"),
-                body: t("settings.silentStartupDescription"),
+                title: osirClient
+                  ? "后台自启时隐藏窗口"
+                  : t("settings.silentStartup"),
+                body: osirClient
+                  ? "开机自启时在后台运行；手动打开客户端会显示主窗口。"
+                  : t("settings.silentStartupDescription"),
               }}
               checked={!!settings.silentStartup}
               onCheckedChange={(value) =>

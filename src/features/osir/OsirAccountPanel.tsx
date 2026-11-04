@@ -345,7 +345,7 @@ export function OsirAccountPanel({
       <main className="osir-welcome">
         <div
           className="osir-welcome-drag"
-          data-tauri-drag-region
+          data-osir-drag-region
           aria-hidden="true"
         />
         <section

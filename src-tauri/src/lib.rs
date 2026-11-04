@@ -17,6 +17,7 @@ mod config;
 mod database;
 mod deeplink;
 mod distribution;
+mod dsh_config;
 mod error;
 mod gemini_config;
 mod gemini_mcp;
@@ -48,6 +49,7 @@ mod release_diagnostics;
 mod services;
 mod session_manager;
 mod settings;
+mod startup;
 mod store;
 
 mod tray;
@@ -467,23 +469,7 @@ pub fn run() {
                 log::info!("ℹ No deep link URL found in args (this is expected on macOS when launched via system)");
             }
 
-            // Show and focus window regardless
-            if let Some(window) = app.get_webview_window("main") {
-                // 防御性重置 Windows 的 skip_taskbar：single_instance 触发时，
-                // 原进程可能因 silent_startup / 关闭到托盘等处于 skip_taskbar(true) 状态，
-                // 仅 show() 不会重置该状态，会导致窗口可见但不在任务栏、最小化后消失。
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = window.set_skip_taskbar(false);
-                }
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-                #[cfg(target_os = "linux")]
-                {
-                    linux_fix::nudge_main_window(window.clone(), "single-instance");
-                }
-            }
+            tray::show_main_window(app);
         }));
     }
 
@@ -495,10 +481,9 @@ pub fn run() {
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
                 && payload.url().scheme() != "about"
                 && !startup_page_handled.swap(true, Ordering::Relaxed)
-                && !crate::settings::get_settings().silent_startup
+                && !crate::startup::should_hide()
             {
-                let _ = webview.window().show();
-                let _ = webview.window().set_focus();
+                tray::show_main_window(webview.app_handle());
                 log::info!("主页面加载完成，主窗口已显示");
             }
         });
@@ -564,6 +549,7 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            startup::capture_launch();
             let _ = rustls::crypto::ring::default_provider().install_default();
 
             // 预先刷新 Store 覆盖配置，确保后续路径读取正确（日志/数据库等）
@@ -1554,7 +1540,7 @@ pub fn run() {
                     let _ = window.set_decorations(false);
                     let _ = window.set_shadow(true);
                 }
-                if settings.silent_startup {
+                if startup::should_hide() {
                     // 静默启动模式：保持窗口隐藏
                     let _ = window.hide();
                     #[cfg(target_os = "windows")]
@@ -1784,6 +1770,7 @@ pub fn run() {
             // Fetch OpenAI-compatible and Anthropic model lists. Response data structure:
             // data[].id, data[]?.owned_by. Special: supports Zhipu OpenAI Responses models[].slug.
             commands::fetch_models_for_config,
+            commands::fetch_dsh_models_for_provider,
             commands::get_agy_models,
             commands::get_opencode_models,
             // ours: endpoint speed test + custom endpoint management
@@ -2154,20 +2141,7 @@ pub fn run() {
             // RunEvent::Opened（ccswitch:// 链接）不在这里处理：deep-link 插件的 on_event 已把它
             // 转成 on_open_url 回调，这里再处理一遍会让同一条链接触发两次导入。
             if let RunEvent::Reopen { .. } = event {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    #[cfg(target_os = "windows")]
-                    {
-                        let _ = window.set_skip_taskbar(false);
-                    }
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    tray::apply_tray_policy(app_handle, true);
-                } else if crate::lightweight::is_lightweight_mode() {
-                    if let Err(e) = crate::lightweight::exit_lightweight_mode(app_handle) {
-                        log::error!("退出轻量模式重建窗口失败: {e}");
-                    }
-                }
+                tray::show_main_window(app_handle);
             }
         }
 

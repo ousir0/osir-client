@@ -48,6 +48,7 @@ pub enum KeyTool {
     ClaudeDesktop,
     OpenCode,
     GeminiCli,
+    DeepseekHarness,
 }
 
 /// Non-secret context. group_id=None is a real ungrouped key, never a wildcard.

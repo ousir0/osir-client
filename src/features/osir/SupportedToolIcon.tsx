@@ -18,6 +18,7 @@ const providerIcons = {
   kimi: "kimi",
   agy: "antigravity",
   omp: "omp",
+  dsh: "deepseek",
 } satisfies Record<
   Exclude<
     SupportedToolId,

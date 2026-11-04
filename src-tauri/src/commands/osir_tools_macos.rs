@@ -20,12 +20,14 @@ use std::time::{Duration, Instant};
 // is identity matching, not a claim that metadata discovery verifies a signature.
 const WORKBUDDY_BUNDLE_ID: &str = "com.tencent.workbuddy.mac";
 // Read from the installed official Claude.app Info.plist, independently of CLI.
+const DSH_BUNDLE_ID: &str = "com.deepseek.dsh";
 const CLAUDE_BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
 const METADATA_LIMIT: u64 = 64 * 1024;
 const DESKTOP_BUDGET: Duration = Duration::from_secs(3);
 // All Codex launch entries, including the installer panel, share this gate.
 // Reject overlapping clicks instead of queuing multiple starts or restarts.
 static CODEX_LAUNCH_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static DSH_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static CLAUDE_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static WORKBUDDY_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -36,7 +38,13 @@ fn codex_launch_guard() -> Result<tokio::sync::MutexGuard<'static, ()>, String> 
 }
 
 fn desktop_action_guard(id: &str) -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
+    if id == "dsh" && crate::distribution::is_isolated() {
+        return Err("开发环境暂不支持打开 DeepSeek 桌面应用，请使用隔离命令行调试。".into());
+    }
     match id {
+        "dsh" => DSH_DESKTOP_GATE
+            .try_lock()
+            .map_err(|_| "此桌面应用正在启动、重启或关闭，请稍后重试".into()),
         "codex" => codex_launch_guard(),
         "claude-desktop" => CLAUDE_DESKTOP_GATE
             .try_lock()
@@ -90,6 +98,7 @@ fn candidate_paths(id: &str, roots: &[PathBuf]) -> Vec<PathBuf> {
     let names: &[&str] = match id {
         "codex" => &["Codex.app", "ChatGPT.app"],
         "claude-desktop" => &["Claude.app"],
+        "dsh" => &["DeepSeek Harness.app"],
         "workbuddy" => &["WorkBuddy.app", "Tencent WorkBuddy.app"],
         _ => &[],
     };

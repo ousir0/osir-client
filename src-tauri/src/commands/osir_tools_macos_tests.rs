@@ -190,6 +190,40 @@ fn fixed_candidates_include_managed_codex_and_never_cli_binaries() {
     );
 }
 
+#[tokio::test]
+async fn dsh_desktop_detection_requires_literal_registered_bundle_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let path = bundle(root.path(), "DeepSeek Harness.app", "com.deepseek.dsh");
+    assert_eq!(
+        candidate_paths("dsh", &[root.path().to_path_buf()]),
+        vec![root.path().join("DeepSeek Harness.app")]
+    );
+    let detected = detect_candidates("dsh", &[path]).await;
+    assert!(detected.installed);
+    assert_eq!(detected.version.as_deref(), Some("5.5.6"));
+    let wrong = bundle(root.path(), "Other.app", "com.example.other");
+    assert!(!detect_candidates("dsh", &[wrong]).await.installed);
+}
+
+#[tokio::test]
+#[ignore = "requires the real locally installed official DeepSeek Harness bundle"]
+async fn dsh_real_installed_macos_bundle_is_detected_without_launching() {
+    let record = detect_candidates(
+        "dsh",
+        &[PathBuf::from("/Applications/DeepSeek Harness.app")],
+    )
+    .await;
+    assert!(record.installed);
+    assert!(record
+        .version
+        .as_deref()
+        .is_some_and(|version| !version.is_empty()));
+    assert_eq!(
+        record.path.as_deref(),
+        Some("/Applications/DeepSeek Harness.app")
+    );
+}
+
 #[test]
 fn codex_profile_running_bundle_remains_the_open_and_restart_target_after_candidate_changes() {
     let preferred = Path::new("/fixture/Applications/OSIR Codex/Codex.app");

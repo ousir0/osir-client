@@ -404,6 +404,7 @@ fn extra_native_launch(id: &str) -> Result<ProviderLaunch, String> {
             }
             Some(("PI_CODING_AGENT_DIR", agent))
         }
+        "dsh" => Some(("DSH_HOME", crate::dsh_config::data_dir())),
         "mcode" => Some(("MINIMAX_DATA_DIR", crate::mcode_config::data_dir())),
         "kimi" => Some(("KIMI_CODE_HOME", crate::kimi_config::data_dir())),
         // Grok and OpenClaw defaults already share native HOME. Their custom

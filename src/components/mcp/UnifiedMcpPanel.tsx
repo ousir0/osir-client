@@ -63,7 +63,13 @@ import {
   ExtensionThemeContext,
 } from "./ExtensionTheme";
 
-const OSIR_MCP_APP_IDS: McpAppId[] = ["codex", "claude", "opencode", "gemini"];
+const OSIR_MCP_APP_IDS: McpAppId[] = [
+  "codex",
+  "claude",
+  "opencode",
+  "gemini",
+  "dsh",
+];
 
 function getMcpSearchText(id: string, server: McpServer): string {
   const spec = server.server ?? {};
@@ -107,10 +113,12 @@ const IMPORT_SOURCE_FILES: Record<
   kimi: { file: "~/.kimi-code/mcp.json" },
   mcode: { file: "~/.minimax/mcp.json" },
   omp: { file: "~/.omp/agent/mcp.json" },
+  dsh: { file: "$DSH_HOME/profiles/{web,desktop}/cordis.patch.yml" },
 };
 
 /** 先写配置文件、成功后才入库的应用：写失败时开关没变，重试要逐行重写 */
 const WRITE_THEN_SAVE_APPS: ReadonlySet<McpAppId> = new Set([
+  "dsh",
   "mcode",
   "kimi",
   "pi",

@@ -741,6 +741,17 @@ fn mapping_key(line: &str) -> Result<String, AppError> {
 /// Anchors, aliases, tags and merge keys can't be edited as text without breaking a
 /// reference elsewhere; refuse them before writing.
 fn reject_yaml_tokens(line: &str) -> Result<(), AppError> {
+    if has_yaml_reference_tokens(line) {
+        return Err(manual_edit());
+    }
+    Ok(())
+}
+
+/// Whether a YAML line has an anchor, alias, tag or merge key outside quotes and comments.
+/// `&`, `*` and `!` are only YAML indicators where a node starts: inside a plain scalar
+/// (`name: Search & Fetch`, which serde_yaml and Bun both write unquoted) they are
+/// ordinary text.
+pub(crate) fn has_yaml_reference_tokens(line: &str) -> bool {
     let mut quote = None;
     let mut escaped = false;
     let mut boundary = true;
@@ -763,18 +774,18 @@ fn reject_yaml_tokens(line: &str) -> Result<(), AppError> {
             continue;
         }
         if c == ':' && previous == ['<', '<'] {
-            return Err(manual_edit());
+            return true;
         }
         match c {
             '"' | '\'' if boundary => quote = Some(c),
             '#' if boundary => break,
-            '&' | '*' | '!' if boundary => return Err(manual_edit()),
+            '&' | '*' | '!' if boundary => return true,
             _ => {}
         }
         previous = [previous[1], c];
         boundary = c.is_whitespace() || matches!(c, ':' | '[' | '{' | ',');
     }
-    Ok(())
+    false
 }
 
 #[derive(Clone, Copy)]

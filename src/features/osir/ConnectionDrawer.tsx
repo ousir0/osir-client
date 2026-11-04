@@ -18,7 +18,10 @@ import {
   SheetDescription,
   SheetBody,
 } from "@/components/ui/sheet";
-import { fetchModelsForConfig } from "@/lib/api/model-fetch";
+import {
+  fetchModelsForConfig,
+  fetchDshModelsForProvider,
+} from "@/lib/api/model-fetch";
 import { defaultConnectionModel } from "./modelDefaults";
 import { providersApi } from "@/lib/api";
 import type { Provider } from "@/types";
@@ -68,11 +71,14 @@ export function ConnectionDrawer({
           name: managed && provider ? provider.name : "OSIR API",
           hideAggregationName: provider?.meta?.hideAggregationName ?? true,
           baseUrl:
-            tool === "codex" || tool === "opencode"
+            tool === "codex" || tool === "opencode" || tool === "dsh"
               ? "https://api.osirclaw.com/v1"
               : "https://api.osirclaw.com",
           apiKey: "",
-          model: "",
+          model:
+            tool === "dsh" && provider
+              ? readConnection(provider, tool).model
+              : "",
           protocol:
             tool === "codex"
               ? "openai_responses"
@@ -115,10 +121,17 @@ export function ConnectionDrawer({
   const [baseError, setBaseError] = useState("");
   const [editBase, setEditBase] = useState<Record<string, unknown>>();
   const [loadingBase, setLoadingBase] = useState(
-    !preview && !!provider && !managed && tool !== "opencode",
+    !preview && !!provider && !managed && tool !== "opencode" && tool !== "dsh",
   );
   useEffect(() => {
-    if (preview || !provider || managed || tool === "opencode") return;
+    if (
+      preview ||
+      !provider ||
+      managed ||
+      tool === "opencode" ||
+      tool === "dsh"
+    )
+      return;
     let cancelled = false;
     setLoadingBase(true);
     setBaseError("");
@@ -175,7 +188,10 @@ export function ConnectionDrawer({
     setDraft(next);
     setDirty(
       managed
-        ? next.name.trim() !== provider?.name || aggregationChanged(next)
+        ? next.name.trim() !== provider?.name ||
+            aggregationChanged(next) ||
+            (tool === "dsh" &&
+              next.model !== readConnection(provider!, tool).model)
         : true,
     );
     if (key === "baseUrl" || key === "apiKey" || key === "protocol")
@@ -192,7 +208,11 @@ export function ConnectionDrawer({
     try {
       if (preview)
         throw new Error("浏览器预览不连接真实服务。请在桌面客户端获取模型。");
-      if (!draft.apiKey.trim()) throw new Error("请先填写密钥。");
+      if (
+        !draft.apiKey.trim() &&
+        !(tool === "dsh" && provider?.settingsConfig._osirDshKey)
+      )
+        throw new Error("请先填写密钥。");
       validateEndpoint();
       const apiFormat =
         draft.protocol === "gemini_native"
@@ -200,20 +220,29 @@ export function ConnectionDrawer({
           : draft.protocol === "anthropic"
             ? "anthropic-messages"
             : draft.protocol;
-      const list = await fetchModelsForConfig(
-        draft.baseUrl.trim(),
-        draft.apiKey.trim(),
-        false,
-        undefined,
-        undefined,
-        { apiFormat },
-      );
+      const list =
+        tool === "dsh" && provider && !draft.apiKey.trim()
+          ? await fetchDshModelsForProvider(
+              provider.id,
+              draft.baseUrl.trim(),
+              apiFormat,
+            )
+          : await fetchModelsForConfig(
+              draft.baseUrl.trim(),
+              draft.apiKey.trim(),
+              false,
+              undefined,
+              undefined,
+              { apiFormat },
+            );
       const modelIds = [
         ...new Set(
           list
             .filter(
               (model) =>
-                (tool !== "codex" && tool !== "claude-desktop") ||
+                (tool !== "codex" &&
+                  tool !== "claude-desktop" &&
+                  tool !== "dsh") ||
                 isCodexConversationModel(model.id, model),
             )
             .map((model) => model.id)
@@ -272,6 +301,11 @@ export function ConnectionDrawer({
         context,
         contextBase.current,
       );
+      if (tool === "dsh") {
+        if (!configured.settingsConfig.models?.[draft.model])
+          throw new Error("请选择此连接中的可用模型。");
+        configured.settingsConfig.defaultModel = draft.model;
+      }
       const confirmed = await providersApi.update(
         configured,
         tool,
@@ -282,7 +316,12 @@ export function ConnectionDrawer({
       if (!confirmed)
         throw new Error("保存未确认，请刷新供应商列表核对后重试。");
       setDirty(false);
-      onSaved(configured);
+      const safe =
+        tool === "dsh"
+          ? (await providersApi.getAll(tool))[configured.id]
+          : configured;
+      if (!safe) throw new Error("保存结果暂不可用，请刷新供应商列表。");
+      onSaved(safe);
       onClose();
     } catch (e) {
       setError(connectionError(e));
@@ -351,7 +390,12 @@ export function ConnectionDrawer({
           )
         : await providersApi.add(configured, tool, false);
       if (!saved) throw new Error("保存未确认完成，请先检查供应商列表再重试。");
-      onSaved(configured);
+      const safe =
+        tool === "dsh"
+          ? (await providersApi.getAll(tool))[configured.id]
+          : configured;
+      if (!safe) throw new Error("保存结果暂不可用，请刷新供应商列表。");
+      onSaved(safe);
       onClose();
     } catch (e) {
       setError(connectionError(e, [draft.apiKey, draft.apiKey.trim()]));
@@ -361,6 +405,7 @@ export function ConnectionDrawer({
   }
   const blocked = busy || loadingBase || !!baseError;
   const contextFields = (disabled: boolean) => {
+    if (tool === "dsh") return null;
     if (tool === "claude-desktop")
       return (
         <p className="osir-muted" role="note">
@@ -659,6 +704,24 @@ export function ConnectionDrawer({
                 busy={busy}
                 onBusy={reportBusy}
               />
+              {tool === "dsh" && (
+                <label>
+                  默认模型
+                  <select
+                    value={draft.model}
+                    disabled={busy || preview}
+                    onChange={(event) => set("model", event.target.value)}
+                  >
+                    {Object.keys(provider.settingsConfig.models ?? {}).map(
+                      (id) => (
+                        <option key={id} value={id}>
+                          {id}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </label>
+              )}
               {contextFields(busy || preview)}
               {tool === "opencode" &&
               provider.meta?.liveConfigManaged !== false ? (
@@ -812,14 +875,20 @@ export function ConnectionDrawer({
                   autoComplete="off"
                   value={draft.apiKey}
                   onChange={(e) => set("apiKey", e.target.value)}
-                  required
+                  required={
+                    !(tool === "dsh" && provider?.settingsConfig._osirDshKey)
+                  }
                   disabled={blocked}
                   placeholder={
-                    preview ? "预览请填写演示值" : "粘贴该分组绑定的密钥"
+                    preview
+                      ? "预览请填写演示值"
+                      : tool === "dsh" && provider
+                        ? "留空保留已保存密钥"
+                        : "粘贴该分组绑定的密钥"
                   }
                 />
               </label>
-              {tool === "codex" && (
+              {(tool === "codex" || tool === "dsh") && (
                 <label>
                   上游协议
                   <select
@@ -831,7 +900,9 @@ export function ConnectionDrawer({
                     <option value="openai_chat">OpenAI Chat Completions</option>
                     <option value="anthropic">Anthropic Messages</option>
                   </select>
-                  <small>非 Responses 协议通过 Codex 多模型聚合使用。</small>
+                  {tool === "codex" && (
+                    <small>非 Responses 协议通过 Codex 多模型聚合使用。</small>
+                  )}
                 </label>
               )}
               <div className="osir-row">
@@ -841,7 +912,10 @@ export function ConnectionDrawer({
                   disabled={
                     blocked ||
                     preview ||
-                    !draft.apiKey.trim() ||
+                    (!draft.apiKey.trim() &&
+                      !(
+                        tool === "dsh" && provider?.settingsConfig._osirDshKey
+                      )) ||
                     !draft.baseUrl.trim()
                   }
                   onClick={() => void fetchModels()}
@@ -886,9 +960,11 @@ export function ConnectionDrawer({
                   </datalist>
                 )}
               </label>
-              <p className="osir-muted">
-                密钥的分组由 OSIR 网站绑定。此处不会修改云端分组。
-              </p>
+              {tool !== "dsh" && (
+                <p className="osir-muted">
+                  密钥的分组由 OSIR 网站绑定。此处不会修改云端分组。
+                </p>
+              )}
               {!managed && contextFields(blocked)}
               {provider && (
                 <p className="osir-muted">
@@ -897,7 +973,8 @@ export function ConnectionDrawer({
               )}
               {(!draft.name.trim() ||
                 !draft.baseUrl.trim() ||
-                !draft.apiKey.trim() ||
+                (!draft.apiKey.trim() &&
+                  !(tool === "dsh" && provider?.settingsConfig._osirDshKey)) ||
                 !draft.model.trim()) && (
                 <p className="osir-muted">
                   请填写供应商名称、服务地址、密钥和模型后保存。
@@ -914,7 +991,10 @@ export function ConnectionDrawer({
                     blocked ||
                     preview ||
                     !draft.name.trim() ||
-                    !draft.apiKey.trim() ||
+                    (!draft.apiKey.trim() &&
+                      !(
+                        tool === "dsh" && provider?.settingsConfig._osirDshKey
+                      )) ||
                     !draft.model.trim() ||
                     (tool === "gemini" &&
                       (!models.length ||

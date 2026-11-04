@@ -52,6 +52,7 @@ fn tool_kind(tool: &str) -> Result<(AppType, KeyTool), String> {
         "claude" => Ok((AppType::Claude, KeyTool::ClaudeCode)),
         "claude-desktop" => Ok((AppType::ClaudeDesktop, KeyTool::ClaudeDesktop)),
         "opencode" => Ok((AppType::OpenCode, KeyTool::OpenCode)),
+        "dsh" => Ok((AppType::Dsh, KeyTool::DeepseekHarness)),
         "gemini" => Ok((AppType::Gemini, KeyTool::GeminiCli)),
         _ => Err(RELOAD.into()),
     }

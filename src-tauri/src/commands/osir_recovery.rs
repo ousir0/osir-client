@@ -97,6 +97,7 @@ pub(crate) fn recover_database<B: CredentialBackend>(
             crate::services::osir::key_vault::KeyTool::ClaudeDesktop => "claude-desktop",
             crate::services::osir::key_vault::KeyTool::OpenCode => "opencode",
             crate::services::osir::key_vault::KeyTool::GeminiCli => "gemini",
+            crate::services::osir::key_vault::KeyTool::DeepseekHarness => "dsh",
         };
         if entry.previous.is_some() && crate::mode::operation::has_pending(tool) {
             return Err("工具配置恢复尚未完成，已保留新旧凭据".into());

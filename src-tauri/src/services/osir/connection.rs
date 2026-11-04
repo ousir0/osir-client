@@ -157,6 +157,11 @@ impl TrustedKeyReplacement {
                 meta.claude_desktop_model_routes =
                     selected_meta.claude_desktop_model_routes.clone();
             }
+            AppType::Dsh => {
+                row.settings_config["models"] = selected.settings_config["models"].clone();
+                row.settings_config["defaultModel"] =
+                    selected.settings_config["defaultModel"].clone();
+            }
             AppType::OpenCode => {
                 row.settings_config["models"] = selected.settings_config["models"].clone();
             }
@@ -204,6 +209,12 @@ impl ConnectionRequest {
                 Ok(AppType::ClaudeDesktop)
             }
             "opencode" => Ok(AppType::OpenCode),
+            "dsh"
+                if self.models.iter().all(|id| desktop_conversation_model(id))
+                    && desktop_conversation_model(&self.model) =>
+            {
+                Ok(AppType::Dsh)
+            }
             "gemini" => Ok(AppType::Gemini),
             _ => Err("此工具不支持账户连接".into()),
         }
@@ -282,6 +293,13 @@ pub fn provider_row(request: &ConnectionRequest, id: String) -> Result<Provider,
             json!({"env":{"ANTHROPIC_BASE_URL":origin,"ANTHROPIC_MODEL":model}})
         }
         AppType::Gemini => json!({"env":{"GOOGLE_GEMINI_BASE_URL":origin,"GEMINI_MODEL":model}}),
+        AppType::Dsh => {
+            let catalog: serde_json::Map<String, serde_json::Value> = models
+                .iter()
+                .map(|id| (id.clone(), json!({"name":id})))
+                .collect();
+            json!({"api":"openai-completions","options":{"baseURL":format!("{origin}/v1")},"models":catalog,"defaultModel":model})
+        }
         AppType::OpenCode => {
             let catalog: serde_json::Map<String, serde_json::Value> = models
                 .iter()

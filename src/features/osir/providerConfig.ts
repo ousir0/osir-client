@@ -15,8 +15,9 @@ import {
 
 export const TOOL_IDS = ["codex", "claude", "opencode", "gemini"] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
-export type ConnectionToolId = ToolId | "claude-desktop";
+export type ConnectionToolId = ToolId | "claude-desktop" | "dsh";
 export const TOOL_NAMES: Record<ConnectionToolId, string> = {
+  dsh: "DeepSeek Harness",
   codex: "Codex",
   claude: "Claude Code",
   "claude-desktop": "Claude 桌面客户端",
@@ -91,7 +92,7 @@ export function readConnectionContext(
     enabled: true,
     models: {},
   };
-  if (!provider || app === "claude-desktop") return result;
+  if (!provider || app === "claude-desktop" || app === "dsh") return result;
   const c = provider.settingsConfig;
   const text = (value: unknown) =>
     typeof value === "number" || typeof value === "string" ? String(value) : "";
@@ -140,7 +141,7 @@ export function applyConnectionContext(
   input: ConnectionContextDraft,
   base?: ConnectionContextDraft,
 ): Provider {
-  if (app === "claude-desktop") return previous;
+  if (app === "claude-desktop" || app === "dsh") return previous;
   const changed = (value: unknown, old: unknown) => !base || value !== old;
   const contextChanged =
     changed(input.window, base?.window) ||
@@ -284,7 +285,7 @@ export function readConnection(
     baseUrl: String(
       app === "codex"
         ? table?.base_url || d.base_url || ""
-        : app === "opencode"
+        : app === "opencode" || app === "dsh"
           ? c.options?.baseURL || ""
           : c.env?.[
               app === "claude" || app === "claude-desktop"
@@ -295,7 +296,7 @@ export function readConnection(
     apiKey: String(
       app === "codex"
         ? c.auth?.OPENAI_API_KEY || ""
-        : app === "opencode"
+        : app === "opencode" || app === "dsh"
           ? c.options?.apiKey || ""
           : c.env?.[
               app === "claude" || app === "claude-desktop"
@@ -306,8 +307,8 @@ export function readConnection(
     model: String(
       app === "codex"
         ? d.model || ""
-        : app === "opencode"
-          ? Object.keys(c.models || {})[0] || ""
+        : app === "opencode" || app === "dsh"
+          ? c.defaultModel || Object.keys(c.models || {})[0] || ""
           : c.env?.[
               app === "claude" || app === "claude-desktop"
                 ? "ANTHROPIC_MODEL"
@@ -315,7 +316,15 @@ export function readConnection(
             ] || "",
     ),
     protocol:
-      (p.meta?.apiFormat as ConnectionDraft["protocol"]) ||
+      (app === "dsh"
+        ? (
+            {
+              "openai-completions": "openai_chat",
+              "openai-responses": "openai_responses",
+              "anthropic-messages": "anthropic",
+            } as const
+          )[c.api as "openai-completions"]
+        : (p.meta?.apiFormat as ConnectionDraft["protocol"])) ||
       (app === "claude" || app === "claude-desktop"
         ? "anthropic"
         : app === "gemini"
@@ -368,10 +377,14 @@ export function buildConnection(
   const name = input.name.trim(),
     model = input.model.trim(),
     apiKey = input.apiKey.trim();
-  if (!name || !apiKey || !model)
+  if (
+    !name ||
+    (!apiKey && !(app === "dsh" && previous?.settingsConfig._osirDshKey)) ||
+    !model
+  )
     throw new Error("请填写供应商名称、密钥和模型。");
   if (
-    (app === "codex" || app === "claude-desktop") &&
+    (app === "codex" || app === "claude-desktop" || app === "dsh") &&
     !isCodexConversationModel(model)
   )
     throw new Error("图片生成模型不能用作对话模型，请选择对话模型。");
@@ -392,7 +405,15 @@ export function buildConnection(
     );
   const p: Provider = previous
     ? structuredClone(previous)
-    : { id: crypto.randomUUID(), name, settingsConfig: {}, category: "custom" };
+    : {
+        id:
+          app === "dsh"
+            ? `osir-${crypto.randomUUID().replace(/-/g, "")}`
+            : crypto.randomUUID(),
+        name,
+        settingsConfig: {},
+        category: "custom",
+      };
   const c = p.settingsConfig;
   p.name = name;
   if (app === "codex")
@@ -427,6 +448,18 @@ export function buildConnection(
     const models = c.modelCatalog?.models || [];
     if (!models.some((x: { model: string }) => x.model === model))
       c.modelCatalog = { ...c.modelCatalog, models: [...models, { model }] };
+  } else if (app === "dsh") {
+    c.api = {
+      openai_chat: "openai-completions",
+      openai_responses: "openai-responses",
+      anthropic: "anthropic-messages",
+    }[input.protocol as "openai_chat"];
+    if (!c.api) throw new Error("请选择 OpenAI 或 Anthropic 协议。");
+    c.options = { ...c.options, baseURL: baseUrl };
+    if (apiKey) c.options.apiKey = apiKey;
+    else delete c.options.apiKey;
+    c.models = { ...c.models, [model]: c.models?.[model] || { name: model } };
+    c.defaultModel = model;
   } else if (app === "opencode") {
     c.npm = c.npm || "@ai-sdk/openai-compatible";
     c.options = { ...c.options, baseURL: baseUrl, apiKey };
@@ -475,7 +508,7 @@ export function modelNames(p: Provider, app: ConnectionToolId): string[] {
       ? p.settingsConfig.modelCatalog?.models?.map(
           (x: { model: string }) => x.model,
         )
-      : app === "opencode"
+      : app === "opencode" || app === "dsh"
         ? Object.keys(p.settingsConfig.models || {})
         : app === "claude-desktop"
           ? Object.values(p.meta?.claudeDesktopModelRoutes ?? {}).map(

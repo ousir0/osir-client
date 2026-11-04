@@ -54,6 +54,9 @@ pub(crate) fn recheck_update(
     target: Option<&Provider>,
     mut incoming: Provider,
 ) -> Result<Provider, AppError> {
+    if app == &AppType::Dsh {
+        crate::services::osir::dsh::check_reference(saved, &incoming)?;
+    }
     if original_id != incoming.id && target.and_then(binding).is_some() {
         return Err(invalid());
     }
@@ -125,7 +128,7 @@ pub(super) fn lock_open_code(
     state: &crate::store::AppState,
     app: &AppType,
 ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
-    matches!(app, AppType::OpenCode)
+    matches!(app, AppType::OpenCode | AppType::Dsh)
         .then(|| futures::executor::block_on(state.proxy_service.lock_switch_for_app(app.as_str())))
 }
 pub(crate) fn non_model_settings(
@@ -274,7 +277,8 @@ pub(crate) fn non_model_settings(
                 }
             }
         }
-        AppType::OpenCode => {
+        AppType::OpenCode | AppType::Dsh => {
+            root.remove("defaultModel");
             if let Some(models) = root.remove("models") {
                 let mut remainder = serde_json::Map::new();
                 for (id, model) in models.as_object().ok_or_else(invalid)? {

@@ -56,6 +56,7 @@ fn app_display_name(app: &AppType) -> &'static str {
         AppType::Pi => "Pi",
         AppType::Mcode => "MiniMax Code",
         AppType::Kimi => "Kimi Code",
+        AppType::Dsh => "DeepSeek Harness",
         AppType::Agy => "Antigravity",
         AppType::Omp => "Oh My Pi",
     }
@@ -2655,43 +2656,48 @@ static APPLIED_INDICATOR: Lazy<Mutex<Option<(bool, String)>>> = Lazy::new(|| Mut
 /// 问题区有内容时托盘图标加圆点、悬停提示写第一条问题；问题都消失后换回原图标和提示。只在
 /// 变了时才动（Linux 每次换图标都要写临时文件）。
 fn update_problem_indicator(app: &tauri::AppHandle, texts: &TrayTexts, problems: &[TrayProblem]) {
-    // 启动时第一次建菜单那会儿托盘图标还没建，等下一次重建。
-    let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        return;
-    };
     let has_dot = !problems.is_empty();
     let tooltip = tray_tooltip(texts, problems);
-    // 只在锁里比对和记账：换图标要回主线程执行，不能拿着锁等。
-    let icon_changed = {
-        let mut applied = lock(&APPLIED_INDICATOR);
-        if applied.as_ref() == Some(&(has_dot, tooltip.clone())) {
+    let handle = app.clone();
+    // Keep the replacement image and its template flag in the same AppKit
+    // turn. Separate queued calls can paint a black image on a dark menu bar.
+    if let Err(error) = app.run_on_main_thread(move || {
+        let Some(tray) = handle.tray_by_id(TRAY_ID) else {
+            return;
+        };
+        let previous = lock(&APPLIED_INDICATOR).clone();
+        if previous.as_ref() == Some(&(has_dot, tooltip.clone())) {
             return;
         }
-        let changed = applied.as_ref().map_or(has_dot, |(dot, _)| *dot != has_dot);
-        *applied = Some((has_dot, tooltip.clone()));
-        changed
-    };
-    if icon_changed {
-        if let Some((base, template)) = base_tray_icon(app) {
+        let changed = previous
+            .as_ref()
+            .map_or(has_dot, |(dot, _)| *dot != has_dot);
+        if changed {
+            let Some((base, template)) = base_tray_icon(&handle) else {
+                return;
+            };
             let icon = if has_dot {
                 icon_with_problem_dot(&base, template)
             } else {
                 base
             };
-            if let Err(e) = tray.set_icon(Some(icon)) {
-                log::warn!("[Tray] 更新托盘图标失败: {e}");
+            if let Err(error) = tray.set_icon(Some(icon)) {
+                log::warn!("[Tray] 更新托盘图标失败: {error}");
+                return;
             }
-            // macOS 上 set_icon 会把模板标记清掉，要再设一次，否则深色菜单栏里是黑图标。
-            if template {
-                if let Err(e) = tray.set_icon_as_template(true) {
-                    log::warn!("[Tray] 恢复模板图标标记失败: {e}");
-                }
+            if let Err(error) = tray.set_icon_as_template(template) {
+                log::warn!("[Tray] 恢复模板图标标记失败: {error}");
+                return;
             }
         }
-    }
-    // Linux（AppIndicator）不显示悬停提示，设了也无害。
-    if let Err(e) = tray.set_tooltip(Some(&tooltip)) {
-        log::warn!("[Tray] 更新托盘悬停提示失败: {e}");
+        if let Err(error) = tray.set_tooltip(Some(&tooltip)) {
+            log::warn!("[Tray] 更新托盘悬停提示失败: {error}");
+            return;
+        }
+        // Failed native writes remain retryable on the next status refresh.
+        *lock(&APPLIED_INDICATOR) = Some((has_dot, tooltip));
+    }) {
+        log::warn!("[Tray] 无法更新状态栏: {error}");
     }
 }
 
@@ -2921,6 +2927,18 @@ fn navigate(app: &tauri::AppHandle, navigation: TrayNavigation) {
 
 /// 显示并聚焦主窗口；轻量模式下重建窗口。
 pub fn show_main_window(app: &tauri::AppHandle) {
+    crate::startup::request_foreground();
+    #[cfg(target_os = "macos")]
+    {
+        // Restore activation before ordering/focusing a formerly accessory app.
+        apply_tray_policy(app, true);
+        if let Err(error) = app.show() {
+            log::warn!("[Window] 激活应用失败: {error}");
+        }
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            let _ = tray.set_visible(true);
+        }
+    }
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(target_os = "windows")]
         {
@@ -2932,10 +2950,6 @@ pub fn show_main_window(app: &tauri::AppHandle) {
         #[cfg(target_os = "linux")]
         {
             crate::linux_fix::nudge_main_window(window.clone(), "tray-show-main");
-        }
-        #[cfg(target_os = "macos")]
-        {
-            apply_tray_policy(app, true);
         }
     } else if crate::lightweight::is_lightweight_mode() {
         if let Err(e) = crate::lightweight::exit_lightweight_mode(app) {

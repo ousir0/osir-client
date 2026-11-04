@@ -41,6 +41,7 @@ fn tool(value: &str) -> Result<AppType, String> {
         "claude" => Ok(AppType::Claude),
         "claude-desktop" => Ok(AppType::ClaudeDesktop),
         "opencode" => Ok(AppType::OpenCode),
+        "dsh" => Ok(AppType::Dsh),
         "gemini" => Ok(AppType::Gemini),
         _ => Err("此工具不支持恢复账户连接凭据".into()),
     }

@@ -15,9 +15,9 @@ use std::time::Duration;
 const CLI_TIMEOUT: Duration = Duration::from_secs(4);
 // Keep the catalog aligned with CC Switch's existing CLI lifecycle handlers.
 // Codex is inventoried as Desktop here; its CLI remains in Codex's install tab.
-const CLI_TOOLS: [&str; 11] = [
+const CLI_TOOLS: [&str; 12] = [
     "claude", "opencode", "gemini", "grok", "openclaw", "hermes", "pi", "mcode", "kimi", "agy",
-    "omp",
+    "omp", "dsh",
 ];
 const INVENTORY_CONCURRENCY: usize = 2;
 const WORKBUDDY_DOWNLOAD_URL: &str = "https://www.workbuddy.ai/";
@@ -195,6 +195,8 @@ pub async fn osir_desktop_runtime(app: tauri::AppHandle) -> Result<Vec<OsirToolD
         detect_desktop("workbuddy"),
     );
     let mut records = vec![codex, claude, workbuddy];
+    #[cfg(target_os = "macos")]
+    records.push(detect_desktop("dsh").await);
     refresh_runtime(&app, &mut records).await;
     Ok(records)
 }
@@ -213,6 +215,15 @@ async fn detect_inventory() -> Vec<OsirToolDetection> {
     let mut records = vec![codex, claude_desktop];
     records.extend(cli);
     records.push(workbuddy);
+    #[cfg(target_os = "macos")]
+    {
+        let dsh = detect_desktop("dsh").await;
+        if dsh.installed || dsh.status == ToolStatus::Unavailable {
+            if let Some(record) = records.iter_mut().find(|r| r.id == "dsh") {
+                *record = dsh;
+            }
+        }
+    }
     records
 }
 
@@ -482,7 +493,8 @@ pub(super) async fn launch_installed_codex(
 
 fn valid_launch_target(id: &str, target: &str) -> bool {
     (target == "cli" && (id == "codex" || CLI_TOOLS.contains(&id)))
-        || (target == "desktop" && matches!(id, "codex" | "claude-desktop" | "workbuddy"))
+        || (target == "desktop" && matches!(id, "codex" | "claude-desktop" | "workbuddy")
+            || (target == "desktop" && id == "dsh" && cfg!(target_os = "macos")))
 }
 
 fn launch_directory(target: &str, directory: Option<String>) -> Result<Option<PathBuf>, String> {

@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "修复 OSIRAPI 分组加载与密钥切换后的模型路由，改善已保存登录凭据恢复、客户端首次打开和 Codex 重启。Codex 聚合支持拖动供应商调整模型顺序。补强 Windows 凭据恢复日志和更新流程，Windows 安装包继续采用小型运行库引导程序。"
+  "notes": "新增 DeepSeek Harness：支持保存与切换连接、选择默认模型、OSIRAPI 密钥接入、MCP、技能与本地历史。工具管理中位于 Codex 和 Claude 之后。修复窗口部分区域无法拖动、手动打开时仅显示菜单栏，以及 macOS 菜单栏图标更新后偶尔不可见的问题。"
 }

@@ -50,6 +50,7 @@ fn desktop_identity(id: &str) -> Option<&'static str> {
     match id {
         "codex" => Some(BUNDLE_ID),
         "claude-desktop" => Some(CLAUDE_BUNDLE_ID),
+        "dsh" => Some(DSH_BUNDLE_ID),
         "workbuddy" => Some(WORKBUDDY_BUNDLE_ID),
         _ => None,
     }
@@ -58,6 +59,7 @@ fn desktop_label(id: &str) -> &'static str {
     match id {
         "codex" => "Codex Desktop",
         "claude-desktop" => "Claude Desktop",
+        "dsh" => "DeepSeek Harness",
         _ => "WorkBuddy",
     }
 }
@@ -703,6 +705,11 @@ pub(super) async fn refresh_runtime(app: &tauri::AppHandle, records: &mut [OsirT
                     "cli"
                 },
             );
+        if record.id == "dsh" && crate::distribution::is_isolated() {
+            record.launch_supported = false;
+            record.runtime_error = Some("开发环境请使用隔离命令行调试 DeepSeek Harness".into());
+            continue;
+        }
         if record.kind != ToolKind::Desktop {
             continue;
         }

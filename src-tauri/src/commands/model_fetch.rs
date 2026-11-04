@@ -203,6 +203,32 @@ pub async fn fetch_models_for_config(
     .await
 }
 
+/// Resolve the saved key in Rust and never return upstream bodies or credentials.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn fetch_dsh_models_for_provider(
+    state: tauri::State<'_, crate::store::AppState>,
+    provider_id: String,
+    base_url: String,
+    api_format: String,
+) -> Result<Vec<FetchedModel>, String> {
+    let native_api = match api_format.as_str() {
+        "openai_chat" => "openai-completions",
+        "openai_responses" => "openai-responses",
+        "anthropic-messages" => "anthropic-messages",
+        _ => return Err("所选协议暂不支持获取模型。".into()),
+    };
+    let key = crate::services::osir::dsh::model_request_key(
+        &state.db,
+        &provider_id,
+        &base_url,
+        native_api,
+    )
+    .map_err(|_| "连接已修改或密钥暂不可用，请填写密钥后重试。".to_string())?;
+    model_fetch::fetch_models(&base_url, &key, false, None, None, Some(&api_format), None)
+        .await
+        .map_err(|_| "获取模型失败，请检查连接和服务状态后重试。".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse_opencode_models, OpenCodeModelRef};
