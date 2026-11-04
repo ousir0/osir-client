@@ -468,7 +468,7 @@ try {
 
     $stage = 'crossVersionUpgrade'
     $baselineInstaller = $env:OSIR_UPGRADE_BASELINE
-    Assert-Smoke ($manifest.version -eq '0.1.6') 'This acceptance requires target 0.1.6.'
+    Assert-Smoke ($manifest.version -eq '0.1.7') 'This acceptance requires target 0.1.7.'
     Assert-Smoke ((Get-Hash $baselineInstaller) -eq 'b409637fd7a05d1835c7190d1c7224193af2f8fcc48763fbfe1dcae2cd82b1c5') 'Published 0.1.3 installer differs from the pinned baseline.'
     Invoke-Installer $baselineInstaller ("/S /D=" + $installDir)
     Assert-Smoke ((Get-Hash $mainExe) -eq 'e2846166db5fad1a6a9a8e6265f8ab6d644b9d23eb62b8a194a1b627ca15a42d') 'Installed 0.1.3 executable differs from the published baseline.'
@@ -595,7 +595,7 @@ print('Published baseline database preserved')
     & python $upgradeFixture verify (Join-Path $isolatedToolHome '.osir_client/osir_client.db')
     Assert-Smoke ($LASTEXITCODE -eq 0) 'Cross-version installer upgrade lost the synthetic baseline row.'
     $report.stages.crossVersionUpgrade = [ordered]@{
-        passed = $true; fromVersion = '0.1.3'; toVersion = '0.1.6'
+        passed = $true; fromVersion = '0.1.3'; toVersion = '0.1.7'
         kind = 'published-installer-to-new-installer-UPDATE-isolated-home'
         baselineInstallerSha256 = 'b409637fd7a05d1835c7190d1c7224193af2f8fcc48763fbfe1dcae2cd82b1c5'
         baselineWindowObserved = $true; newRendererAndNativeIpcPassed = $true
@@ -703,7 +703,7 @@ print("Synthetic migration fixture verified")
     $diagnostic = Invoke-UserDiagnostics 'installed' (Get-Hash $mainExe)
     Assert-Smoke ($diagnostic.powershell -like '5.1.*') 'Diagnostics did not run under Windows PowerShell 5.1.'
     Assert-Smoke ($diagnostic.executable.isExpectedBuild -eq $true -and $diagnostic.startupTest.aliveAfter12Seconds -eq $true -and $diagnostic.startupTest.windowObserved -eq $true) 'Diagnostics did not observe the installed build opening.'
-    Assert-Smoke ($diagnostic.codexQuerySucceeded -eq $true -and @($diagnostic.codexPackages | Where-Object { $_.Version -eq '26.1027.6604.0' }).Count -eq 1) 'Diagnostics did not record the real installed Codex.'
+    Assert-Smoke ($diagnostic.codexQuerySucceeded -eq $true -and @($diagnostic.codexPackages | Where-Object { $_.Version -eq '26.1029.7803.0' }).Count -eq 1) 'Diagnostics did not record the real installed Codex.'
     $detectedConfig = @($diagnostic.configurationDirectories | Where-Object { $_.path -eq $currentConfig })
     Assert-Smoke ($detectedConfig.Count -eq 1 -and $detectedConfig[0].database.sqliteHeader -eq $true) 'Diagnostics did not read synthetic database metadata.'
     $report.stages.userDiagnostics = [ordered]@{
