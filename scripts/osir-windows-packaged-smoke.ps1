@@ -650,10 +650,12 @@ else:
         with readonly(path) as database:
             assert database.execute("PRAGMA quick_check").fetchone() == ("ok",)
             assert database.execute("SELECT value FROM osir_migration_acceptance").fetchall() == [("synthetic-preserved-row",)]
-            expected_version = 20 if index == 0 else 24
+            expected_version = 20 if index == 0 else 25
             assert database.execute('PRAGMA user_version').fetchone()[0] == expected_version
             if index == 1:
                 assert database.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='osir_model_credentials'").fetchone() == (1,)
+                for table in ("mcp_servers", "skills"):
+                    assert "enabled_dsh" in [r[1] for r in database.execute("PRAGMA table_info(" + table + ")")]
 print("Synthetic migration fixture verified")
 '@ | Set-Content -LiteralPath $fixtureScript -Encoding utf8NoBOM
     $legacyDatabase = Join-Path $legacyConfig 'cc-switch.db'
