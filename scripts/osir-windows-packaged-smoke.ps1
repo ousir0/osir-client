@@ -468,10 +468,10 @@ try {
 
     $stage = 'crossVersionUpgrade'
     $baselineInstaller = $env:OSIR_UPGRADE_BASELINE
-    Assert-Smoke ($manifest.version -eq '0.1.7') 'This acceptance requires target 0.1.7.'
-    Assert-Smoke ((Get-Hash $baselineInstaller) -eq 'b409637fd7a05d1835c7190d1c7224193af2f8fcc48763fbfe1dcae2cd82b1c5') 'Published 0.1.3 installer differs from the pinned baseline.'
+    Assert-Smoke ($manifest.version -eq '0.1.8') 'This acceptance requires target 0.1.8.'
+    Assert-Smoke ((Get-Hash $baselineInstaller) -eq '3c419f776bd890cd7101ae9bf252e4892eb47601d5043242e2c0fe8e8855a6a0') 'Published 0.1.7 installer differs from the pinned baseline.'
     Invoke-Installer $baselineInstaller ("/S /D=" + $installDir)
-    Assert-Smoke ((Get-Hash $mainExe) -eq 'e2846166db5fad1a6a9a8e6265f8ab6d644b9d23eb62b8a194a1b627ca15a42d') 'Installed 0.1.3 executable differs from the published baseline.'
+    Assert-Smoke ((Get-Hash $mainExe) -eq 'e781489c52608fdb76cdcbb4ed9b5874a06ee783e82da140257771b58691e350') 'Installed 0.1.7 executable differs from the published baseline.'
     $ownedLaunch = Start-Isolated $mainExe
     $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
     do {
@@ -484,7 +484,7 @@ try {
     Assert-Smoke ($null -ne $baselineWindow) 'Published baseline did not show a window.'
     Start-Sleep -Seconds 2
     Stop-OwnedApp
-    $upgradeBaselineDatabase = Join-Path $smokeRoot 'published-013-baseline.db'
+    $upgradeBaselineDatabase = Join-Path $smokeRoot 'published-017-baseline.db'
     $upgradeFixture = Join-Path $smokeRoot 'upgrade-fixture.py'
     @'
 import pathlib, sqlite3, sys
@@ -493,12 +493,12 @@ with sqlite3.connect(database) as db:
     assert db.execute('PRAGMA quick_check').fetchone() == ('ok',)
     if sys.argv[1] == 'prepare':
         db.execute('CREATE TABLE osir_upgrade_acceptance(value TEXT NOT NULL)')
-        db.execute("INSERT INTO osir_upgrade_acceptance VALUES ('published-013-preserved')")
+        db.execute("INSERT INTO osir_upgrade_acceptance VALUES ('published-017-preserved')")
         db.commit()
         with sqlite3.connect(sys.argv[3]) as target:
             db.backup(target)
     else:
-        assert db.execute('SELECT value FROM osir_upgrade_acceptance').fetchall() == [('published-013-preserved',)]
+        assert db.execute('SELECT value FROM osir_upgrade_acceptance').fetchall() == [('published-017-preserved',)]
 print('Published baseline database preserved')
 '@ | Set-Content -LiteralPath $upgradeFixture -Encoding utf8NoBOM
     & python $upgradeFixture prepare (Join-Path $isolatedToolHome '.osir_client/osir_client.db') $upgradeBaselineDatabase
@@ -595,9 +595,9 @@ print('Published baseline database preserved')
     & python $upgradeFixture verify (Join-Path $isolatedToolHome '.osir_client/osir_client.db')
     Assert-Smoke ($LASTEXITCODE -eq 0) 'Cross-version installer upgrade lost the synthetic baseline row.'
     $report.stages.crossVersionUpgrade = [ordered]@{
-        passed = $true; fromVersion = '0.1.3'; toVersion = '0.1.7'
+        passed = $true; fromVersion = '0.1.7'; toVersion = '0.1.8'
         kind = 'published-installer-to-new-installer-UPDATE-isolated-home'
-        baselineInstallerSha256 = 'b409637fd7a05d1835c7190d1c7224193af2f8fcc48763fbfe1dcae2cd82b1c5'
+        baselineInstallerSha256 = '3c419f776bd890cd7101ae9bf252e4892eb47601d5043242e2c0fe8e8855a6a0'
         baselineWindowObserved = $true; newRendererAndNativeIpcPassed = $true
         databaseQuickCheck = $true; syntheticRowPreserved = $true
         updaterDownloadAndRestartCovered = $false
@@ -694,7 +694,7 @@ print("Synthetic migration fixture verified")
         migratedDatabaseQuickCheck = $true
         syntheticRowPreserved = $true
         startupLogPreserved = $true
-        scope = 'synthetic-schema20-from-published013-baseline-and-crash-only-destination'
+        scope = 'synthetic-schema20-from-published017-baseline-and-crash-only-destination'
     }
 
     $stage = 'userDiagnostics'
