@@ -512,7 +512,13 @@ export type AccountOverviewToolsProps = {
   onOpenImage?: () => void;
 };
 export type OverviewToolConnection = {
-  status: "native" | "osir_api" | "loading" | "unavailable" | "error";
+  status:
+    | "native"
+    | "api_key"
+    | "osir_api"
+    | "loading"
+    | "unavailable"
+    | "error";
   observedAt?: number;
 };
 
@@ -650,8 +656,10 @@ function OverviewToolCard({
       ? "正在读取连接…"
       : connection?.status === "error"
         ? "连接读取失败"
-        : connection?.status === "osir_api" && connectionFresh
-          ? "OSIR API 配置"
+        : (connection?.status === "api_key" ||
+              connection?.status === "osir_api") &&
+            connectionFresh
+          ? "API 密钥配置"
           : connection?.status === "native" && connectionFresh
             ? "原生配置"
             : "进入配置查看连接";

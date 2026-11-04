@@ -6,13 +6,13 @@ use crate::app_config::AppType;
 use crate::config::{get_claude_settings_path, read_json_file};
 use crate::database::Database;
 use crate::provider::Provider;
-use crate::proxy::server::ProxyServer;
+use crate::proxy::server::{ProxyServer, RestartAdmissionLease};
 use crate::proxy::switch_lock::SwitchLockManager;
 use crate::proxy::types::*;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::Emitter;
-use tokio::sync::RwLock;
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use crate::live::project::claude::PROXY_TOKEN_PLACEHOLDER;
 
@@ -23,6 +23,14 @@ pub struct ProxyService {
     /// AppHandle，用于传递给 ProxyServer 以支持故障转移时的 UI 更新
     app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
     switch_locks: SwitchLockManager,
+    maintenance: Arc<RwLock<()>>,
+}
+
+/// Admission is restored before releasing maintenance, so a replacement cannot
+/// start between the two. A lease also excludes starts when there is no server.
+pub(crate) struct RestartLease {
+    _admission: Option<RestartAdmissionLease>,
+    _maintenance: OwnedRwLockWriteGuard<()>,
 }
 
 /// 重启失败时写回库的那份配置：设置页只动四个全局字段，旧接口是整份七个字段。
@@ -63,6 +71,7 @@ impl ProxyService {
             server: Arc::new(RwLock::new(None)),
             app_handle: Arc::new(RwLock::new(None)),
             switch_locks: SwitchLockManager::new(),
+            maintenance: Arc::new(RwLock::new(())),
         }
     }
 
@@ -94,6 +103,35 @@ impl ProxyService {
         result
     }
 
+    /// Hold the pause through installation and cleanup. Dropping the lease on
+    /// failure or cancellation reopens this server's admission synchronously.
+    pub(crate) async fn prepare_restart(&self) -> Result<RestartLease, String> {
+        let maintenance = self
+            .maintenance
+            .clone()
+            .try_write_owned()
+            .map_err(|_| "代理设置正在更改或已在准备重启，请稍后重试。".to_string())?;
+        let server = self.server.read().await;
+        let admission =
+            match server.as_ref() {
+                Some(server) => Some(server.prepare_restart().await.map_err(|_| {
+                    "当前请求尚未结束，已取消重启。请等待任务完成后重试。".to_string()
+                })?),
+                None => None,
+            };
+        Ok(RestartLease {
+            _admission: admission,
+            _maintenance: maintenance,
+        })
+    }
+
+    fn try_operation(&self) -> Result<OwnedRwLockReadGuard<()>, String> {
+        self.maintenance
+            .clone()
+            .try_read_owned()
+            .map_err(|_| "正在准备重启，请稍后重试。".to_string())
+    }
+
     /// 托盘在后台线程比对、变了才重建，这里不等它。
     async fn notify_tray(&self) {
         if let Some(handle) = self.app_handle.read().await.as_ref() {
@@ -102,6 +140,20 @@ impl ProxyService {
     }
 
     async fn start_server(&self) -> Result<ProxyServerInfo, String> {
+        let _operation = self.try_operation()?;
+        // Serialize check/create/commit; two starts must not produce two generations.
+        let mut slot = self.server.write().await;
+        if let Some(server) = slot.as_ref() {
+            let status = server.get_status().await;
+            if !status.running || !server.is_accepting().await {
+                return Err("代理正在停止，请等待停止完成后重试。".into());
+            }
+            return Ok(ProxyServerInfo {
+                address: status.address,
+                port: status.port,
+                started_at: chrono::Utc::now().to_rfc3339(),
+            });
+        }
         // 1. 启动时自动设置 proxy_enabled = true
         let mut global_config = self
             .db
@@ -124,17 +176,6 @@ impl ProxyService {
             .await
             .map_err(|e| format!("获取代理配置失败: {e}"))?;
 
-        // 3. 若已在运行：确保持久化状态（如需要）并返回当前信息
-        if let Some(server) = self.server.read().await.as_ref() {
-            let status = server.get_status().await;
-            return Ok(ProxyServerInfo {
-                address: status.address,
-                port: status.port,
-                // 无法精确取回首次启动时间，返回当前时间用于 UI 展示即可
-                started_at: chrono::Utc::now().to_rfc3339(),
-            });
-        }
-
         // 4. 创建并启动服务器
         let app_handle = self.app_handle.read().await.clone();
         let server = ProxyServer::new(config.clone(), self.db.clone(), app_handle);
@@ -151,7 +192,7 @@ impl ProxyService {
         }
 
         // 5. 保存服务器实例
-        *self.server.write().await = Some(server);
+        *slot = Some(server);
 
         log::info!("代理服务器已启动: {}:{}", info.address, info.port);
         Ok(info)
@@ -220,11 +261,15 @@ impl ProxyService {
     }
 
     async fn stop_server(&self) -> Result<(), String> {
-        if let Some(server) = self.server.write().await.take() {
+        let mut slot = self.server.write().await;
+        if let Some(server) = slot.as_ref() {
             server
                 .stop()
                 .await
                 .map_err(|e| format!("停止代理服务器失败: {e}"))?;
+            // Keep ownership on timeout: callers must still be able to retry
+            // or observe a server whose in-flight connections are draining.
+            *slot = None;
 
             // 停止时设置 proxy_enabled = false
             let mut global_config = self
@@ -452,7 +497,11 @@ impl ProxyService {
     /// 获取服务器状态
     pub async fn get_status(&self) -> Result<ProxyStatus, String> {
         if let Some(server) = self.server.read().await.as_ref() {
-            Ok(server.get_status().await)
+            let mut status = server.get_status().await;
+            // Public running means the listener is still available, not merely
+            // that an owned task is draining after a stop timeout.
+            status.running &= server.is_accepting().await;
+            Ok(status)
         } else {
             // 服务器未运行时返回默认状态
             Ok(ProxyStatus {
@@ -473,6 +522,7 @@ impl ProxyService {
     /// 更新代理配置（旧接口：七个字段整份写进四行）。返回代理是否因地址或端口变了而重启：
     /// 重启后调用方要按新地址重写接上代理的客户端（`mode::controller::resync_route`）。
     pub async fn update_config(&self, config: &ProxyConfig) -> Result<bool, String> {
+        let _operation = self.try_operation()?;
         // 记录旧配置用于判定是否需要重启
         let previous = self
             .db
@@ -500,6 +550,7 @@ impl ProxyService {
     /// [`Self::update_config`] 走的旧 DAO 读的是 claude 行、写的是四行，会把 claude 的
     /// 应用级字段广播给其他三家。返回值同 [`Self::update_config`]。
     pub async fn update_global_config(&self, config: &GlobalProxyConfig) -> Result<bool, String> {
+        let _operation = self.try_operation()?;
         let previous = self
             .db
             .get_global_proxy_config()
@@ -526,6 +577,7 @@ impl ProxyService {
         require_restart: bool,
         previous: SavedProxyConfig,
     ) -> Result<bool, String> {
+        let _operation = self.try_operation()?;
         let mut server_guard = self.server.write().await;
         if server_guard.is_none() {
             return Ok(false);
@@ -544,12 +596,26 @@ impl ProxyService {
             return Ok(false);
         }
 
-        if let Some(server) = server_guard.take() {
-            server
-                .stop()
-                .await
-                .map_err(|e| format!("重启前停止代理服务器失败: {e}"))?;
+        // Pause before closing the listener. A busy server must keep serving
+        // when a settings-triggered restart cannot drain within the budget.
+        let _admission = if let Some(server) = server_guard.as_ref() {
+            match server.prepare_restart().await {
+                Ok(lease) => Some(lease),
+                Err(_) => {
+                    previous.write(&self.db).await?;
+                    return Err("当前请求尚未结束，已保留原代理设置。请等待任务完成后重试。".into());
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(server) = server_guard.as_ref() {
+            if let Err(error) = server.stop().await {
+                previous.write(&self.db).await?;
+                return Err(format!("重启前停止代理服务器失败: {error}"));
+            }
         }
+        *server_guard = None;
 
         let error = match self.start_with(&new_config).await {
             Ok(server) => {
@@ -572,6 +638,7 @@ impl ProxyService {
 
     /// 按 `config` 起一个新服务，动态端口回写进库。
     async fn start_with(&self, config: &ProxyConfig) -> Result<ProxyServer, String> {
+        let _operation = self.try_operation()?;
         let app_handle = self.app_handle.read().await.clone();
         let server = ProxyServer::new(config.clone(), self.db.clone(), app_handle);
         let info = server.start().await.map_err(|e| e.to_string())?;
@@ -586,6 +653,7 @@ impl ProxyService {
     }
 
     async fn restore_and_start(&self, previous: SavedProxyConfig) -> Result<ProxyServer, String> {
+        let _operation = self.try_operation()?;
         previous.write(&self.db).await?;
         let config = self
             .db
@@ -597,13 +665,20 @@ impl ProxyService {
 
     /// 检查服务器是否正在运行
     pub async fn is_running(&self) -> bool {
-        self.server.read().await.is_some()
+        match self.server.read().await.as_ref() {
+            Some(server) => server.is_accepting().await && server.get_status().await.running,
+            None => false,
+        }
     }
 
     /// 同 [`Self::is_running`]，但不等锁：托盘菜单这种同步路径用。正在启动 / 停止、拿不到锁时
     /// 为 `None`（按「不知道」处理，不报问题）。
     pub fn running_now(&self) -> Option<bool> {
-        self.server.try_read().ok().map(|server| server.is_some())
+        let slot = self.server.try_read().ok()?;
+        match slot.as_ref() {
+            Some(server) => server.accepting_now(),
+            None => Some(false),
+        }
     }
 
     /// 热更新熔断器配置
@@ -660,6 +735,293 @@ impl ProxyService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn settings_restart_timeout_keeps_original_listener_and_config() {
+        use std::time::Duration;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let db = Arc::new(Database::memory().unwrap());
+        let service = ProxyService::new(db.clone());
+        let mut global = db.get_global_proxy_config().await.unwrap();
+        global.listen_address = "127.0.0.1".into();
+        global.listen_port = 0;
+        db.update_global_proxy_config(global).await.unwrap();
+        let port = service.start().await.unwrap().port;
+        let original = db.get_global_proxy_config().await.unwrap();
+        let mut pending = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        pending.write_all(b"POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n").await.unwrap();
+        let mut interim = [0; b"HTTP/1.1 100 Continue\r\n\r\n".len()];
+        tokio::time::timeout(Duration::from_secs(2), pending.read_exact(&mut interim))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+        let mut changed = original.clone();
+        changed.listen_port = 0;
+        let error = tokio::time::timeout(
+            Duration::from_secs(33),
+            service.update_global_config(&changed),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(error.contains("已保留原代理设置"));
+        assert!(service.is_running().await);
+        assert_eq!(
+            serde_json::to_value(db.get_global_proxy_config().await.unwrap()).unwrap(),
+            serde_json::to_value(original).unwrap()
+        );
+        // The original request survives, and admission reopens on the same port.
+        pending.write_all(b"{").await.unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(2), pending.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        // Invalid JSON reaches the existing parser after the pending body is
+        // supplied. Its current protocol status is Internal (500).
+        assert!(response.starts_with(b"HTTP/1.1 500"));
+        let mut next = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        next.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        response.clear();
+        tokio::time::timeout(Duration::from_secs(2), next.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 "));
+        assert!(!response.starts_with(b"HTTP/1.1 503"));
+        service.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn maintenance_without_server_rejects_concurrent_start_and_config_writes() {
+        let db = Arc::new(Database::memory().unwrap());
+        let service = ProxyService::new(db.clone());
+        let original = db.get_global_proxy_config().await.unwrap();
+        let mut global = original.clone();
+        global.listen_port = 0;
+        let mut config = db.get_proxy_config().await.unwrap();
+        let original_config = serde_json::to_value(&config).unwrap();
+        config.listen_port = 0;
+        let lease = service.prepare_restart().await.unwrap();
+        let starting = {
+            let service = service.clone();
+            tokio::spawn(async move { service.start().await })
+        };
+        let updating = {
+            let service = service.clone();
+            tokio::spawn(async move { service.update_config(&config).await })
+        };
+        let updating_global = {
+            let service = service.clone();
+            tokio::spawn(async move { service.update_global_config(&global).await })
+        };
+        assert!(starting.await.unwrap().is_err());
+        assert!(updating.await.unwrap().is_err());
+        assert!(updating_global.await.unwrap().is_err());
+        assert!(service.server.read().await.is_none());
+        assert_eq!(
+            serde_json::to_value(db.get_global_proxy_config().await.unwrap()).unwrap(),
+            serde_json::to_value(original).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(db.get_proxy_config().await.unwrap()).unwrap(),
+            original_config
+        );
+        assert!(service.prepare_restart().await.is_err());
+        drop(lease);
+        assert!(service.try_operation().is_ok());
+    }
+
+    #[tokio::test]
+    async fn maintenance_lease_survives_cleanup_stop_and_excludes_new_generation() {
+        let db = Arc::new(Database::memory().unwrap());
+        let service = ProxyService::new(db.clone());
+        let mut global = db.get_global_proxy_config().await.unwrap();
+        global.listen_address = "127.0.0.1".into();
+        global.listen_port = 0;
+        db.update_global_proxy_config(global).await.unwrap();
+        service.start().await.unwrap();
+        let lease = service.prepare_restart().await.unwrap();
+        // Cleanup must run under exclusive maintenance without reacquiring a read guard.
+        tokio::time::timeout(std::time::Duration::from_secs(2), service.stop())
+            .await
+            .unwrap()
+            .unwrap();
+        let starting = {
+            let service = service.clone();
+            tokio::spawn(async move { service.start().await })
+        };
+        assert!(starting.await.unwrap().is_err());
+        assert!(service.server.read().await.is_none());
+        let config = db.get_proxy_config().await.unwrap();
+        assert!(service.start_with(&config).await.is_err());
+        assert!(service
+            .restore_and_start(SavedProxyConfig::Legacy(config))
+            .await
+            .is_err());
+        drop(lease);
+        service.start().await.unwrap();
+        service.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn maintenance_cannot_overtake_start_commit_and_cancellation_releases_it() {
+        let db = Arc::new(Database::memory().unwrap());
+        let service = ProxyService::new(db.clone());
+        let mut global = db.get_global_proxy_config().await.unwrap();
+        global.listen_address = "127.0.0.1".into();
+        global.listen_port = 0;
+        db.update_global_proxy_config(global).await.unwrap();
+        let slot = service.server.write().await;
+        let starting = {
+            let service = service.clone();
+            tokio::spawn(async move { service.start().await })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while service.maintenance.try_write().is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(service.prepare_restart().await.is_err());
+        drop(slot);
+        starting.await.unwrap().unwrap();
+
+        // Cancellation while prepare waits for the server lock must drop the
+        // service maintenance write guard, even before an admission lease exists.
+        let slot = service.server.write().await;
+        let preparing = {
+            let service = service.clone();
+            tokio::spawn(async move { service.prepare_restart().await })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while service.maintenance.try_read().is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        preparing.abort();
+        assert!(matches!(preparing.await, Err(error) if error.is_cancelled()));
+        assert!(service.try_operation().is_ok());
+        drop(slot);
+        service.stop().await.unwrap();
+    }
+
+    /// Exercise the real service stop path and its five-second production budget.
+    /// Expect/Continue acknowledges that the request body is being polled before
+    /// stop begins, without relying on the forwarding-only active counter.
+    #[tokio::test]
+    async fn stop_timeout_preserves_server_and_allows_service_stop_retry() {
+        use std::time::Duration;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let db = Arc::new(Database::memory().unwrap());
+        let service = ProxyService::new(db.clone());
+        let mut global = db.get_global_proxy_config().await.unwrap();
+        global.listen_address = "127.0.0.1".into();
+        global.listen_port = 0;
+        db.update_global_proxy_config(global).await.unwrap();
+        let port = service.start().await.unwrap().port;
+        let mut pending = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        pending.write_all(b"POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n").await.unwrap();
+        let mut interim = [0; b"HTTP/1.1 100 Continue\r\n\r\n".len()];
+        tokio::time::timeout(Duration::from_secs(2), pending.read_exact(&mut interim))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+
+        let error = tokio::time::timeout(Duration::from_secs(7), service.stop())
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(error.contains("停止超时"), "{error}");
+        assert!(
+            service.server.read().await.is_some(),
+            "timeout must retain the actual server"
+        );
+        assert!(
+            !service.is_running().await,
+            "closed listener must not report available"
+        );
+        assert_eq!(service.running_now(), Some(false));
+        assert!(!service.get_status().await.unwrap().running);
+        assert!(
+            service.start().await.is_err(),
+            "a draining server is not a successful start"
+        );
+        assert!(
+            service
+                .server
+                .read()
+                .await
+                .as_ref()
+                .unwrap()
+                .get_status()
+                .await
+                .running,
+            "still draining this request"
+        );
+        assert!(db.get_global_proxy_config().await.unwrap().proxy_enabled);
+        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_err());
+        let mut probe = [0; 1];
+        assert!(
+            matches!(pending.try_read(&mut probe), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+
+        // Invalid synthetic JSON ends at local parsing, before credentials or upstream IO.
+        pending.write_all(b"{").await.unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(2), pending.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            response.starts_with(b"HTTP/1.1 "),
+            "the original request must finish normally"
+        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while service
+                .server
+                .read()
+                .await
+                .as_ref()
+                .unwrap()
+                .get_status()
+                .await
+                .running
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            service.server.read().await.is_some(),
+            "completed server awaits the service retry"
+        );
+
+        service.stop().await.unwrap();
+        assert!(service.server.read().await.is_none());
+        assert!(!service.is_running().await);
+        assert!(!service.get_status().await.unwrap().running);
+        assert!(!db.get_global_proxy_config().await.unwrap().proxy_enabled);
+    }
+
     async fn seed_distinct_app_proxy_configs(db: &Database) -> Vec<Value> {
         let mut configs = Vec::new();
         for (app, retries) in [("claude", 6), ("codex", 0), ("gemini", 2), ("grokbuild", 3)] {

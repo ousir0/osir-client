@@ -26,8 +26,24 @@ use axum::{
 use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{oneshot, RwLock};
-use tokio::task::JoinHandle;
+use tokio::sync::{oneshot, watch, Mutex, RwLock};
+use tokio::task::{JoinHandle, JoinSet};
+
+#[path = "admission.rs"]
+mod admission;
+#[path = "request_body.rs"]
+pub(crate) mod request_body;
+
+const STOP_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const RESTART_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+type ServerTaskHandle = Arc<RwLock<Option<JoinHandle<Result<(), ProxyError>>>>>;
+
+/// Binds a restart pause to one server generation. Drop synchronously reopens
+/// admission unless that generation is already stopping or was explicitly resumed.
+pub(crate) struct RestartAdmissionLease {
+    _lease: admission::PauseLease,
+}
 
 /// 代理服务器状态（共享）
 #[derive(Clone)]
@@ -50,13 +66,20 @@ pub struct ProxyState {
     pub failover_manager: Arc<FailoverSwitchManager>,
 }
 
-/// 代理HTTP服务器
+/// 代理HTTP服务器。
+///
+/// Connection draining requires a live Tokio runtime. Dropping this value signals
+/// shutdown but does not synchronously join tasks; process/runtime exit cannot
+/// promise request completion. Exit/update callers must await stop explicitly.
 pub struct ProxyServer {
     config: ProxyConfig,
     state: ProxyState,
     shutdown_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
     /// 服务器任务句柄，用于等待服务器实际关闭
-    server_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
+    server_handle: ServerTaskHandle,
+    lifecycle: Mutex<()>,
+    admission: RwLock<admission::Admission>,
+    force_tx: watch::Sender<bool>,
 }
 
 #[cfg(test)]
@@ -91,17 +114,22 @@ impl ProxyServer {
             failover_manager,
         };
 
+        let (force_tx, _) = watch::channel(false);
         Self {
             config,
             state,
             shutdown_tx: Arc::new(RwLock::new(None)),
             server_handle: Arc::new(RwLock::new(None)),
+            lifecycle: Mutex::new(()),
+            admission: RwLock::new(admission::Admission::new()),
+            force_tx,
         }
     }
 
     pub async fn start(&self) -> Result<ProxyServerInfo, ProxyError> {
+        let _lifecycle = self.lifecycle.lock().await;
         // 检查是否已在运行
-        if self.shutdown_tx.read().await.is_some() {
+        if self.server_handle.read().await.is_some() {
             return Err(ProxyError::AlreadyRunning);
         }
 
@@ -124,6 +152,10 @@ impl ProxyServer {
             .local_addr()
             .map_err(|e| ProxyError::BindFailed(e.to_string()))?;
         let actual_port = local_addr.port();
+        let admission = admission::Admission::new();
+        *self.admission.write().await = admission.clone();
+        self.force_tx.send_replace(false);
+        let mut force_rx = self.force_tx.subscribe();
 
         log::info!("[{}] 代理服务器启动于 {local_addr}", log_srv::STARTED);
 
@@ -148,25 +180,45 @@ impl ProxyServer {
         let state = self.state.clone();
         let handle = tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
+            let (drain_tx, _) = watch::channel(false);
+            let mut connections = JoinSet::new();
+            let mut connection_failed = false;
             loop {
                 tokio::select! {
+                    biased;
+                    _ = &mut shutdown_rx => {
+                        break;
+                    }
+                    result = connections.join_next(), if !connections.is_empty() => {
+                        if let Some(Err(_)) = result {
+                            connection_failed = true;
+                            log::warn!("[{}] 代理连接任务异常结束", log_srv::TASK_ERROR);
+                        }
+                    }
                     result = listener.accept() => {
                         let (stream, _remote_addr) = match result {
                             Ok(v) => v,
-                            Err(e) => {
-                                log::error!("[{SRV}] accept 失败: {e}", SRV = log_srv::ACCEPT_ERR);
+                            Err(_) => {
+                                log::error!("[{SRV}] accept 失败: operation_failed", SRV = log_srv::ACCEPT_ERR);
                                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                                 continue;
                             }
                         };
 
                         let app = app.clone();
-                        tokio::spawn(async move {
+                        let admission = admission.clone();
+                        let mut drain_rx = drain_tx.subscribe();
+                        connections.spawn(async move {
                             // Peek raw TCP bytes to capture original header casing
                             // before hyper parses (and lowercases) the header names.
                             let original_cases = {
                                 let mut peek_buf = vec![0u8; 8192];
-                                match stream.peek(&mut peek_buf).await {
+                                let peek = tokio::select! {
+                                    biased;
+                                    _ = drain_rx.changed() => return,
+                                    result = stream.peek(&mut peek_buf) => result,
+                                };
+                                match peek {
                                     Ok(n) => {
                                         let cases = super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..n]);
                                         log::debug!(
@@ -175,8 +227,8 @@ impl ProxyServer {
                                         );
                                         cases
                                     }
-                                    Err(e) => {
-                                        log::debug!("[ProxyServer] peek failed (non-fatal): {e}");
+                                    Err(_) => {
+                                        log::debug!("[ProxyServer] peek failed (non-fatal): operation_failed");
                                         super::hyper_client::OriginalHeaderCases::default()
                                     }
                                 }
@@ -186,7 +238,16 @@ impl ProxyServer {
                             let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                                 let mut router = app.clone();
                                 let cases = original_cases.clone();
+                                let guard = admission.enter();
                                 async move {
+                                    let Some(guard) = guard else {
+                                        use axum::response::IntoResponse;
+                                        return Ok::<_, std::convert::Infallible>((
+                                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                                            [("connection", "close"), ("retry-after", "1")],
+                                            "Proxy is preparing to restart; retry shortly",
+                                        ).into_response());
+                                    };
                                     // 将 hyper::body::Incoming 转为 axum::body::Body，保留 extensions
                                     let (mut parts, body) = req.into_parts();
 
@@ -195,22 +256,50 @@ impl ProxyServer {
 
                                     let body = axum::body::Body::new(body);
                                     let axum_req = http::Request::from_parts(parts, body);
-                                    <Router as tower::Service<http::Request<axum::body::Body>>>::call(&mut router, axum_req).await
+                                    let response = <Router as tower::Service<http::Request<axum::body::Body>>>::call(&mut router, axum_req).await?;
+                                    Ok(admission::track_response(response, guard))
                                 }
                             });
 
-                            if let Err(e) = hyper::server::conn::http1::Builder::new()
-                                .preserve_header_case(true)
-                                .serve_connection(TokioIo::new(stream), service)
-                                .await
-                            {
+                            let mut builder = hyper::server::conn::http1::Builder::new();
+                            builder.preserve_header_case(true);
+                            let connection = builder.serve_connection(TokioIo::new(stream), service);
+                            tokio::pin!(connection);
+                            let result = tokio::select! {
+                                result = &mut connection => result,
+                                _ = drain_rx.changed() => {
+                                    connection.as_mut().graceful_shutdown();
+                                    connection.await
+                                }
+                            };
+                            if result.is_err() {
                                 // Connection reset / broken pipe 等在代理场景下很常见，debug 级别
-                                log::debug!("[{SRV}] connection error: {e}", SRV = log_srv::CONN_ERR);
+                                log::debug!("[{SRV}] connection error: operation_failed", SRV = log_srv::CONN_ERR);
                             }
                         });
                     }
-                    _ = &mut shutdown_rx => {
-                        break;
+                }
+            }
+
+            // Close admission and the listening socket before waiting on real tasks.
+            admission.stop();
+            drop(listener);
+            drain_tx.send_replace(true);
+            let mut forced = false;
+            let mut force_channel_open = true;
+            while !connections.is_empty() {
+                if *force_rx.borrow_and_update() {
+                    forced = true;
+                    connections.abort_all();
+                }
+                tokio::select! {
+                    result = connections.join_next() => {
+                        if let Some(Err(error)) = result {
+                            if !forced || !error.is_cancelled() { connection_failed = true; }
+                        }
+                    }
+                    changed = force_rx.changed(), if !forced && force_channel_open => {
+                        force_channel_open = changed.is_ok();
                     }
                 }
             }
@@ -218,6 +307,11 @@ impl ProxyServer {
             // 服务器停止后更新状态
             state.status.write().await.running = false;
             *state.start_time.write().await = None;
+            if connection_failed {
+                Err(ProxyError::StopFailed("代理连接任务异常结束".into()))
+            } else {
+                Ok(())
+            }
         });
 
         // 保存服务器任务句柄
@@ -231,35 +325,86 @@ impl ProxyServer {
     }
 
     pub async fn stop(&self) -> Result<(), ProxyError> {
-        // 1. 发送关闭信号
+        self.stop_with_policy(false, STOP_DRAIN_TIMEOUT).await
+    }
+
+    /// Only for a caller that has already obtained explicit interruption consent.
+    #[allow(dead_code)] // Reserved for the explicit-interruption service wrapper.
+    pub async fn stop_force(&self) -> Result<(), ProxyError> {
+        self.stop_with_policy(true, STOP_DRAIN_TIMEOUT).await
+    }
+
+    /// Pauses new requests atomically with guard acquisition, including keep-alive.
+    /// Timeout/cancellation resumes admission; success keeps it paused until resumed.
+    pub(crate) async fn prepare_restart(&self) -> Result<RestartAdmissionLease, ProxyError> {
+        let admission = {
+            let _lifecycle = self.lifecycle.lock().await;
+            if self.shutdown_tx.read().await.is_none() {
+                return Err(ProxyError::NotRunning);
+            }
+            self.admission.read().await.clone()
+        };
+        admission
+            .pause_and_wait(RESTART_DRAIN_TIMEOUT)
+            .await
+            .map(|lease| RestartAdmissionLease { _lease: lease })
+            .map_err(|_| ProxyError::StopTimeout)
+    }
+
+    #[allow(dead_code)] // Explicit cancellation API; normal callers drop the lease.
+    pub async fn resume_admission(&self) -> Result<(), ProxyError> {
+        self.admission
+            .read()
+            .await
+            .resume()
+            .map_err(|_| ProxyError::NotRunning)
+    }
+
+    async fn stop_with_policy(
+        &self,
+        force: bool,
+        timeout: std::time::Duration,
+    ) -> Result<(), ProxyError> {
+        let _lifecycle = self.lifecycle.lock().await;
+        let mut slot = self.server_handle.write().await;
+        let handle = slot.as_mut().ok_or(ProxyError::NotRunning)?;
+        self.admission.read().await.stop();
+        if force {
+            self.force_tx.send_replace(true);
+        }
         if let Some(tx) = self.shutdown_tx.write().await.take() {
             let _ = tx.send(());
-        } else {
-            return Err(ProxyError::NotRunning);
         }
-
-        // 2. 等待服务器任务结束（带 5 秒超时保护）
-        if let Some(handle) = self.server_handle.write().await.take() {
-            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
-                Ok(Ok(())) => {
-                    log::info!("[{}] 代理服务器已完全停止", log_srv::STOPPED);
-                    Ok(())
-                }
-                Ok(Err(e)) => {
-                    log::warn!("[{}] 代理服务器任务异常终止: {e}", log_srv::TASK_ERROR);
-                    Err(ProxyError::StopFailed(e.to_string()))
-                }
-                Err(_) => {
-                    log::warn!(
-                        "[{}] 代理服务器停止超时（5秒），强制继续",
-                        log_srv::STOP_TIMEOUT
-                    );
-                    Err(ProxyError::StopTimeout)
-                }
+        // Borrow the stored handle: timeout or cancellation must not detach it.
+        let result = tokio::time::timeout(timeout, handle).await;
+        match result {
+            Ok(joined) => {
+                slot.take();
+                let result =
+                    joined.map_err(|_| ProxyError::StopFailed("代理服务器任务异常结束".into()))?;
+                result?;
+                log::info!("[{}] 代理服务器连接任务已全部结束", log_srv::STOPPED);
+                Ok(())
             }
-        } else {
-            Ok(())
+            Err(_) => {
+                log::warn!(
+                    "[{}] 等待代理连接结束超时；仍在排空，尚未确认完全停止（force={force}）",
+                    log_srv::STOP_TIMEOUT
+                );
+                Err(ProxyError::StopTimeout)
+            }
         }
+    }
+
+    pub(crate) async fn is_accepting(&self) -> bool {
+        self.shutdown_tx.read().await.is_some()
+    }
+
+    pub(crate) fn accepting_now(&self) -> Option<bool> {
+        self.shutdown_tx
+            .try_read()
+            .ok()
+            .map(|sender| sender.is_some())
     }
 
     pub async fn get_status(&self) -> ProxyStatus {
@@ -420,7 +565,7 @@ impl ProxyServer {
             // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
             // 提高默认请求体大小限制（避免 413 Payload Too Large）
-            .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
+            .layer(DefaultBodyLimit::max(request_body::MAX_REQUEST_BODY_BYTES))
             .with_state(self.state.clone())
     }
 
@@ -467,6 +612,113 @@ mod tests {
     use axum::http::{header, HeaderMap, StatusCode};
     use serde_json::{json, Value};
     use tokio::sync::Mutex;
+
+    async fn restart_fixture() -> (Arc<ProxyServer>, tokio::net::TcpStream, u16) {
+        use tokio::io::AsyncWriteExt;
+        let proxy = Arc::new(ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                ..ProxyConfig::default()
+            },
+            Arc::new(Database::memory().unwrap()),
+            None,
+        ));
+        let port = proxy.start().await.unwrap().port;
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        stream
+            .write_all(
+                b"POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while proxy.admission.read().await.active() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        (proxy, stream, port)
+    }
+
+    #[tokio::test]
+    async fn restart_admission_blocks_new_requests_and_lease_drop_restores() {
+        use tokio::io::AsyncWriteExt;
+        let (proxy, mut pending, port) = restart_fixture().await;
+        let preparing = {
+            let proxy = proxy.clone();
+            tokio::spawn(async move { proxy.prepare_restart().await })
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while !proxy.admission.read().await.paused() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let url = format!("http://127.0.0.1:{port}/health");
+        assert_eq!(
+            client.get(&url).send().await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(!preparing.is_finished());
+        pending.write_all(b"{").await.unwrap();
+        let lease = tokio::time::timeout(std::time::Duration::from_secs(2), preparing)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            client.get(&url).send().await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        drop(lease);
+        assert_eq!(
+            client.get(&url).send().await.unwrap().status(),
+            StatusCode::OK
+        );
+        proxy.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stop_timeout_keeps_request_and_handle_until_completion() {
+        use tokio::io::AsyncWriteExt;
+        let (proxy, mut pending, port) = restart_fixture().await;
+        assert!(matches!(
+            proxy
+                .stop_with_policy(false, std::time::Duration::from_millis(10))
+                .await,
+            Err(ProxyError::StopTimeout)
+        ));
+        assert!(proxy.server_handle.read().await.is_some());
+        assert!(proxy.get_status().await.running);
+        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_err());
+        pending.write_all(b"{").await.unwrap();
+        proxy.stop().await.unwrap();
+        assert!(!proxy.get_status().await.running);
+    }
+
+    #[tokio::test]
+    async fn stop_force_reaps_pending_connection_and_idle_peek() {
+        let (proxy, pending, port) = restart_fixture().await;
+        let idle = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        proxy.stop_force().await.unwrap();
+        assert!(proxy.server_handle.read().await.is_none());
+        assert!(!proxy.get_status().await.running);
+        assert_eq!(proxy.admission.read().await.active(), 0);
+        drop((pending, idle));
+    }
 
     #[derive(Debug)]
     struct CapturedRequest {

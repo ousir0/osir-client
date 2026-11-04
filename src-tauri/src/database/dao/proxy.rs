@@ -554,6 +554,12 @@ impl Database {
             (None, Some(now.clone()))
         };
 
+        // Final persistence boundary, shared by both public health writers.
+        // Never trust callers to have classified upstream error text already.
+        let normalized_error_msg = error_msg
+            .as_deref()
+            .map(crate::proxy::error_mapper::normalize_health_error);
+
         // UPSERT
         conn.execute(
             "INSERT OR REPLACE INTO provider_health
@@ -572,7 +578,7 @@ impl Database {
                 consecutive_failures as i64,
                 last_success_at,
                 last_failure_at,
-                error_msg,
+                normalized_error_msg,
                 &now,
             ],
         )
@@ -853,6 +859,97 @@ impl Database {
 mod tests {
     use crate::database::Database;
     use crate::error::AppError;
+
+    #[tokio::test]
+    async fn a1_direct_health_writers_normalize_before_persistence() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let provider = crate::provider::Provider::with_id(
+            "a1".into(),
+            "fixture".into(),
+            serde_json::json!({}),
+            None,
+        );
+        db.save_provider("claude", &provider)?;
+        let payload = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+        let payloads = [
+            payload.to_string(),
+            serde_json::json!({"error": {"message": payload, "nested": {"prompt": payload}}})
+                .to_string(),
+            format!("上游错误 (HTTP 502) {payload}"),
+            "fixture-long-A1".repeat(10000),
+            "arbitrary upstream prose without known secret patterns".into(),
+        ];
+        // Bypass forwarder/router completely. Exercise both public DAO writers.
+        for with_threshold in [false, true] {
+            for raw in &payloads {
+                if with_threshold {
+                    db.update_provider_health_with_threshold(
+                        "a1",
+                        "claude",
+                        false,
+                        Some(raw.clone()),
+                        2,
+                    )
+                    .await?;
+                } else {
+                    db.update_provider_health("a1", "claude", false, Some(raw.clone()))
+                        .await?;
+                }
+                // Inspect stored SQL directly so accessor sanitization cannot hide a leak.
+                {
+                    let conn = crate::database::lock_conn!(db.conn);
+                    let stored: String = conn.query_row(
+                        "SELECT last_error FROM provider_health WHERE provider_id = 'a1' AND app_type = 'claude'",
+                        [], |row| row.get(0),
+                    )?;
+                    assert_eq!(stored, "请求失败");
+                }
+                for sql in [db.export_sql_string()?, db.export_sql_string_for_sync()?] {
+                    assert!(!sql.contains(raw));
+                    for marker in [
+                        "fixture-key-A1",
+                        "fixture-token-A1",
+                        "fixture-prompt-A1",
+                        "fixture-image-A1",
+                        "fixture-long-A1",
+                    ] {
+                        assert!(!sql.contains(marker));
+                    }
+                }
+            }
+        }
+        db.update_provider_health("a1", "claude", false, Some("上游错误 (HTTP 502)".into()))
+            .await?;
+        assert_eq!(
+            db.get_provider_health("a1", "claude")
+                .await?
+                .last_error
+                .as_deref(),
+            Some("上游错误 (HTTP 502)")
+        );
+        db.update_provider_health_with_threshold(
+            "a1",
+            "claude",
+            false,
+            Some("上游错误 (HTTP 429)".into()),
+            2,
+        )
+        .await?;
+        assert_eq!(
+            db.get_provider_health("a1", "claude")
+                .await?
+                .last_error
+                .as_deref(),
+            Some("上游错误 (HTTP 429)")
+        );
+        db.update_provider_health("a1", "claude", true, None)
+            .await?;
+        let health = db.get_provider_health("a1", "claude").await?;
+        assert!(health.last_error.is_none());
+        assert!(health.is_healthy);
+        assert_eq!(health.consecutive_failures, 0);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_pricing_model_source_round_trip_and_validation() -> Result<(), AppError> {

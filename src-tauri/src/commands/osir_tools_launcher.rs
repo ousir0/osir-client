@@ -192,6 +192,16 @@ fn claude_launch(directory: &Path, settings: &Path) -> Result<ProviderLaunch, St
     Ok(launch)
 }
 
+/// Missing configuration uses OpenCode's own default initialization. Keep the
+/// selected configuration directory and clear inherited inline/project config.
+fn opencode_launch(directory: &Path, config: &Path) -> Result<ProviderLaunch, String> {
+    let mut launch = projected_terminal_launch(&AppType::OpenCode, directory, Some(config))?;
+    if !config.try_exists().map_err(|_| CONFIG_UNREADABLE)? {
+        set_env(&mut launch, "OPENCODE_CONFIG", None);
+    }
+    Ok(launch)
+}
+
 fn preserve_claude_default_mcp_path(launch: &mut ProviderLaunch, directory: &Path, home: &Path) {
     if directory == home.join(".claude") {
         // Claude treats an explicit CLAUDE_CONFIG_DIR as a custom layout, even
@@ -485,18 +495,18 @@ pub(super) async fn launch_with_resume(
             projected_terminal_launch(&app, &crate::gemini_config::get_gemini_dir(), None)?
         }
         AppType::OpenCode => {
-            let mode =
-                crate::opencode_config::osir_connection_mode().map_err(|_| CONFIG_UNREADABLE)?;
-            if mode.mode == "unavailable" {
-                return Err(CONFIG_CHANGED.into());
-            }
-            let path = crate::opencode_config::get_opencode_config_path()
-                .map_err(|_| CONFIG_UNREADABLE)?;
-            projected_terminal_launch(
-                &app,
-                &crate::opencode_config::get_opencode_dir(),
-                Some(&path),
-            )?
+            // A missing native restore target does not make default OpenCode
+            // startup unsafe. Independently check any existing restore intent.
+            let path =
+                crate::opencode_config::validated_launch_config_path().map_err(
+                    |error| match error {
+                        crate::opencode_config::LaunchConfigError::Unreadable => CONFIG_UNREADABLE,
+                        crate::opencode_config::LaunchConfigError::RestoreConflict => {
+                            CONFIG_CHANGED
+                        }
+                    },
+                )?;
+            opencode_launch(&crate::opencode_config::get_opencode_dir(), &path)?
         }
         AppType::Agy => {
             let profile = row
@@ -664,3 +674,37 @@ fn launch_terminal(launch: &ProviderLaunch, directory: &Path) -> Result<CliLaunc
 #[cfg(test)]
 #[path = "osir_tools_launcher_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod opencode_launch_tests {
+    use super::*;
+
+    #[test]
+    fn u1_opencode_launcher_missing_file_uses_defaults_without_creating_config() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("opencode");
+        let path = directory.join("opencode.json");
+        let launch = opencode_launch(&directory, &path).unwrap();
+        assert!(launch.env.contains(&("OPENCODE_CONFIG", None)));
+        assert_eq!(
+            env_value(&launch, "OPENCODE_CONFIG_DIR"),
+            directory.to_str()
+        );
+        assert!(launch.env.contains(&("OPENCODE_CONFIG_CONTENT", None)));
+        assert_eq!(
+            env_value(&launch, "OPENCODE_DISABLE_PROJECT_CONFIG"),
+            Some("true")
+        );
+        assert!(!directory.exists());
+    }
+
+    #[test]
+    fn u1_opencode_launcher_existing_empty_file_keeps_explicit_config() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("opencode.json");
+        std::fs::write(&path, b"{}").unwrap();
+        let launch = opencode_launch(root.path(), &path).unwrap();
+        assert_eq!(env_value(&launch, "OPENCODE_CONFIG"), path.to_str());
+        assert_eq!(std::fs::read(&path).unwrap(), b"{}");
+    }
+}

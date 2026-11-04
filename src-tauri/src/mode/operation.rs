@@ -76,11 +76,26 @@ pub fn run(
     };
 
     // 1. 在内存里算好每个文件；任何一个解析失败都不写。
-    let mut plans = Vec::with_capacity(changes.len());
+    let mut plans: Vec<(Planned, &dyn LivePatch)> = Vec::with_capacity(changes.len());
     for change in changes {
         let planned = plan(&change.file, change.patch)?;
         if !planned.is_noop() {
             plans.push((planned, change.patch));
+        }
+    }
+    let native_record = super::controller::native_restore::transaction(
+        store,
+        guard.app(),
+        &plans
+            .iter()
+            .map(|(p, patch)| (p, *patch))
+            .collect::<Vec<_>>(),
+        &target,
+    )?;
+    if let Some((file, patch)) = &native_record {
+        let planned = plan(file, patch)?;
+        if !planned.is_noop() {
+            plans.push((planned, patch));
         }
     }
     if plans.is_empty() {
@@ -155,6 +170,17 @@ pub fn run(
                 break;
             }
 
+            // The native record was computed from this exact set of pre/post
+            // images. Replanning one member would invalidate that proof.
+            if native_record.is_some() {
+                return Err(give_up_on_conflict(
+                    store,
+                    guard,
+                    &pending,
+                    published_any,
+                    &current_planned.file.path,
+                ));
+            }
             replans += 1;
             if replans > MAX_REPLANS {
                 return Err(give_up_on_conflict(

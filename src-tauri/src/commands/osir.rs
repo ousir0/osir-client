@@ -46,19 +46,22 @@ pub async fn osir_set_connection_mode(
     mode: String,
     provider_id: Option<String>,
     aggregation: Option<bool>,
+    model_id: Option<String>,
 ) -> Result<crate::mode::controller::ConnectionModeView, String> {
-    crate::mode::controller::set_connection_mode(
+    crate::mode::controller::set_connection_mode_with_model(
         state.inner(),
         &connection_tool(&tool)?,
         &mode,
         provider_id.as_deref(),
         aggregation.unwrap_or(true),
+        model_id.as_deref(),
     )
     .await
 }
 
 #[path = "osir_mutation.rs"]
 mod mutation;
+pub use mutation::*;
 #[path = "osir_recovery.rs"]
 mod recovery;
 #[path = "osir_workbuddy.rs"]
@@ -570,37 +573,6 @@ fn check_connected(auth: &AuthManager, generation: u64) -> Result<String, String
         return Err(STALE.into());
     }
     Ok(status.profile.ok_or(STALE)?.id.to_string())
-}
-
-/// This cloud mutation never applies local tool configuration or retries.
-#[tauri::command]
-pub async fn osir_create_key(
-    state: State<'_, OsirAccountState>,
-    request: crate::services::osir::client::CreateKeyRequest,
-    generation: u64,
-) -> Result<crate::services::osir::account::KeyMetadata, String> {
-    let _operation = state
-        .connection_operation
-        .try_lock()
-        .map_err(|_| "连接操作进行中，请稍后重试")?;
-    check_connected(&state.auth, generation)?;
-    let created = state
-        .auth
-        .create_key(request, generation)
-        .await
-        .map_err(|e| e.to_string())?;
-    mutation::after_cloud_success(
-        || {
-            let session = state.session(generation)?;
-            state
-                .sync
-                .invalidate(&session, None)
-                .map_err(|_| STALE.to_string())?;
-            check_connected(&state.auth, generation)?;
-            Ok::<_, String>(created.data.metadata())
-        },
-        || crate::services::osir::client::CreateKeyError::Uncertain.to_string(),
-    )
 }
 
 #[derive(Serialize)]

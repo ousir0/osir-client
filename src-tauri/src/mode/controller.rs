@@ -45,6 +45,9 @@ use super::operation;
 use super::stack::{self, StackModel, StackView};
 use super::state::{op, Contract, Mode, ModeState, PendingTarget, StackState};
 
+#[path = "native_restore.rs"]
+pub(crate) mod native_restore;
+
 /// 有路由模式的应用（[`AppType::has_route_mode`]）。Claude Desktop 也在内：它经同一个路由
 /// 服务转发，只是没有故障转移。
 pub const PROXY_APPS: [AppType; 5] = [
@@ -448,9 +451,43 @@ async fn write_proxy(
     op_name: &str,
     route: &Provider,
     live_now: &LiveNow,
-    mut target: ModeState,
-    mut next_stack: Option<StackState>,
+    target: ModeState,
+    next_stack: Option<StackState>,
 ) -> Result<bool, String> {
+    write_proxy_with_native(
+        state,
+        app,
+        op_name,
+        route,
+        live_now,
+        ProxyWriteTarget {
+            mode: target,
+            stack: next_stack,
+            native_capture: false,
+        },
+    )
+    .await
+}
+
+struct ProxyWriteTarget {
+    mode: ModeState,
+    stack: Option<StackState>,
+    native_capture: bool,
+}
+
+async fn write_proxy_with_native(
+    state: &AppState,
+    app: &AppType,
+    op_name: &str,
+    route: &Provider,
+    live_now: &LiveNow,
+    target: ProxyWriteTarget,
+) -> Result<bool, String> {
+    let ProxyWriteTarget {
+        mode: mut target,
+        stack: mut next_stack,
+        native_capture,
+    } = target;
     let (proxy_url, codex_base_url) = state.proxy_service.build_proxy_urls().await?;
     // 改用 CC Switch 的目录时契约可能没变（指针只在 live 里），也要重写。
     let force = op_name == op::ATTACH || op_name == op::CATALOG;
@@ -513,6 +550,13 @@ async fn write_proxy(
     let pending = |target: ModeState| PendingTarget {
         state: Some(target),
         stack: next_stack.clone(),
+        extra: if native_capture {
+            [("nativeCapture".into(), Value::Bool(true))]
+                .into_iter()
+                .collect()
+        } else {
+            Default::default()
+        },
         ..PendingTarget::default()
     };
     let unchanged = match app {
@@ -649,6 +693,9 @@ fn write_direct(
     live_now: &LiveNow,
     target: ModeState,
 ) -> Result<(), String> {
+    if native_restore::restore_to(state, app, &target)? {
+        return Ok(());
+    }
     let direct = direct_provider(state, app)?;
     let pending_target = PendingTarget::mode(target);
     let attached = matches!(live_now, LiveNow::Proxy { .. });
@@ -937,6 +984,17 @@ async fn enter_locked(
     stack_mode: Option<bool>,
     explicit_route: Option<Provider>,
 ) -> Result<(), String> {
+    enter_locked_with_native(state, app, op_name, stack_mode, explicit_route, false).await
+}
+
+async fn enter_locked_with_native(
+    state: &AppState,
+    app: &AppType,
+    op_name: &str,
+    stack_mode: Option<bool>,
+    explicit_route: Option<Provider>,
+    native_capture: bool,
+) -> Result<(), String> {
     if !state.proxy_service.is_running().await {
         state.proxy_service.start().await?;
     }
@@ -971,19 +1029,22 @@ async fn enter_locked(
     let was_stack = settled_stack(app).is_ok_and(|stack| stack.enabled);
     let stack_on = stack_mode.unwrap_or(was_stack);
     let live_now = LiveNow::of(state, app, &mode)?;
-    let rewritten = write_proxy(
+    let rewritten = write_proxy_with_native(
         state,
         app,
         op_name,
         &route,
         &live_now,
-        ModeState {
-            mode: Some(Mode::Proxy),
-            attached: true,
-            proxy_route: Some(route.id.clone()),
-            contract: None,
+        ProxyWriteTarget {
+            mode: ModeState {
+                mode: Some(Mode::Proxy),
+                attached: true,
+                proxy_route: Some(route.id.clone()),
+                contract: None,
+            },
+            stack: next_stack,
+            native_capture,
         },
-        next_stack,
     )
     .await?;
     log::info!(
@@ -1035,6 +1096,37 @@ pub struct ConnectionModeView {
     pub mode: &'static str,
     pub can_restore_native: bool,
     pub reason: Option<&'static str>,
+    pub native_configuration: Option<NativeConfiguration>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeConfiguration {
+    pub source: &'static str,
+    pub status: &'static str,
+    pub label: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<&'static str>,
+}
+
+impl NativeConfiguration {
+    pub(crate) fn local(status: &'static str) -> Self {
+        Self {
+            source: "local_config",
+            status,
+            label: "本机已有配置",
+            detail: None,
+        }
+    }
+
+    pub(crate) fn unknown() -> Self {
+        Self {
+            source: "unknown",
+            status: "unknown",
+            label: "来源暂无法确认",
+            detail: None,
+        }
+    }
 }
 
 fn is_osir_connection(provider: &Provider) -> bool {
@@ -1042,8 +1134,6 @@ fn is_osir_connection(provider: &Provider) -> bool {
         .meta
         .as_ref()
         .is_some_and(|meta| meta.osir_binding.is_some())
-        || serde_json::to_string(&provider.settings_config)
-            .is_ok_and(|config| config.to_ascii_lowercase().contains("osirclaw.com"))
 }
 
 fn connection_mode_locked(state: &AppState, app: &AppType) -> Result<ConnectionModeView, String> {
@@ -1055,19 +1145,50 @@ fn connection_mode_locked(state: &AppState, app: &AppType) -> Result<ConnectionM
             mode: "unavailable",
             can_restore_native: false,
             reason: Some("此工具尚无可验证的原生配置恢复路径"),
+            native_configuration: Some(NativeConfiguration::unknown()),
         });
     }
-    // Fail closed on damaged state, instead of the legacy read-as-direct fallback.
-    let mode = super::state::mode_state(
-        &crate::live::engine::DeviceStore::for_device(),
-        app.as_str(),
-    )
-    .map_err(|_| "连接方式状态读取失败".to_string())?;
-    let direct = direct_provider(state, app)?;
-    let can_restore = matches!(app, AppType::Codex | AppType::ClaudeDesktop)
-        || direct
+    // identity_snapshot is genuinely read-only, including on malformed state.
+    let snapshot = super::state::identity_snapshot(&DeviceStore::for_device())
+        .map_err(|_| "连接方式状态读取失败".to_string())?;
+    let saved = snapshot.apps.get(app.as_str());
+    if saved.is_some_and(|saved| saved.pending.is_some()) {
+        return Ok(ConnectionModeView {
+            mode: "unavailable",
+            can_restore_native: false,
+            reason: Some("上次切换尚未完成，请重新选择连接方式"),
+            native_configuration: Some(NativeConfiguration::unknown()),
+        });
+    }
+    let mode = saved.map(|saved| saved.mode_state()).unwrap_or_default();
+    let attached_live = if app == &AppType::ClaudeDesktop {
+        native_restore::desktop_attached(state)
+    } else {
+        state.proxy_service.live_has_proxy_placeholder(app)
+    };
+    if let Some(view) = native_restore::view(app, &mode, attached_live)? {
+        return Ok(view);
+    }
+    let direct = native_restore::direct_read_only(state, app)?;
+    let detected = if !mode.is_proxy()
+        && !mode.attached
+        && direct
             .as_ref()
-            .is_some_and(|row| !is_osir_connection(row) && usable_direct(app, Some(row)).is_some());
+            .is_none_or(|p| p.category.as_deref() == Some("official"))
+    {
+        native_restore::local_configuration(app)
+    } else {
+        None
+    };
+    let can_restore = detected.is_some()
+        || (mode.is_proxy()
+            && mode.attached
+            && attached_live
+            && direct.as_ref().is_some_and(|row| {
+                !is_osir_connection(row)
+                    && mode.proxy_route.as_deref() != Some(row.id.as_str())
+                    && usable_direct(app, Some(row)).is_some()
+            }));
     let active = if mode.is_proxy() {
         mode.proxy_route
             .as_deref()
@@ -1077,15 +1198,29 @@ fn connection_mode_locked(state: &AppState, app: &AppType) -> Result<ConnectionM
     } else {
         direct
     };
+    let active_verified = if mode.is_proxy() {
+        mode.attached && attached_live
+    } else {
+        active
+            .as_ref()
+            .is_some_and(|row| native_restore::provider_is_live(app, row))
+    };
     Ok(ConnectionModeView {
         mode: match active.as_ref() {
-            Some(row) if is_osir_connection(row) => "osir_api",
-            Some(_) if !mode.is_proxy() => "native",
-            None if matches!(app, AppType::ClaudeDesktop) && !mode.is_proxy() => "native",
+            _ if detected.is_some() => "native",
+            Some(_) if mode.is_proxy() && active_verified => "api_key",
+            Some(row)
+                if !mode.is_proxy()
+                    && active_verified
+                    && row.category.as_deref() != Some("official") =>
+            {
+                "api_key"
+            }
             _ => "unavailable",
         },
         can_restore_native: can_restore,
         reason: (!can_restore).then_some("没有可验证的原生直连配置，无法安全恢复"),
+        native_configuration: Some(detected.unwrap_or_else(NativeConfiguration::unknown)),
     })
 }
 
@@ -1093,11 +1228,15 @@ pub async fn connection_mode(
     state: &AppState,
     app: &AppType,
 ) -> Result<ConnectionModeView, String> {
-    let _guard = lock_settled(state, app)
-        .await
-        .map_err(|_| "连接状态恢复失败".to_string())?;
+    let _guard = state.proxy_service.lock_switch_for_app(app.as_str()).await;
     if matches!(app, AppType::OpenCode) {
-        return crate::opencode_config::osir_connection_mode()
+        let ids = state
+            .db
+            .get_all_providers(app.as_str())
+            .map_err(|_| "连接读取失败")?
+            .into_keys()
+            .collect::<Vec<_>>();
+        return crate::opencode_config::osir_connection_mode_for_providers(&ids)
             .map_err(|_| "OpenCode 连接状态读取失败".to_string());
     }
     connection_mode_locked(state, app)
@@ -1110,6 +1249,17 @@ pub async fn set_connection_mode(
     provider_id: Option<&str>,
     aggregation: bool,
 ) -> Result<ConnectionModeView, String> {
+    set_connection_mode_with_model(state, app, mode, provider_id, aggregation, None).await
+}
+
+pub async fn set_connection_mode_with_model(
+    state: &AppState,
+    app: &AppType,
+    mode: &str,
+    provider_id: Option<&str>,
+    aggregation: bool,
+    model_id: Option<&str>,
+) -> Result<ConnectionModeView, String> {
     if matches!(app, AppType::OpenCode) {
         {
             let _guard = lock_settled(state, app)
@@ -1117,19 +1267,28 @@ pub async fn set_connection_mode(
                 .map_err(|_| "连接状态恢复失败".to_string())?;
             let row = match mode {
                 "native" => None,
-                "osir_api" => {
-                    let id = provider_id.ok_or("请选择已保存的 OSIR 连接")?;
-                    let row = provider(state, app, id)?.ok_or("OSIR 连接不存在")?;
-                    if !is_osir_connection(&row) {
-                        return Err("所选连接不是 OSIR API".into());
+                "api_key" | "osir_api" => {
+                    let id = provider_id.ok_or("请选择已保存的连接")?;
+                    let row = provider(state, app, id)?.ok_or("连接不存在")?;
+                    if row.category.as_deref() == Some("official") {
+                        return Err("请选择 API 连接".into());
                     }
                     Some(row)
                 }
                 _ => return Err("连接方式无效".into()),
             };
-            crate::opencode_config::osir_set_connection_mode(row.as_ref()).map_err(|_| {
-                "OpenCode 切换失败：配置已变化或连接不可用，未确认切换成功".to_string()
-            })?;
+            let ids = state
+                .db
+                .get_all_providers(app.as_str())
+                .map_err(|_| "连接读取失败")?
+                .into_keys()
+                .collect::<Vec<_>>();
+            crate::opencode_config::osir_set_connection_mode_with_sources(
+                row.as_ref(),
+                model_id,
+                &ids,
+            )
+            .map_err(|_| "OpenCode 切换失败：配置已变化或连接不可用，未确认切换成功".to_string())?;
         }
         return connection_mode(state, app).await;
     }
@@ -1146,101 +1305,98 @@ pub async fn set_connection_mode(
                 let _guard = lock_settled(state, app)
                     .await
                     .map_err(|_| "连接状态恢复失败".to_string())?;
-                let view = connection_mode_locked(state, app)?;
-                if !view.can_restore_native {
-                    return Err(view.reason.unwrap_or("无法安全恢复原生配置").into());
-                }
-                if matches!(app, AppType::ClaudeDesktop) {
-                    // Explicit Desktop native recovery restores the real 1P
-                    // deployment. Never materialize an OSIR key in a profile.
-                    let official = crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID;
-                    state
-                        .db
-                        .ensure_official_seed_by_id(official, AppType::ClaudeDesktop)
-                        .map_err(|_| "原生连接恢复准备失败".to_string())?;
-                    let mode = super::state::mode_state(
-                        &crate::live::engine::DeviceStore::for_device(),
-                        app.as_str(),
-                    )
+                let saved_mode = super::state::mode_state(&DeviceStore::for_device(), app.as_str())
                     .map_err(|_| "连接方式状态读取失败".to_string())?;
-                    let mut target = PendingTarget::mode(ModeState {
+                if !native_restore::restore(state, app, &saved_mode)? {
+                    let view = connection_mode_locked(state, app)?;
+                    if view.mode == "native" {
+                        return Ok(view);
+                    }
+                    if !view.can_restore_native {
+                        return Err(view.reason.unwrap_or("无法安全恢复原生配置").into());
+                    }
+                    let target = direct_provider(state, app)?.ok_or("原配置已不可用")?;
+                    let live = LiveNow::of(state, app, &saved_mode)?;
+                    let pending = PendingTarget::mode(ModeState {
                         mode: Some(Mode::Direct),
                         attached: false,
-                        proxy_route: mode.proxy_route,
+                        proxy_route: saved_mode.proxy_route,
                         contract: None,
                     });
-                    target.pointer = Some(official.into());
-                    claude_desktop_config::write_direct(&state.db, op::EXIT, None, target)
-                        .map_err(|_| "原生配置恢复失败，请检查配置后重试".to_string())?;
-                } else if matches!(app, AppType::Codex) {
-                    let mode = super::state::mode_state(
-                        &crate::live::engine::DeviceStore::for_device(),
-                        app.as_str(),
-                    )
-                    .map_err(|_| "连接方式状态读取失败".to_string())?;
-                    let direct = direct_provider(state, app)?;
-                    let native = direct.as_ref().filter(|row| {
-                        !is_osir_connection(row) && usable_direct(app, Some(row)).is_some()
-                    });
-                    // A first OSIR connection can become the direct pointer in
-                    // older builds. That pointer is not a native restore target.
-                    // Explicit recovery may select the built-in OpenAI seed;
-                    // its projection preserves the user's native login and MCP.
-                    let fallback = if native.is_none() {
-                        let official = crate::database::CODEX_OFFICIAL_PROVIDER_ID;
-                        state
-                            .db
-                            .ensure_official_seed_by_id(official, AppType::Codex)
-                            .map_err(|_| "原生连接恢复准备失败".to_string())?;
-                        provider(state, app, official)?
-                    } else {
-                        None
-                    };
-                    let target = native.or(fallback.as_ref()).ok_or("原生连接恢复准备失败")?;
-                    if mode.is_proxy()
-                        || mode.attached
-                        || direct.as_ref().map(|p| &p.id) != Some(&target.id)
-                    {
-                        let live = LiveNow::of(state, app, &mode)?;
-                        // Unlike the generic emergency exit, never silently fall
-                        // back to clearing fields if the restore target fails.
-                        codex_direct::write_direct(
-                            &state.db,
-                            &state.codex_oauth_manager,
-                            op::EXIT,
-                            live.codex_owner(),
-                            Some(target),
-                            PendingTarget {
-                                pointer: Some(target.id.clone()),
-                                ..PendingTarget::mode(ModeState {
-                                    mode: Some(Mode::Direct),
-                                    attached: false,
-                                    proxy_route: mode.proxy_route,
-                                    contract: None,
-                                })
-                            },
-                        )
-                        .map_err(|_| "原生配置恢复失败，请检查配置后重试".to_string())?;
+                    match app {
+                        AppType::Codex => {
+                            codex_direct::write_direct(
+                                &state.db,
+                                &state.codex_oauth_manager,
+                                op::EXIT,
+                                live.codex_owner(),
+                                Some(&target),
+                                pending,
+                            )
+                            .map_err(|_| "原配置恢复失败")?;
+                        }
+                        AppType::Claude => {
+                            let resolved =
+                                crate::services::osir::managed::resolve_provider(app, &target)
+                                    .map_err(|_| "原配置不可用")?;
+                            let patch = direct_patch(
+                                live.claude_exclusive_owner().as_ref(),
+                                &ClaudeProjection::of(&resolved.settings_config),
+                            );
+                            claude_direct::run(&state.db, op::EXIT, Some(&patch), pending)
+                                .map_err(|_| "原配置恢复失败")?;
+                        }
+                        AppType::Gemini => {
+                            gemini_direct::write_provider_with_edits(
+                                &state.db,
+                                op::EXIT,
+                                &target,
+                                pending,
+                                None,
+                            )
+                            .map_err(|_| "原配置恢复失败")?;
+                        }
+                        AppType::ClaudeDesktop => {
+                            claude_desktop_config::write_direct(
+                                &state.db,
+                                op::EXIT,
+                                Some(&target),
+                                pending,
+                            )
+                            .map_err(|_| "原配置恢复失败")?;
+                        }
+                        _ => return Err("无法恢复原配置".into()),
                     }
-                } else {
-                    exit_locked(state, app, false)?;
                 }
             }
             stop_server_if_unused(state).await;
         }
-        "osir_api" => {
-            let id = provider_id.ok_or("请选择已保存的 OSIR 连接")?;
-            let row = provider(state, app, id)?.ok_or("OSIR 连接不存在")?;
-            if !is_osir_connection(&row) {
-                return Err("所选连接不是 OSIR API".into());
+        "api_key" | "osir_api" => {
+            let _guard = lock_settled(state, app)
+                .await
+                .map_err(|_| "连接状态恢复失败")?;
+            let id = provider_id.ok_or("请选择已保存的连接")?;
+            let row = provider(state, app, id)?.ok_or("连接不存在")?;
+            if row.category.as_deref() == Some("official") {
+                return Err("请选择 API 连接".into());
             }
-            // Never replace the direct pointer: it is the durable restore target.
-            // Codex publishes the stack; the other tools use a single route.
-            enter_with_route(
+            reject_unsupported_official(app, &row)?;
+            let current_mode = super::state::mode_state(&DeviceStore::for_device(), app.as_str())
+                .map_err(|_| "连接方式状态读取失败")?;
+            let direct = direct_provider(state, app)?;
+            // Never capture an already managed client configuration as native.
+            let capture = !current_mode.is_proxy()
+                && !current_mode.attached
+                && !direct.as_ref().is_some_and(is_osir_connection)
+                && connection_mode_locked(state, app)?.mode == "native"
+                && native_restore::local_configuration(app).is_some();
+            enter_locked_with_native(
                 state,
                 app,
-                matches!(app, AppType::Codex) && aggregation,
-                Some(id),
+                op::ENTER,
+                Some(matches!(app, AppType::Codex) && aggregation),
+                Some(row),
+                capture,
             )
             .await?;
         }
@@ -1382,10 +1538,9 @@ pub async fn exit_all(state: &AppState) -> Result<(), String> {
 /// 分离反而会在 CC Switch 关着时把 Desktop 换成直连那家（映射卡写不进去时是官方登录），
 /// 下次打开 CC Switch 又换回来，每次都要重启 Desktop。
 pub async fn detach_all(state: &AppState) {
-    for app in PROXY_APPS
-        .into_iter()
-        .filter(|app| *app != AppType::ClaudeDesktop)
-    {
+    for app in PROXY_APPS.into_iter().filter(|app| {
+        *app != AppType::ClaudeDesktop || native_restore::has_record(app).unwrap_or(true)
+    }) {
         let result = match lock_settled(state, &app).await {
             Ok(_guard) => exit_locked(state, &app, true),
             Err(error) => Err(error.to_string()),
@@ -4274,39 +4429,446 @@ mod mode_tests {
 
     #[tokio::test]
     #[serial]
-    async fn osir_codex_native_recovery_replaces_a_legacy_osir_direct_pointer() {
+    async fn u1_missing_native_target_never_creates_official_seed() {
         let _home = Home::new();
-        let mut relay = codex_official();
-        relay.id = "legacy-osir".into();
-        relay.category = Some("custom".into());
-        relay.settings_config = json!({ "auth": {"OPENAI_API_KEY": "synthetic-key"}, "config": "model_provider = \"relay\"\nmodel = \"fixture-model\"\n[model_providers.relay]\nname = \"OSIR\"\nbase_url = \"https://api.osirclaw.com/v1\"\nwire_api = \"responses\"\n" });
-        let user_fields =
-            "# user configuration\n[mcp_servers.fixture]\ncommand = \"fixture-mcp\"\n";
-        seed_codex(user_fields, None);
-        let state = state_with(AppType::Codex, &[relay], "legacy-osir").await;
-        let before = connection_mode(&state, &AppType::Codex).await.unwrap();
-        assert_eq!(before.mode, "osir_api");
-        assert!(before.can_restore_native);
-        let after = set_connection_mode(&state, &AppType::Codex, "native", None, false)
-            .await
-            .unwrap();
-        assert_eq!(after.mode, "native");
-        assert_eq!(
-            current::direct_provider(&state.db, &AppType::Codex)
-                .unwrap()
-                .unwrap()
-                .id,
-            crate::database::CODEX_OFFICIAL_PROVIDER_ID
+        let relay = codex_row("legacy-osir", "https://api.osirclaw.com/v1", "");
+        seed_codex(
+            relay.settings_config["config"].as_str().unwrap(),
+            Some(&relay.settings_config["auth"]),
         );
-        let text = fs::read_to_string(codex_config_path()).unwrap();
-        assert!(text.contains("# user configuration"));
-        assert!(text.contains("[mcp_servers.fixture]"));
-        assert!(!text.contains("api.osirclaw.com"));
-        let again = set_connection_mode(&state, &AppType::Codex, "native", None, false)
+        let state = state_with(AppType::Codex, &[relay], "legacy-osir").await;
+        let bytes = fs::read(codex_config_path()).unwrap();
+        let before = connection_mode(&state, &AppType::Codex).await.unwrap();
+        assert_eq!(before.mode, "api_key");
+        assert_eq!(before.native_configuration.unwrap().source, "unknown");
+        assert!(!before.can_restore_native);
+        assert!(
+            set_connection_mode(&state, &AppType::Codex, "native", None, false)
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read(codex_config_path()).unwrap(), bytes);
+        assert!(state
+            .db
+            .get_provider_by_id(crate::database::CODEX_OFFICIAL_PROVIDER_ID, "codex")
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn u1_get_does_not_settle_pending_or_repair_state() {
+        let _home = Home::new();
+        seed_settings(USER_SETTINGS);
+        let state = state_with(AppType::Claude, &[], "missing").await;
+        let store = DeviceStore::for_device();
+        super::super::state::set_pending(
+            &store,
+            "claude",
+            Some(super::super::state::Pending {
+                op: "fixture".into(),
+                files: vec![],
+                published: false,
+                target: PendingTarget::default(),
+            }),
+        )
+        .unwrap();
+        let before = fs::read(store.state_path()).unwrap();
+        let config = fs::read(settings_path()).unwrap();
+        assert_eq!(
+            connection_mode(&state, &AppType::Claude)
+                .await
+                .unwrap()
+                .mode,
+            "unavailable"
+        );
+        assert_eq!(fs::read(store.state_path()).unwrap(), before);
+        assert_eq!(fs::read(settings_path()).unwrap(), config);
+        assert_eq!(
+            crate::settings::get_settings()
+                .current_provider_claude
+                .as_deref(),
+            Some("missing")
+        );
+        fs::write(store.state_path(), "{broken").unwrap();
+        assert!(connection_mode(&state, &AppType::Claude).await.is_err());
+        assert_eq!(fs::read(store.state_path()).unwrap(), b"{broken");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn u1_native_api_roundtrip_preserves_auth_mcp_and_rejects_external_edits() {
+        let _home = Home::new();
+        let official = codex_official();
+        let api = codex_row("manual", "https://fixture.invalid/v1", "");
+        let original = "# user fixture\n[mcp_servers.keep]\ncommand = \"fixture\"\n";
+        let auth = json!({"tokens":{"access_token":"fixture-only","account_id":"fixture"}});
+        seed_codex(original, Some(&auth));
+        let state = state_with(
+            AppType::Codex,
+            &[official.clone(), api.clone()],
+            &official.id,
+        )
+        .await;
+        assert_eq!(
+            connection_mode(&state, &AppType::Codex).await.unwrap().mode,
+            "native"
+        );
+        let metadata =
+            serde_json::to_string(&connection_mode(&state, &AppType::Codex).await.unwrap())
+                .unwrap();
+        assert!(metadata.contains("official_login"));
+        assert!(!metadata.contains("fixture-only"));
+        let view = set_connection_mode(&state, &AppType::Codex, "api_key", Some(&api.id), false)
             .await
             .unwrap();
-        assert_eq!(again.mode, "native");
-        assert_eq!(fs::read_to_string(codex_config_path()).unwrap(), text);
+        assert_eq!(view.mode, "api_key");
+        let mode = super::super::state::mode_state(&DeviceStore::for_device(), "codex").unwrap();
+        assert_eq!(
+            native_restore::view(&AppType::Codex, &mode, false)
+                .unwrap()
+                .unwrap()
+                .mode,
+            "unavailable"
+        );
+        let restored = set_connection_mode(&state, &AppType::Codex, "native", None, false)
+            .await
+            .unwrap();
+        assert_eq!(restored.mode, "native");
+        assert_eq!(fs::read_to_string(codex_config_path()).unwrap(), original);
+        assert_eq!(
+            crate::config::read_json_file::<Value>(&codex_auth_path()).unwrap(),
+            auth
+        );
+        set_connection_mode(&state, &AppType::Codex, "osir_api", Some(&api.id), false)
+            .await
+            .unwrap();
+        let edited = format!(
+            "{}\n# external MCP edit\n",
+            fs::read_to_string(codex_config_path()).unwrap()
+        );
+        fs::write(codex_config_path(), &edited).unwrap();
+        assert!(
+            set_connection_mode(&state, &AppType::Codex, "native", None, false)
+                .await
+                .is_err()
+        );
+        assert_eq!(fs::read_to_string(codex_config_path()).unwrap(), edited);
+        state.proxy_service.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn u1_legacy_managed_switch_does_not_capture_api_as_native() {
+        let _home = Home::new();
+        let grant = osir_claude_grant();
+        let manual = claude("manual", "https://fixture.invalid", json!({}));
+        seed_settings(&grant.provider.settings_config.to_string());
+        let state = state_with(
+            AppType::Claude,
+            &[grant.provider.clone(), manual.clone()],
+            &grant.provider.id,
+        )
+        .await;
+        let result =
+            set_connection_mode(&state, &AppType::Claude, "api_key", Some(&manual.id), false)
+                .await
+                .unwrap();
+        assert_eq!(result.mode, "api_key");
+        assert!(!result.can_restore_native);
+        assert!(!native_restore::has_record(&AppType::Claude).unwrap());
+        assert!(
+            set_connection_mode(&state, &AppType::Claude, "native", None, false)
+                .await
+                .is_err()
+        );
+        state.proxy_service.stop().await.unwrap();
+    }
+
+    /// Native configuration has no saved provider row. Exit must restore that
+    /// exact source, and startup may attach again without replacing the source.
+    #[tokio::test]
+    #[serial]
+    async fn u1_native_restore_lifecycle_without_direct_row() {
+        for app in [AppType::Claude, AppType::Codex, AppType::Gemini] {
+            let _home = Home::new();
+            let (row, originals) = u1_native_fixture(&app);
+            let state = state_with(app.clone(), &[row.clone()], "missing-native-row").await;
+            assert_eq!(connection_mode(&state, &app).await.unwrap().mode, "native");
+            assert_eq!(
+                set_connection_mode(&state, &app, "api_key", Some(&row.id), false)
+                    .await
+                    .unwrap()
+                    .mode,
+                "api_key"
+            );
+            detach_all(&state).await;
+            assert!(!mode(&app).attached);
+            assert!(mode(&app).is_proxy(), "detach retains startup intent");
+            u1_assert_originals(&originals);
+            startup(&state).await;
+            assert!(mode(&app).attached);
+            assert_eq!(connection_mode(&state, &app).await.unwrap().mode, "api_key");
+            assert_eq!(
+                set_connection_mode(&state, &app, "native", None, false)
+                    .await
+                    .unwrap()
+                    .mode,
+                "native"
+            );
+            u1_assert_originals(&originals);
+            assert!(state
+                .db
+                .get_provider_by_id("missing-native-row", app.as_str())
+                .unwrap()
+                .is_none());
+            u1_stop_proxy_if_running(&state).await;
+        }
+    }
+
+    fn u1_native_fixture(app: &AppType) -> (Provider, Vec<(std::path::PathBuf, Vec<u8>)>) {
+        let originals = match app {
+            AppType::Claude => vec![
+                (settings_path(), br#"{ "env": {"ANTHROPIC_AUTH_TOKEN":"native-fixture", "ANTHROPIC_BASE_URL":"https://native.invalid"}, "mcpServers":{"keep":{"command":"native"}}, "permissions":{"allow":["Read"]} }"#.to_vec()),
+                (crate::config::get_claude_config_dir().join(".credentials.json"), b"native-auth-fixture".to_vec()),
+            ],
+            AppType::Codex => vec![
+                (codex_config_path(), b"# native fixture\n[mcp_servers.keep]\ncommand = \"native\"\n".to_vec()),
+                (codex_auth_path(), br#"{"tokens":{"access_token":"native-fixture","account_id":"fixture"}}"#.to_vec()),
+            ],
+            AppType::Gemini => vec![
+                (gemini_env_path(), b"# native fixture\nGEMINI_API_KEY=native-fixture\n".to_vec()),
+                (gemini_settings_path(), br#"{ "security":{"auth":{"selectedType":"gemini-api-key"}}, "mcpServers":{"keep":{"command":"native"}}, "theme":"native" }"#.to_vec()),
+                (crate::gemini_config::get_gemini_dir().join("oauth_creds.json"), b"native-auth-fixture".to_vec()),
+            ],
+            _ => unreachable!(),
+        };
+        for (path, bytes) in &originals {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let row = match app {
+            AppType::Claude => claude("manual", "https://manual.invalid", json!({})),
+            AppType::Codex => codex_row("manual", "https://manual.invalid/v1", ""),
+            AppType::Gemini => gemini(
+                "manual",
+                json!({"GEMINI_API_KEY":"manual-fixture", "GOOGLE_GEMINI_BASE_URL":"https://manual.invalid"}),
+                json!({"model":{"name":"manual-model"}}),
+            ),
+            _ => unreachable!(),
+        };
+        (row, originals)
+    }
+
+    fn u1_assert_originals(originals: &[(std::path::PathBuf, Vec<u8>)]) {
+        for (path, bytes) in originals {
+            assert_eq!(fs::read(path).unwrap(), *bytes, "{}", path.display());
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn u1_native_restore_internal_resync_and_mcp_advance_expected() {
+        for app in [AppType::Codex, AppType::Gemini] {
+            let _home = Home::new();
+            let (mut row, originals) = u1_native_fixture(&app);
+            let state = state_with(app.clone(), &[row.clone()], "missing-native-row").await;
+            set_connection_mode(&state, &app, "api_key", Some(&row.id), false)
+                .await
+                .unwrap();
+            // Exercise a new listening port and a changed model contract.
+            state.proxy_service.stop().await.unwrap();
+            state.proxy_service.start().await.unwrap();
+            if app == AppType::Codex {
+                row.settings_config["config"] = json!(row.settings_config["config"]
+                    .as_str()
+                    .unwrap()
+                    .replace("gpt-manual", "gpt-next"));
+            } else {
+                row.settings_config["config"]["model"]["name"] = json!("gemini-next");
+            }
+            state.db.save_provider(app.as_str(), &row).unwrap();
+            resync_route(&state, &app).await.unwrap();
+            assert_eq!(connection_mode(&state, &app).await.unwrap().mode, "api_key");
+            let spec = json!({"command":"fixture-mcp", "args":["new"]});
+            if app == AppType::Codex {
+                crate::mcp::sync_single_server_to_codex(&Default::default(), "added", &spec)
+                    .unwrap();
+            } else {
+                crate::mcp::sync_single_server_to_gemini(&Default::default(), "added", &spec)
+                    .unwrap();
+            }
+            assert_eq!(connection_mode(&state, &app).await.unwrap().mode, "api_key");
+            if app == AppType::Codex {
+                let live = codex_doc();
+                assert_eq!(
+                    live["mcp_servers"]["keep"]["command"].as_str(),
+                    Some("native")
+                );
+                assert_eq!(
+                    live["mcp_servers"]["added"]["command"].as_str(),
+                    Some("fixture-mcp")
+                );
+            }
+            set_connection_mode(&state, &app, "native", None, false)
+                .await
+                .unwrap();
+            if app == AppType::Codex {
+                let doc = codex_doc();
+                assert!(doc.get("model_provider").is_none());
+                assert!(
+                    doc.get("model").is_none(),
+                    "API model did not replace native model"
+                );
+                assert_eq!(
+                    doc["mcp_servers"]["keep"]["command"].as_str(),
+                    Some("native")
+                );
+                assert_eq!(
+                    doc["mcp_servers"]["added"]["command"].as_str(),
+                    Some("fixture-mcp")
+                );
+                assert_eq!(fs::read(codex_auth_path()).unwrap(), originals[1].1);
+            } else {
+                let value: Value = crate::config::read_json_file(&gemini_settings_path()).unwrap();
+                assert_eq!(value["mcpServers"]["keep"]["command"], "native");
+                assert_eq!(value["mcpServers"]["added"]["command"], "fixture-mcp");
+                assert_eq!(value["theme"], "native");
+                assert!(value.get("model").is_none());
+                assert_eq!(fs::read(gemini_env_path()).unwrap(), originals[0].1);
+                assert_eq!(fs::read(&originals[2].0).unwrap(), originals[2].1);
+            }
+            // A second attach uses the updated native MCP baseline.
+            set_connection_mode(&state, &app, "api_key", Some(&row.id), false)
+                .await
+                .unwrap();
+            set_connection_mode(&state, &app, "native", None, false)
+                .await
+                .unwrap();
+            u1_stop_proxy_if_running(&state).await;
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn u1_native_restore_pending_capture_and_restore_recover_together() {
+        for point in ["pending", "published:0", "target"] {
+            let _home = Home::new();
+            let app = AppType::Claude;
+            let (row, originals) = u1_native_fixture(&app);
+            let state = state_with(app.clone(), &[row.clone()], "missing-native-row").await;
+            failpoint::crash_at(Some(point));
+            let interrupted =
+                set_connection_mode(&state, &app, "api_key", Some(&row.id), false).await;
+            failpoint::crash_at(None);
+            assert!(interrupted.is_err(), "{point}");
+            let before_get = fs::read(DeviceStore::for_device().state_path()).unwrap();
+            assert_eq!(
+                connection_mode(&state, &app).await.unwrap().mode,
+                "unavailable"
+            );
+            assert_eq!(
+                before_get,
+                fs::read(DeviceStore::for_device().state_path()).unwrap()
+            );
+            operation::settle(&state.db, app.as_str()).unwrap();
+            if point == "pending" {
+                assert!(!native_restore::has_record(&app).unwrap());
+                u1_assert_originals(&originals);
+                set_connection_mode(&state, &app, "api_key", Some(&row.id), false)
+                    .await
+                    .unwrap();
+            } else {
+                assert_eq!(connection_mode(&state, &app).await.unwrap().mode, "api_key");
+            }
+            failpoint::crash_at(Some("published:0"));
+            let interrupted = set_connection_mode(&state, &app, "native", None, false).await;
+            failpoint::crash_at(None);
+            assert!(interrupted.is_err());
+            operation::recover_on_startup(&state.db);
+            assert_eq!(connection_mode(&state, &app).await.unwrap().mode, "native");
+            u1_assert_originals(&originals);
+            u1_stop_proxy_if_running(&state).await;
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn u1_native_restore_mcp_pending_replays_native_baseline() {
+        let _home = Home::new();
+        let app = AppType::Codex;
+        let (row, _) = u1_native_fixture(&app);
+        let state = state_with(app.clone(), &[row.clone()], "missing-native-row").await;
+        set_connection_mode(&state, &app, "api_key", Some(&row.id), false)
+            .await
+            .unwrap();
+        failpoint::crash_at(Some("published:0"));
+        let interrupted = crate::mcp::sync_single_server_to_codex(
+            &Default::default(),
+            "added",
+            &json!({"command":"fixture"}),
+        );
+        failpoint::crash_at(None);
+        assert!(interrupted.is_err());
+        operation::recover_on_startup(&state.db);
+        assert_eq!(connection_mode(&state, &app).await.unwrap().mode, "api_key");
+        let live = codex_doc();
+        assert_eq!(
+            live["mcp_servers"]["keep"]["command"].as_str(),
+            Some("native")
+        );
+        assert_eq!(
+            live["mcp_servers"]["added"]["command"].as_str(),
+            Some("fixture")
+        );
+        set_connection_mode(&state, &app, "native", None, false)
+            .await
+            .unwrap();
+        let doc = codex_doc();
+        assert_eq!(
+            doc["mcp_servers"]["added"]["command"].as_str(),
+            Some("fixture")
+        );
+        assert_eq!(
+            doc["mcp_servers"]["keep"]["command"].as_str(),
+            Some("native")
+        );
+        assert!(doc.get("model_provider").is_none());
+        u1_stop_proxy_if_running(&state).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn u1_native_restore_recovery_never_adopts_external_postimage() {
+        let _home = Home::new();
+        let app = AppType::Claude;
+        let (row, _) = u1_native_fixture(&app);
+        let state = state_with(app.clone(), &[row.clone()], "missing-native-row").await;
+        failpoint::crash_at(Some("published:0"));
+        let interrupted = set_connection_mode(&state, &app, "api_key", Some(&row.id), false).await;
+        failpoint::crash_at(None);
+        assert!(interrupted.is_err());
+        let external = br#"{"env":{"ANTHROPIC_AUTH_TOKEN":"external-only"}}"#;
+        fs::write(settings_path(), external).unwrap();
+        operation::recover_on_startup(&state.db);
+        assert_eq!(
+            connection_mode(&state, &app).await.unwrap().mode,
+            "unavailable"
+        );
+        assert!(set_connection_mode(&state, &app, "native", None, false)
+            .await
+            .is_err());
+        assert_eq!(fs::read(settings_path()).unwrap(), external);
+        u1_stop_proxy_if_running(&state).await;
+    }
+
+    async fn u1_stop_proxy_if_running(state: &AppState) {
+        // Native selection already stops an unused proxy. Do not issue a
+        // second stop, but always verify the fixture leaves no running server.
+        if state.proxy_service.is_running().await {
+            state.proxy_service.stop().await.unwrap();
+        }
+        assert!(!state.proxy_service.is_running().await);
     }
 
     fn codex_config_path() -> std::path::PathBuf {
@@ -6927,6 +7489,14 @@ model_provider = "c"
             "desktop-native-proxy-secret",
         );
         let desktop = AppType::ClaudeDesktop;
+        let lib = claude_desktop_config::get_config_library_path().unwrap();
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(
+            lib.parent().unwrap().join("claude_desktop_config.json"),
+            r#"{"deploymentMode":"1p","mcpServers":{"keep":{}}}"#,
+        )
+        .unwrap();
+        fs::write(lib.join("_meta.json"), "{}").unwrap();
         let native = connection_mode(&state, &desktop).await.unwrap();
         assert_eq!(native.mode, "native");
         assert!(native.can_restore_native);
@@ -6939,7 +7509,7 @@ model_provider = "c"
             set_connection_mode(&state, &desktop, "osir_api", Some(&grant.provider.id), true)
                 .await
                 .unwrap();
-        assert_eq!(view.mode, "osir_api");
+        assert_eq!(view.mode, "api_key");
         assert!(view.can_restore_native);
         assert!(
             !settled_stack(&desktop).unwrap().enabled,
@@ -6969,20 +7539,18 @@ model_provider = "c"
             .unwrap();
         assert_eq!(view.mode, "native");
         assert!(!current::is_proxy(&desktop));
-        assert_eq!(
-            current::direct_provider(&state.db, &desktop)
-                .unwrap()
-                .unwrap()
-                .id,
-            crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID
-        );
+        assert!(current::direct_provider(&state.db, &desktop)
+            .unwrap()
+            .is_none());
         let dir = claude_desktop_config::get_config_library_path().unwrap();
         let config: Value = serde_json::from_slice(
             &fs::read(dir.parent().unwrap().join("claude_desktop_config.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(config["deploymentMode"], "1p");
-        assert!(desktop_profile().get("inferenceGatewayApiKey").is_none());
+        assert!(!lib
+            .join(format!("{}.json", claude_desktop_config::PROFILE_ID))
+            .exists());
         assert_eq!(
             fs::read(crate::config::get_claude_settings_path()).unwrap(),
             cli_before
@@ -7106,7 +7674,7 @@ model_provider = "c"
         assert!(!status.proxy_running);
         assert_eq!(
             connection_mode(&state, &desktop).await.unwrap().mode,
-            "native"
+            "api_key"
         );
     }
 

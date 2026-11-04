@@ -395,6 +395,26 @@ pub enum CopilotAuthError {
     InvalidDomain(String),
 }
 
+impl CopilotAuthError {
+    /// Safe internal category; Display remains available for caller-facing errors.
+    fn log_category(&self) -> &'static str {
+        match self {
+            Self::DeviceFlowNotStarted => "device_flow_not_started",
+            Self::AuthorizationPending => "authorization_pending",
+            Self::AccessDenied => "access_denied",
+            Self::ExpiredToken => "authorization_expired",
+            Self::GitHubTokenInvalid => "authentication_failed",
+            Self::CopilotTokenFetchFailed(_) => "token_fetch_failed",
+            Self::NetworkError(_) => "network_failed",
+            Self::ParseError(_) => "response_parse_failed",
+            Self::IoError(_) => "credential_store_failed",
+            Self::NoCopilotSubscription => "subscription_unavailable",
+            Self::AccountNotFound(_) => "account_unavailable",
+            Self::InvalidDomain(_) => "domain_invalid",
+        }
+    }
+}
+
 impl From<reqwest::Error> for CopilotAuthError {
     fn from(err: reqwest::Error) -> Self {
         CopilotAuthError::NetworkError(err.to_string())
@@ -596,7 +616,7 @@ impl CopilotAuthManager {
 
         // 尝试从磁盘加载（同步，不发起网络请求）
         if let Err(e) = manager.load_from_disk_sync() {
-            log::warn!("[CopilotAuth] 加载存储失败: {e}");
+            log::warn!("[CopilotAuth] 加载存储失败: {}", e.log_category());
         }
 
         manager
@@ -708,7 +728,7 @@ impl CopilotAuthManager {
         // 持久化
         self.save_to_disk().await?;
 
-        log::info!("[CopilotAuth] 添加账号成功: {}", user.login);
+        log::info!("[CopilotAuth] 添加账号成功");
 
         Ok(account)
     }
@@ -768,10 +788,7 @@ impl CopilotAuthManager {
             .await
             .map_err(|e| CopilotAuthError::ParseError(e.to_string()))?;
 
-        log::info!(
-            "[CopilotAuth] 获取设备码成功，user_code: {}",
-            device_code.user_code
-        );
+        log::info!("[CopilotAuth] 获取设备码成功");
 
         Ok(device_code)
     }
@@ -1134,11 +1151,7 @@ impl CopilotAuthManager {
             log::debug!("[CopilotAuth] 账号 {account_id} 已保存动态 API 端点");
         }
 
-        log::info!(
-            "[CopilotAuth] 获取使用量成功，计划: {}, 重置日期: {}",
-            usage.copilot_plan,
-            usage.quota_reset_date
-        );
+        log::info!("[CopilotAuth] 获取使用量成功");
 
         Ok(usage)
     }
@@ -1180,7 +1193,8 @@ impl CopilotAuthManager {
             Ok(endpoint) => endpoint,
             Err(e) => {
                 log::debug!(
-                    "[CopilotAuth] 获取账号 {account_id} 动态 API 端点失败: {e}，使用默认值"
+                    "[CopilotAuth] 动态 API 端点失败: {}，使用默认值",
+                    e.log_category()
                 );
                 let domain = self.get_account_domain(account_id).await;
                 copilot_api_base(&domain)
@@ -1507,7 +1521,7 @@ impl CopilotAuthManager {
             .await
             .map_err(|e| CopilotAuthError::ParseError(e.to_string()))?;
 
-        log::info!("[CopilotAuth] 获取用户信息成功: {}", user.login);
+        log::info!("[CopilotAuth] 获取用户信息成功");
 
         Ok(user)
     }
@@ -1632,7 +1646,10 @@ impl CopilotAuthManager {
                         )
                         .await
                     {
-                        log::warn!("[CopilotAuth] 迁移时验证 Copilot 订阅失败: {e}");
+                        log::warn!(
+                            "[CopilotAuth] 迁移时验证 Copilot 订阅失败: {}",
+                            e.log_category()
+                        );
                     }
 
                     // 添加账号
@@ -1648,10 +1665,14 @@ impl CopilotAuthManager {
                 }
                 Err(e) => {
                     self.set_migration_error(Some(format!(
-                        "Legacy Copilot auth migration failed: {e}"
+                        "Legacy Copilot auth migration failed: {}",
+                        e.log_category()
                     )))
                     .await;
-                    log::warn!("[CopilotAuth] 迁移失败，旧 token 可能已失效: {e}");
+                    log::warn!(
+                        "[CopilotAuth] 迁移失败，旧 token 可能已失效: {}",
+                        e.log_category()
+                    );
                 }
             }
 
@@ -1694,6 +1715,82 @@ impl CopilotAuthManager {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a1_copilot_store_parse_failure_does_not_log_fixture_credentials() {
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("copilot_auth.json"),
+            r#"{"version":"fixture-key-A1 fixture-token-A1 fixture-prompt-A1","github_token":"fixture-image-A1"}"#).unwrap();
+        let _manager = CopilotAuthManager::new(dir.path().into());
+        let logs = capture.text();
+        assert!(logs.contains("response_parse_failed"), "{logs}");
+        assert!(!logs.contains("fixture-"), "{logs}");
+    }
+
+    #[test]
+    fn a1_copilot_internal_error_categories_never_include_payloads() {
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        let secret = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+        let cases = [
+            (
+                CopilotAuthError::DeviceFlowNotStarted,
+                "device_flow_not_started",
+            ),
+            (
+                CopilotAuthError::AuthorizationPending,
+                "authorization_pending",
+            ),
+            (CopilotAuthError::AccessDenied, "access_denied"),
+            (CopilotAuthError::ExpiredToken, "authorization_expired"),
+            (
+                CopilotAuthError::GitHubTokenInvalid,
+                "authentication_failed",
+            ),
+            (
+                CopilotAuthError::CopilotTokenFetchFailed(secret.into()),
+                "token_fetch_failed",
+            ),
+            (
+                CopilotAuthError::NetworkError(secret.into()),
+                "network_failed",
+            ),
+            (
+                CopilotAuthError::ParseError(secret.into()),
+                "response_parse_failed",
+            ),
+            (
+                CopilotAuthError::IoError(secret.into()),
+                "credential_store_failed",
+            ),
+            (
+                CopilotAuthError::NoCopilotSubscription,
+                "subscription_unavailable",
+            ),
+            (
+                CopilotAuthError::AccountNotFound(secret.into()),
+                "account_unavailable",
+            ),
+            (
+                CopilotAuthError::InvalidDomain(secret.into()),
+                "domain_invalid",
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.log_category(), expected);
+            log::warn!("[CopilotAuth] fixture failure: {}", error.log_category());
+        }
+        let caller_error = CopilotAuthError::NetworkError(secret.into());
+        assert!(caller_error.to_string().contains(secret));
+        let logs = capture.text();
+        assert!(logs.contains("network_failed"));
+        assert!(!logs.contains("fixture-key-"));
+        assert!(!logs.contains("fixture-token-"));
+        assert!(!logs.contains("fixture-prompt-"));
+        assert!(!logs.contains("fixture-image-"));
+    }
+
     use super::*;
     use crate::provider::CodexCopilotApiFormat;
     use tempfile::tempdir;

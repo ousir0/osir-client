@@ -491,6 +491,188 @@ pub fn atomic_write_private(path: &Path, data: &[u8]) -> Result<(), AppError> {
     atomic_write_with_unix_mode(path, data, Some(0o600))
 }
 
+// Reuse the tool-backup ACL implementation, including its current-user/SYSTEM
+// policy and reparse-point checks. No second SDDL or ACL policy to maintain.
+#[cfg(windows)]
+#[path = "services/osir"]
+mod database_access {
+    use crate::commands::BackupError;
+    type Result<T> = std::result::Result<T, BackupError>;
+    #[path = "tool_backup_windows.rs"]
+    mod windows;
+
+    pub(super) fn create_directory(path: &std::path::Path) -> std::io::Result<()> {
+        windows::create_private_directory(path)
+    }
+    pub(super) fn verify_path(path: &std::path::Path) -> Result<()> {
+        windows::verify_path(path)
+    }
+    pub(super) fn read_options(options: &mut std::fs::OpenOptions) {
+        windows::read_options(options);
+    }
+    pub(super) fn verify_file(file: &std::fs::File) -> Result<()> {
+        windows::verify_file(file, true)
+    }
+    pub(super) fn verify_plain_file(file: &std::fs::File) -> Result<()> {
+        windows::verify_file(file, false)
+    }
+    pub(super) fn is_reparse(metadata: &std::fs::Metadata) -> bool {
+        windows::is_reparse(metadata)
+    }
+
+    // Copy an already verified policy; do not construct another ACL/SDDL.
+    pub(super) fn copy_acl(
+        source: &std::path::Path,
+        target: &std::path::Path,
+    ) -> std::io::Result<()> {
+        use std::{os::windows::ffi::OsStrExt, ptr};
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::{
+                Authorization::{GetNamedSecurityInfoW, SetNamedSecurityInfoW, SE_FILE_OBJECT},
+                DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+            },
+        };
+        windows::verify_path(source).map_err(|_| std::io::Error::other("Unsafe ACL source"))?;
+        let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+        let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+        unsafe {
+            let mut acl = ptr::null_mut();
+            let mut descriptor = ptr::null_mut();
+            let status = GetNamedSecurityInfoW(
+                source.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut acl,
+                ptr::null_mut(),
+                &mut descriptor,
+            );
+            if status != 0 {
+                return Err(std::io::Error::from_raw_os_error(status as i32));
+            }
+            let status = SetNamedSecurityInfoW(
+                target.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                acl,
+                ptr::null_mut(),
+            );
+            LocalFree(descriptor);
+            if status != 0 {
+                return Err(std::io::Error::from_raw_os_error(status as i32));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Only missing directories are created privately. Existing custom directories
+/// are never chmod'ed recursively. Windows requires a verified private ACL:
+/// SQLite creates its sidecars using the parent directory's inherited ACL.
+pub(crate) fn create_private_database_directory(path: &Path) -> Result<(), AppError> {
+    #[cfg(windows)]
+    {
+        if !path.exists() {
+            if let Some(parent) = path.parent().filter(|p| !p.exists()) {
+                create_private_database_directory(parent)?;
+            }
+            match database_access::create_directory(path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(AppError::io(path, e)),
+            }
+        }
+        // Upgrade only the dedicated app directory, never an arbitrary custom
+        // directory or its ancestors. Existing file ACLs are handled separately.
+        if database_access::verify_path(path).is_err()
+            && path == get_device_config_dir()
+            && fs::symlink_metadata(path)
+                .is_ok_and(|m| m.is_dir() && !database_access::is_reparse(&m))
+        {
+            let stage = tempfile::tempdir_in(path).map_err(|e| AppError::io(path, e))?;
+            let policy = stage.path().join("policy");
+            database_access::create_directory(&policy).map_err(|e| AppError::io(&policy, e))?;
+            database_access::copy_acl(&policy, path).map_err(|e| AppError::io(path, e))?;
+        }
+        database_access::verify_path(path).map_err(|_| {
+            AppError::Config(
+                "数据库目录的访问权限不安全。请使用仅当前账户可访问的目录后重试。".into(),
+            )
+        })?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(path).map_err(|e| AppError::io(path, e))
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn verify_private_database_file(path: &Path) -> Result<(), AppError> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    database_access::read_options(&mut options);
+    let file = options.open(path).map_err(|e| AppError::io(path, e))?;
+    database_access::verify_file(&file)
+        .map_err(|_| AppError::Config("数据库文件的访问权限不安全，请检查文件权限后重试。".into()))
+}
+
+#[cfg(windows)]
+pub(crate) fn protect_private_database_file(path: &Path) -> Result<(), AppError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| AppError::Config("无效的路径".into()))?;
+    // Reject reparse/hard links before setting security on any existing file.
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    database_access::read_options(&mut options);
+    let file = options.open(path).map_err(|e| AppError::io(path, e))?;
+    database_access::verify_plain_file(&file)
+        .map_err(|_| AppError::Config("数据库文件路径不安全，请检查文件位置后重试。".into()))?;
+    database_access::copy_acl(parent, path).map_err(|e| AppError::io(path, e))?;
+    database_access::verify_file(&file)
+        .map_err(|_| AppError::Config("数据库文件的访问权限不安全，请检查文件权限后重试。".into()))
+}
+
+/// Full SQL exports contain credentials. On Windows publish a file inheriting
+/// our protected staging directory's ACL, even in a shared export directory.
+/// rename preserves that ACL; ReplaceFileW would retain a broad destination ACL.
+pub(crate) fn atomic_write_private_export(path: &Path, data: &[u8]) -> Result<(), AppError> {
+    #[cfg(not(windows))]
+    {
+        atomic_write_private(path, data)
+    }
+    #[cfg(windows)]
+    {
+        let parent = path
+            .parent()
+            .ok_or_else(|| AppError::Config("无效的路径".into()))?;
+        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+        let stage = tempfile::Builder::new()
+            .prefix(".osir-private-export-")
+            .tempdir_in(parent)
+            .map_err(|e| AppError::io(parent, e))?;
+        let private = stage.path().join("private");
+        create_private_database_directory(&private)?;
+        let staged_file = private.join("export.sql");
+        atomic_write_private(&staged_file, data)?;
+        verify_private_database_file(&staged_file)?;
+        fs::rename(&staged_file, path).map_err(|e| AppError::io(path, e))?;
+        verify_private_database_file(path)
+    }
+}
+
 fn atomic_write_with_unix_mode(
     path: &Path,
     data: &[u8],

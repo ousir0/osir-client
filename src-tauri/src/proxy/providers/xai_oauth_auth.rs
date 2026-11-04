@@ -211,8 +211,8 @@ impl XaiOAuthManager {
             storage_path: data_dir.join("xai_oauth_auth.json"),
         };
 
-        if let Err(error) = manager.load_from_disk_sync() {
-            log::warn!("[XaiOAuth] 加载存储失败: {error}");
+        if let Err(_error) = manager.load_from_disk_sync() {
+            log::warn!("[XaiOAuth] 加载存储失败: credential_store_failed");
         }
         manager
     }

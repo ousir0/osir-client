@@ -2536,7 +2536,7 @@ fn create_anthropic_sse_stream_from_responses_raw<E: std::error::Error + Send + 
                             .or_else(|| data.get("type").and_then(Value::as_str))
                             .unwrap_or("");
 
-                        log::debug!("[Claude/Responses] <<< SSE event: {event_name}");
+                        log::debug!("[Claude/Responses] <<< SSE event received");
 
                         // Ignore every event after a terminal response. In particular,
                         // do not synthesize message_start if a broken gateway emits a
@@ -4598,7 +4598,7 @@ fn create_anthropic_sse_stream_from_responses_raw<E: std::error::Error + Send + 
                     if terminated {
                         break;
                     }
-                    log::error!("Responses stream error: {e}");
+                    log::error!("Responses stream error: stream_transport_failed");
                     let error_event = json!({
                         "type": "error",
                         "error": {
@@ -4710,6 +4710,38 @@ fn create_anthropic_sse_stream_from_responses_raw<E: std::error::Error + Send + 
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a1_responses_stream_errors_preserve_caller_payload_without_logging_it() {
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        let secret = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+        let upstream = stream::iter(vec![
+            Ok(Bytes::from(format!(
+                "event: {secret}\ndata: {{\"type\":\"{secret}\"}}\n\n"
+            ))),
+            Err(std::io::Error::other(secret)),
+        ]);
+        let chunks = create_anthropic_sse_stream_from_responses(upstream)
+            .collect::<Vec<_>>()
+            .await;
+        let output: String = chunks
+            .into_iter()
+            .map(|chunk| String::from_utf8(chunk.unwrap().to_vec()).unwrap())
+            .collect();
+        let events = sse_data_values(&output);
+        let error = events
+            .iter()
+            .find(|event| event["type"] == "error")
+            .unwrap();
+        assert_eq!(error["error"]["type"], "stream_error");
+        assert_eq!(error["error"]["message"], format!("Stream error: {secret}"));
+        assert!(!output.contains("event: message_stop"));
+        let logs = capture.text();
+        assert!(logs.contains("SSE event received"));
+        assert!(logs.contains("stream_transport_failed"));
+        assert!(!logs.contains("fixture-"), "{logs}");
+    }
+
     use super::*;
     use futures::stream;
     use futures::StreamExt;

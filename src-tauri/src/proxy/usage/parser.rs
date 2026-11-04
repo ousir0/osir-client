@@ -271,10 +271,7 @@ impl TokenUsage {
     pub fn from_codex_response(body: &Value) -> Option<Self> {
         let usage = body.get("usage");
         if usage.is_none() {
-            log::debug!(
-                "[Codex] 响应中没有 usage 字段，body keys: {:?}",
-                body.as_object().map(|o| o.keys().collect::<Vec<_>>())
-            );
+            log::debug!("[Codex] 响应中没有 usage 字段: usage_missing");
             return None;
         }
         let usage = usage?;
@@ -283,7 +280,7 @@ impl TokenUsage {
         let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64());
 
         if input_tokens.is_none() || output_tokens.is_none() {
-            log::debug!("[Codex] usage 字段缺少 input_tokens 或 output_tokens，usage: {usage:?}");
+            log::debug!("[Codex] usage 字段缺少 input_tokens 或 output_tokens: usage_incomplete");
             return None;
         }
 
@@ -326,7 +323,7 @@ impl TokenUsage {
             // 使用非调整版本，记录原始 input_tokens
             Self::from_codex_response(body)
         } else {
-            log::debug!("[Codex] 无法识别响应格式，usage: {usage:?}");
+            log::debug!("[Codex] 无法识别响应格式: usage_format_unknown");
             None
         }
     }
@@ -402,7 +399,7 @@ impl TokenUsage {
         for event in events.iter().rev() {
             if let Some(usage) = event.get("usage") {
                 if !usage.is_null() {
-                    log::debug!("[Codex] 找到 usage: {usage:?}");
+                    log::debug!("[Codex] 找到 usage: usage_present");
                     let mut parsed = Self::from_openai_response(event)?;
                     if parsed.message_id.is_none() {
                         parsed.message_id =
@@ -508,6 +505,39 @@ impl TokenUsage {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a1_usage_parser_logs_categories_without_response_values_or_keys() {
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        let secret = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+        let mut missing = json!({"output": secret});
+        missing
+            .as_object_mut()
+            .unwrap()
+            .insert(secret.into(), json!(secret));
+        assert!(TokenUsage::from_codex_response(&missing).is_none());
+        let malformed = json!({"usage": {"input_tokens": secret, "nested": {"message": secret}}});
+        assert!(TokenUsage::from_codex_response(&malformed).is_none());
+        assert!(
+            TokenUsage::from_codex_response_auto(&json!({"usage": {(secret): secret}})).is_none()
+        );
+        let parsed = TokenUsage::from_openai_stream_events(&[json!({
+            "usage": {"prompt_tokens": 17, "completion_tokens": 3, "extra": secret}
+        })])
+        .unwrap();
+        assert_eq!((parsed.input_tokens, parsed.output_tokens), (17, 3));
+        let logs = capture.text();
+        for category in [
+            "usage_missing",
+            "usage_incomplete",
+            "usage_format_unknown",
+            "usage_present",
+        ] {
+            assert!(logs.contains(category), "{logs}");
+        }
+        assert!(!logs.contains("fixture-"), "{logs}");
+    }
+
     use super::*;
     use serde_json::json;
 

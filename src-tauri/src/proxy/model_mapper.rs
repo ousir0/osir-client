@@ -145,7 +145,7 @@ pub fn apply_model_mapping(
         let mapped = mapping.map_model(original);
 
         if mapped != *original {
-            log::debug!("[ModelMapper] 模型映射: {original} → {mapped}");
+            log::debug!("[ModelMapper] 模型映射: model_remapped");
             body["model"] = serde_json::json!(mapped);
             return (body, Some(original.clone()), Some(mapped));
         }
@@ -175,7 +175,7 @@ pub fn strip_one_m_suffix_for_upstream_from_body(mut body: Value) -> Value {
 
     let stripped = strip_one_m_suffix_for_upstream(model);
     if stripped != model {
-        log::debug!("[ModelMapper] 去除本地 1M 标记: {model} → {stripped}");
+        log::debug!("[ModelMapper] 去除本地 1M 标记: model_suffix_removed");
         body["model"] = serde_json::json!(stripped);
     }
     body

@@ -113,8 +113,8 @@ impl FailoverSwitchManager {
                 "providerId": provider_id,
                 "source": "failover"  // 标识来源是故障转移
             });
-            if let Err(e) = app.emit("provider-switched", event_data) {
-                log::error!("[Failover] 发射事件失败: {e}");
+            if app.emit("provider-switched", event_data).is_err() {
+                log::error!("[Failover] 发射事件失败: operation_failed");
             }
         }
 

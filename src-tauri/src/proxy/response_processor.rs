@@ -111,7 +111,7 @@ pub(crate) async fn read_decoded_body(
     let mut decoded = false;
 
     if let Some(encoding) = get_content_encoding(&headers) {
-        log::debug!("[{tag}] 解压非流式响应: content-encoding={encoding}");
+        log::debug!("[{tag}] 解压非流式响应");
         match decompress_body_with_limit(&encoding, &raw_bytes, MAX_RESPONSE_BODY_BYTES) {
             Ok(Some(decompressed)) => {
                 // 解码器在预算耗尽处即截停，此处必然 ≤ MAX_RESPONSE_BODY_BYTES
@@ -124,8 +124,8 @@ pub(crate) async fn read_decoded_body(
             Err(DecompressError::TooLarge { .. }) => {
                 return Err(ProxyError::ResponseBodyTooLarge(MAX_RESPONSE_BODY_BYTES));
             }
-            Err(DecompressError::Io(e)) => {
-                log::warn!("[{tag}] 解压失败 ({encoding}): {e}，使用原始数据");
+            Err(DecompressError::Io(_)) => {
+                log::warn!("[{tag}] 解压失败: response_decompression_failed，使用原始数据");
             }
         }
     }
@@ -173,9 +173,9 @@ pub async fn handle_streaming(
         format_headers(response.headers())
     );
     // 检查流式响应是否被压缩（SSE 通常不压缩，如果压缩则 SSE 解析会失败）
-    if let Some(encoding) = get_content_encoding(response.headers()) {
+    if get_content_encoding(response.headers()).is_some() {
         log::warn!(
-            "[{}] 流式响应含 content-encoding={encoding}，SSE 解析可能失败。\
+            "[{}] 流式响应含 content-encoding，SSE 解析可能失败。\
              上游在 accept-encoding 透传后压缩了 SSE 流。",
             ctx.tag
         );
@@ -213,7 +213,7 @@ pub async fn handle_streaming(
     match builder.body(body) {
         Ok(resp) => resp,
         Err(e) => {
-            log::error!("[{}] 构建流式响应失败: {e}", ctx.tag);
+            log::error!("[{}] 构建流式响应失败: response_build_failed", ctx.tag);
             ProxyError::Internal(format!("Failed to build streaming response: {e}")).into_response()
         }
     }
@@ -325,7 +325,7 @@ pub async fn handle_non_streaming(
 
     let body = axum::body::Body::from(body_bytes);
     builder.body(body).map_err(|e| {
-        log::error!("[{}] 构建响应失败: {e}", ctx.tag);
+        log::error!("[{}] 构建响应失败: response_build_failed", ctx.tag);
         ProxyError::Internal(format!("Failed to build response: {e}"))
     })
 }
@@ -674,8 +674,7 @@ async fn log_usage_internal(
     let request_id = usage.dedup_request_id(dedup_scope);
 
     log::debug!(
-        "[{app_type}] 记录请求日志: id={request_id}, provider={provider_id}, model={model}, streaming={is_streaming}, status={status_code}, latency_ms={latency_ms}, first_token_ms={first_token_ms:?}, session={}, input={}, output={}, cache_read={}, cache_creation={}",
-        session_id.as_deref().unwrap_or("none"),
+        "[{app_type}] 记录请求日志: streaming={is_streaming}, status={status_code}, latency_ms={latency_ms}, first_token_ms={first_token_ms:?}, input={}, output={}, cache_read={}, cache_creation={}",
         usage.input_tokens,
         usage.output_tokens,
         usage.cache_read_tokens,
@@ -718,12 +717,8 @@ async fn log_usage_internal(
             is_streaming,
         )
     });
-    if let Err(e) = write.await.unwrap_or_else(|e| {
-        Err(crate::error::AppError::Database(format!(
-            "usage 记录任务失败: {e}"
-        )))
-    }) {
-        log::warn!("[USG-001] 记录使用量失败: {e}");
+    if !matches!(write.await, Ok(Ok(()))) {
+        log::warn!("[USG-001] 记录使用量失败: usage_write_failed");
     }
 }
 
@@ -837,7 +832,8 @@ pub fn create_logged_passthrough_stream(
                     yield Ok(bytes);
                 }
                 Some(Err(e)) => {
-                    log::error!("[{tag}] 流错误: {e}");
+                    // A1: only the downstream error carries upstream text.
+                    log::error!("[{tag}] 流错误: stream_transport_failed");
                     yield Err(std::io::Error::other(e.to_string()));
                     break;
                 }
@@ -857,53 +853,10 @@ pub fn create_logged_passthrough_stream(
     }
 }
 
-fn is_safe_diagnostic_header(name: &str) -> bool {
-    matches!(
-        name,
-        "content-type"
-            | "content-encoding"
-            | "content-length"
-            | "retry-after"
-            | "cf-ray"
-            | "x-request-id"
-            | "request-id"
-            | "x-correlation-id"
-    ) || name.starts_with("x-ratelimit-")
-        || name.starts_with("ratelimit-")
-}
-
-fn bounded_header_value(value: &axum::http::HeaderValue) -> Option<String> {
-    let value = value.to_str().ok()?;
-    let mut bounded = value.chars().take(160).collect::<String>();
-    if value.chars().count() > 160 {
-        bounded.push('…');
-    }
-    Some(bounded)
-}
-
+// Header names and values are both controlled by the upstream. A header-name
+// allowlist plus truncation cannot make its values safe to persist in file logs.
 fn format_headers(headers: &HeaderMap) -> String {
-    let mut entries = headers
-        .keys()
-        .map(|key| {
-            let name = key.as_str();
-            if !is_safe_diagnostic_header(name) {
-                return name.to_string();
-            }
-
-            let values = headers
-                .get_all(key)
-                .iter()
-                .filter_map(bounded_header_value)
-                .collect::<Vec<_>>();
-            if values.is_empty() {
-                name.to_string()
-            } else {
-                format!("{name}={}", values.join("|"))
-            }
-        })
-        .collect::<Vec<_>>();
-    entries.sort();
-    format!("[{}]", entries.join(", "))
+    format!("[count={}]", headers.len())
 }
 
 #[cfg(test)]
@@ -1002,22 +955,60 @@ mod tests {
     }
 
     #[test]
-    fn format_headers_keeps_only_allowlisted_diagnostic_values() {
+    fn a1_diagnostic_headers_never_include_upstream_names_or_values() {
         let mut headers = HeaderMap::new();
-        headers.insert("authorization", "Bearer super-secret".parse().unwrap());
-        headers.insert("set-cookie", "session=cookie-secret".parse().unwrap());
-        headers.insert("retry-after", "30".parse().unwrap());
-        headers.insert("x-ratelimit-remaining", "2".parse().unwrap());
-        headers.insert("cf-ray", "abc123-SJC".parse().unwrap());
+        for name in [
+            "authorization",
+            "set-cookie",
+            "retry-after",
+            "x-ratelimit-remaining",
+            "cf-ray",
+            "x-request-id",
+            "content-type",
+            "content-encoding",
+            "fixture-key-a1",
+        ] {
+            headers.insert(
+                http::header::HeaderName::from_static(name),
+                "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1"
+                    .parse()
+                    .unwrap(),
+            );
+        }
+        assert_eq!(format_headers(&headers), "[count=9]");
+    }
 
-        let formatted = format_headers(&headers);
-        assert!(formatted.contains("authorization"), "{formatted}");
-        assert!(formatted.contains("set-cookie"), "{formatted}");
-        assert!(formatted.contains("retry-after=30"), "{formatted}");
-        assert!(formatted.contains("x-ratelimit-remaining=2"), "{formatted}");
-        assert!(formatted.contains("cf-ray=abc123-SJC"), "{formatted}");
-        assert!(!formatted.contains("super-secret"), "{formatted}");
-        assert!(!formatted.contains("cookie-secret"), "{formatted}");
+    #[tokio::test]
+    async fn a1_passthrough_errors_preserve_client_payload_without_logging_it() {
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        let payload = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+        let bytes = Bytes::from(format!(
+            "event: error\ndata: {}\n\n",
+            serde_json::json!({"error": {"message": payload}})
+        ));
+        let upstream =
+            futures::stream::iter(vec![Ok(bytes.clone()), Err(std::io::Error::other(payload))]);
+        let chunks = create_logged_passthrough_stream(
+            upstream,
+            "fixture",
+            None,
+            StreamingTimeoutConfig {
+                first_byte_timeout: 0,
+                idle_timeout: 0,
+            },
+            None,
+        )
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].as_ref().unwrap(), &bytes);
+        assert_eq!(chunks[1].as_ref().unwrap_err().to_string(), payload);
+        let text = capture.text();
+        assert!(text.contains("stream_transport_failed"));
+        for marker in payload.split_whitespace() {
+            assert!(!text.contains(marker));
+        }
     }
 
     #[tokio::test]

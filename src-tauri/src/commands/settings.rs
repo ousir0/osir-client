@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 // IPC callers share a single installation, even if multiple windows invoke it.
@@ -276,10 +276,15 @@ pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreR
 /// 重启应用程序（当 app_config_dir 变更后使用）
 #[tauri::command]
 pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
+    let installation = UpdateInstallationLease::acquire()?;
+    let state = app.state::<crate::store::AppState>();
+    let admission = state.proxy_service.prepare_restart().await?;
     crate::save_window_state_before_exit(&app);
 
     // 在后台延迟重启，让函数有时间返回响应
     tauri::async_runtime::spawn(async move {
+        let _installation = installation;
+        let _admission = admission;
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         // 本命令用于 app_config_dir 变更后的重启：新实例会切到新数据库，拿不到
         // 旧库里的 Live 备份，无法恢复被接管的 Live 配置。因此必须趁旧实例的
@@ -310,6 +315,19 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
     // 由 MSI 模板自身的 REBOOT 属性兜底。
     #[cfg(target_os = "windows")]
     let builder = builder.installer_arg("REBOOT=ReallySuppress");
+    #[cfg(target_os = "windows")]
+    let builder = {
+        let handle = app.clone();
+        // The plugin invokes this only after successful archive extraction.
+        // Returned validation/extraction failures must leave the app usable.
+        builder.on_before_exit(move || {
+            crate::save_window_state_before_exit(&handle);
+            tauri::async_runtime::block_on(crate::cleanup_before_exit(&handle));
+            crate::remove_tray_icon_before_exit(&handle);
+            crate::destroy_single_instance_lock(&handle);
+            handle.cleanup_before_exit();
+        })
+    };
     let updater = builder
         .build()
         .map_err(|e| format!("初始化更新器失败: {e}"))?;
@@ -346,24 +364,29 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
         .await
         .map_err(|e| format!("下载更新失败: {e}"))?;
 
+    // Download leaves existing traffic untouched. Once bytes are ready, pause
+    // admission and wait for complete response bodies before replacing files.
+    let _ = app.emit("update-install-phase", "waiting");
+    let state = app.state::<crate::store::AppState>();
+    let _admission = state.proxy_service.prepare_restart().await?;
+    let _ = app.emit("update-install-phase", "installing");
     log::info!("开始安装应用更新: {}", update.version);
 
     #[cfg(target_os = "windows")]
     {
-        // Windows updater 会在 install() 内启动安装器并直接退出当前进程
-        // （插件内部 std::process::exit(0)，绕过 TrayIcon::drop、不发
-        // NIM_DELETE，会残留死图标——与托盘"退出"路径相同的问题）。
-        // 因此清理只能放在 install 前执行，且必须显式移除托盘图标。
-        crate::save_window_state_before_exit(&app);
-        crate::cleanup_before_exit(&app).await;
-        crate::remove_tray_icon_before_exit(&app);
-        crate::destroy_single_instance_lock(&app);
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        update.install(bytes).map_err(|e| {
-            format!(
-                "Windows 更新安装失败: {e}。已执行退出前清理，代理或 Live 接管可能已暂停；请重启应用或重新开启代理后再试。"
-            )
-        })?;
+        // The plugin exits after handing off to the installer. Run its sync
+        // hook outside an async worker, and keep the admission lease until it
+        // returns or exits. An error drops the lease without stopping routing.
+        tauri::async_runtime::spawn_blocking(move || {
+            // A blocking installer outlives cancellation of the IPC future.
+            // Keep both guards with that operation until handoff or failure.
+            let _installation = _installation;
+            let _admission = _admission;
+            update.install(bytes)
+        })
+        .await
+        .map_err(|_| "更新安装未完成，请重试。".to_string())?
+        .map_err(|_| "更新包校验或安装准备失败，请重新下载后重试。".to_string())?;
         Ok(true)
     }
 

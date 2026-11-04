@@ -69,7 +69,7 @@ pub fn apply_copilot_model_normalization(mut body: Value) -> Value {
         return body;
     };
     if let Some(normalized) = normalize_to_copilot_id(orig) {
-        log::debug!("[CopilotNormalizer] {orig} → {normalized}");
+        log::debug!("[CopilotNormalizer] model_normalized");
         body["model"] = Value::String(normalized);
     }
     body

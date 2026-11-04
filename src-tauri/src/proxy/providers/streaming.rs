@@ -538,8 +538,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                             }
                                                             if state.consecutive_whitespace >= INFINITE_WHITESPACE_THRESHOLD {
                                                                 log::warn!(
-                                                                    "[Copilot] 检测到无限空白 bug (tool: {}), 中止此 tool call 流",
-                                                                    state.name
+                                                                    "[Copilot] 检测到无限空白 bug，中止此 tool call 流"
                                                                 );
                                                                 state.aborted = true;
                                                                 None
@@ -745,7 +744,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                     }
                 }
                 Err(e) => {
-                    log::error!("Stream error: {e}");
+                    // A1: keep the original message in the client SSE only.
+                    log::error!("Stream error: stream_transport_failed");
                     stream_ended_with_error = true;
                     // 错误路径同样冲刷 inline think 残留：先下发已收到的载荷，
                     // 再以 error 事件收尾，不伪造成功终止事件。
@@ -870,8 +870,10 @@ fn map_stop_reason(finish_reason: Option<&str>) -> Option<String> {
             "stop" => "end_turn",
             "length" => "max_tokens",
             "content_filter" => "end_turn",
-            other => {
-                log::warn!("[Claude/OpenRouter] Unknown finish_reason in streaming: {other}");
+            _ => {
+                log::warn!(
+                    "[Claude/OpenRouter] Unknown finish_reason in streaming: unknown_finish_reason"
+                );
                 "end_turn"
             }
         }
@@ -1474,9 +1476,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_error_does_not_emit_success_terminal_events() {
-        let upstream = stream::iter(vec![Err::<Bytes, _>(std::io::Error::other(
-            "upstream disconnected",
-        ))]);
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        let payload = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+        let upstream = stream::iter(vec![Err::<Bytes, _>(std::io::Error::other(payload))]);
         let converted = create_anthropic_sse_stream(upstream);
         let chunks: Vec<_> = converted.collect().await;
 
@@ -1495,15 +1498,36 @@ mod tests {
             })
             .collect();
 
-        assert!(events
-            .iter()
-            .any(|e| e.get("type").and_then(|v| v.as_str()) == Some("error")));
+        let error = events.iter().find(|e| e["type"] == "error").unwrap();
+        assert_eq!(error["error"]["type"], "stream_error");
+        assert_eq!(
+            error["error"]["message"],
+            format!("Stream error: {payload}")
+        );
+        let text = capture.text();
+        assert!(text.contains("stream_transport_failed"));
+        for marker in payload.split_whitespace() {
+            assert!(!text.contains(marker));
+        }
         assert!(!events
             .iter()
             .any(|e| e.get("type").and_then(|v| v.as_str()) == Some("message_delta")));
         assert!(!events
             .iter()
             .any(|e| e.get("type").and_then(|v| v.as_str()) == Some("message_stop")));
+    }
+
+    #[test]
+    fn a1_unknown_finish_reason_does_not_log_upstream_text() {
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        assert_eq!(
+            map_stop_reason(Some("fixture-prompt-A1")).as_deref(),
+            Some("end_turn")
+        );
+        let text = capture.text();
+        assert!(text.contains("unknown_finish_reason"));
+        assert!(!text.contains("fixture-prompt-A1"));
     }
 
     #[tokio::test]

@@ -198,7 +198,12 @@ impl<'a> UsageLogger<'a> {
                     log.latency_ms as i64,
                     log.first_token_ms.map(|v| v as i64),
                     log.status_code as i64,
-                    log.error_message,
+                    log.error_message.as_deref().map(|message| {
+                        crate::proxy::error_mapper::normalize_persisted_error(
+                            log.status_code,
+                            message,
+                        )
+                    }),
                     log.session_id,
                     log.provider_type,
                     log.is_streaming as i64,
@@ -210,10 +215,7 @@ impl<'a> UsageLogger<'a> {
 
         if affected_rows > 0 {
             if collision {
-                log::warn!(
-                    "usage request_id collision: primary={}, fallback={request_id}",
-                    log.request_id
-                );
+                log::warn!("usage request_id collision: request_id_collision");
             }
             crate::usage_events::notify_log_recorded();
         }
@@ -358,12 +360,12 @@ impl<'a> UsageLogger<'a> {
             Ok(value) if value == PRICING_SOURCE_RESPONSE || value == PRICING_SOURCE_REQUEST => {
                 value
             }
-            Ok(value) => {
-                log::warn!("[USG-003] 计费模式无效 (app_type={app_type}): {value}");
+            Ok(_) => {
+                log::warn!("[USG-003] 计费模式无效: pricing_source_invalid");
                 PRICING_SOURCE_RESPONSE.to_string()
             }
-            Err(e) => {
-                log::warn!("[USG-003] 获取计费模式失败 (app_type={app_type}): {e}");
+            Err(_) => {
+                log::warn!("[USG-003] 获取计费模式失败: pricing_source_unavailable");
                 PRICING_SOURCE_RESPONSE.to_string()
             }
         }
@@ -395,7 +397,7 @@ impl<'a> UsageLogger<'a> {
             || usage.cache_creation_tokens > 0;
 
         if pricing.is_none() && has_usage && !is_placeholder_pricing_model(&pricing_model) {
-            log::warn!("[USG-002] 模型定价未找到，成本将记录为 0: {pricing_model}");
+            log::warn!("[USG-002] 模型定价未找到，成本将记录为 0: model_pricing_unavailable");
         }
 
         let cost = CostCalculator::try_calculate_for_app(
@@ -668,6 +670,105 @@ mod tests {
     }
 
     #[test]
+    fn errors_cannot_leak_into_usage_or_sql_backups() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let logger = UsageLogger::new(&db);
+        let payloads = [
+            "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1".to_string(),
+            serde_json::json!({"error": {"message": "fixture-prompt-A1",
+                "nested": {"Authorization": "Bearer fixture-token-A1",
+                    "key": "fixture-key-A1", "image": "fixture-image-A1"}}})
+            .to_string(),
+            "fixture-long-A1".repeat(10000),
+            "arbitrary upstream prose without any recognized secret pattern".to_string(),
+        ];
+        for (index, payload) in payloads.iter().enumerate() {
+            logger.log_error(
+                format!("error-{index}"),
+                "provider-1".into(),
+                "claude".into(),
+                "fixture-model".into(),
+                429,
+                payload.clone(),
+                10,
+            )?;
+            logger.log_error_with_context(
+                format!("stream-{index}"),
+                "provider-1".into(),
+                "codex".into(),
+                "fixture-model".into(),
+                502,
+                payload.clone(),
+                10,
+                true,
+                Some("fixture-session".into()),
+                None,
+            )?;
+            // Direct writes must not bypass the final sink guard, including a
+            // stream that fails after HTTP 200 and after some usage was collected.
+            let mut log = request_log(&format!("direct-{index}"), 10);
+            log.status_code = 200;
+            log.is_streaming = true;
+            log.error_message = Some(payload.clone());
+            logger.log_request(&log)?;
+        }
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            let rows: i64 =
+                conn.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |r| r.get(0))?;
+            assert_eq!(rows, 12);
+            let bad_rows: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE error_message NOT IN
+                 ('请求失败 (HTTP 200)', '请求失败 (HTTP 429)', '请求失败 (HTTP 502)')",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(bad_rows, 0);
+        }
+        // Full backups and sync exports inherit the sanitized stored rows.
+        for dump in [db.export_sql_string()?, db.export_sql_string_for_sync()?] {
+            for payload in &payloads {
+                assert!(!dump.contains(payload));
+            }
+            for marker in [
+                "fixture-key-A1",
+                "fixture-token-A1",
+                "fixture-prompt-A1",
+                "fixture-image-A1",
+                "fixture-long-A1",
+            ] {
+                assert!(!dump.contains(marker), "unexpected marker: {marker}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn controlled_error_classification_survives_usage_writes() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let logger = UsageLogger::new(&db);
+        let error = crate::proxy::ProxyError::TransformError("fixture-prompt-A1".into());
+        let safe = crate::proxy::error_mapper::get_safe_error_message(&error);
+        logger.log_error(
+            "safe-error".into(),
+            "provider-1".into(),
+            "codex".into(),
+            "fixture-model".into(),
+            422,
+            safe.clone(),
+            10,
+        )?;
+        let conn = crate::database::lock_conn!(db.conn);
+        let stored: String = conn.query_row(
+            "SELECT error_message FROM proxy_request_logs WHERE request_id = 'safe-error'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(stored, safe);
+        Ok(())
+    }
+
+    #[test]
     fn test_log_error() -> Result<(), AppError> {
         let db = Database::memory()?;
         let logger = UsageLogger::new(&db);
@@ -692,7 +793,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, 500);
-        assert_eq!(error, Some("Internal Server Error".to_string()));
+        assert_eq!(error, Some("请求失败 (HTTP 500)".to_string()));
         Ok(())
     }
 

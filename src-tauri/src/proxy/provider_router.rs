@@ -68,8 +68,10 @@ impl ProviderRouter {
         // 检查该应用的自动故障转移开关是否开启（从 proxy_config 表读取）
         let auto_failover_enabled = match self.db.get_proxy_config_for_app(app_type).await {
             Ok(config) => config.auto_failover_enabled,
-            Err(e) => {
-                log::error!("[{app_type}] 读取 proxy_config 失败: {e}，默认禁用故障转移");
+            Err(_) => {
+                log::error!(
+                    "[{app_type}] 读取 proxy_config 失败: operation_failed，默认禁用故障转移"
+                );
                 false
             }
         };
@@ -180,7 +182,9 @@ impl ProviderRouter {
                 provider_id,
                 app_type,
                 success,
-                error_msg.clone(),
+                error_msg
+                    .as_deref()
+                    .map(super::error_mapper::normalize_health_error),
                 failure_threshold,
             )
             .await?;
@@ -298,6 +302,57 @@ impl ProviderRouter {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a1_health_sink_rejects_arbitrary_errors_before_database_or_backup() {
+        let db = Arc::new(Database::memory().unwrap());
+        let provider = Provider::with_id("a1-health".into(), "fixture".into(), json!({}), None);
+        db.save_provider("claude", &provider).unwrap();
+        let router = ProviderRouter::new(db.clone());
+        for raw in [
+            "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1",
+            "upstream text without known secret patterns",
+            "上游错误 (HTTP 429) fixture-prompt-A1",
+        ] {
+            router
+                .record_result(&provider.id, "claude", false, false, Some(raw.into()))
+                .await
+                .unwrap();
+            assert_eq!(
+                db.get_provider_health(&provider.id, "claude")
+                    .await
+                    .unwrap()
+                    .last_error
+                    .as_deref(),
+                Some("请求失败")
+            );
+            for sql in [
+                db.export_sql_string().unwrap(),
+                db.export_sql_string_for_sync().unwrap(),
+            ] {
+                assert!(!sql.contains(raw));
+                assert!(!sql.contains("fixture-key-A1"));
+            }
+        }
+        router
+            .record_result(
+                &provider.id,
+                "claude",
+                false,
+                false,
+                Some("上游错误 (HTTP 429)".into()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            db.get_provider_health(&provider.id, "claude")
+                .await
+                .unwrap()
+                .last_error
+                .as_deref(),
+            Some("上游错误 (HTTP 429)")
+        );
+    }
+
     use super::*;
     use crate::database::Database;
     use crate::provider::{AuthBinding, AuthBindingSource, ProviderMeta};

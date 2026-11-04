@@ -72,7 +72,6 @@ fn read_with_output_limit<R: Read>(
     reader: R,
     max_bytes: usize,
 ) -> Result<Vec<u8>, DecompressError> {
-    // saturating_add：无界调用（max_bytes = usize::MAX）时预算保持 usize::MAX
     let budget = max_bytes.saturating_add(1) as u64;
     let mut limited = reader.take(budget);
     let mut out = Vec::new();
@@ -101,10 +100,14 @@ fn decompress_single(
             let zlib = flate2::read::ZlibDecoder::new(body);
             match read_with_output_limit(zlib, max_output_bytes) {
                 Ok(decompressed) => Ok(Some(decompressed)),
-                Err(zlib_err) => {
-                    // TooLarge 也要回退：raw 流被误判为 zlib 时可能在预算处截停，
-                    // 回退后若真是炸弹，raw 解码同样会触发 TooLarge。
-                    log::debug!("deflate 按 zlib 解压失败（{zlib_err}），回退 raw deflate");
+                Err(DecompressError::TooLarge { limit }) => {
+                    Err(DecompressError::TooLarge { limit })
+                }
+                Err(_) => {
+                    // 仅格式错误回退；超预算必须保留 TooLarge，不能被 raw 的格式错误掩盖。
+                    log::debug!(
+                        "deflate 按 zlib 解压失败，回退 raw deflate: response_decompression_failed"
+                    );
                     let raw = flate2::read::DeflateDecoder::new(body);
                     Ok(Some(read_with_output_limit(raw, max_output_bytes)?))
                 }
@@ -141,7 +144,7 @@ pub(crate) fn decompress_body_with_limit(
     }
     // 任一 coding 不支持就整体放弃解压、保头透传，避免半解码的脏数据。
     if !codings.iter().all(|c| is_single_supported(c)) {
-        log::warn!("不支持的 content-encoding: {content_encoding}，跳过解压");
+        log::warn!("不支持的 content-encoding，跳过解压: encoding_unsupported");
         return Ok(None);
     }
 
@@ -158,18 +161,19 @@ pub(crate) fn decompress_body_with_limit(
     Ok(data)
 }
 
-/// 无输出上限的 [`decompress_body_with_limit`] 版本，供请求侧等已有自身
-/// 体积约束的调用方使用。
+/// 测试用便捷入口，使用与请求体相同的有限预算。
+#[cfg(test)]
 pub(crate) fn decompress_body(
     content_encoding: &str,
     body: &[u8],
 ) -> Result<Option<Vec<u8>>, std::io::Error> {
-    decompress_body_with_limit(content_encoding, body, usize::MAX).map_err(Into::into)
+    decompress_body_with_limit(content_encoding, body, 200 * 1024 * 1024).map_err(Into::into)
 }
 
 /// 该 content-encoding（含堆叠，如 `gzip, zstd`）是否全部可被解压。
 ///
 /// 请求侧用它做闸门：无法解压的压缩体不能透传给 JSON 解析，需直接拒绝。
+#[cfg(test)]
 pub(crate) fn is_supported_content_encoding(content_encoding: &str) -> bool {
     let codings = split_codings(content_encoding);
     !codings.is_empty() && codings.iter().all(|c| is_single_supported(c))
@@ -178,7 +182,7 @@ pub(crate) fn is_supported_content_encoding(content_encoding: &str) -> bool {
 /// 从 header 提取 content-encoding（合并重复头，忽略 identity 与空值）。
 ///
 /// HTTP 允许重复 content-encoding 头，语义等同逗号拼接，故用 `get_all` 合并；
-/// 返回值可能含多个逗号分隔的 coding，交由 [`decompress_body`] 反向解码。
+/// 返回值可能含多个逗号分隔的 coding，交由 [`decompress_body_with_limit`] 反向解码。
 pub(crate) fn get_content_encoding(headers: &HeaderMap) -> Option<String> {
     let combined = headers
         .get_all("content-encoding")
@@ -303,6 +307,19 @@ mod tests {
             .unwrap();
         assert_eq!(out.len(), 64 * 1024);
         assert_eq!(out, payload);
+    }
+
+    #[test]
+    fn decompress_deflate_limit_is_not_hidden_by_raw_fallback() {
+        use std::io::Write;
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&[0; 4096]).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(matches!(
+            decompress_body_with_limit("deflate", &compressed, 64),
+            Err(DecompressError::TooLarge { limit: 64 })
+        ));
     }
 
     #[test]

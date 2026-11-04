@@ -257,12 +257,11 @@ impl ProxyResponse {
 /// When set, the raw write path uses HTTP CONNECT tunneling through the proxy,
 /// so header-case preservation works even when an upstream proxy is configured.
 ///
-/// `log_display` is a caller-supplied, already-sanitized string used only for
-/// logging; this layer never derives a log value from the raw `uri`.
+/// `_log_display` is retained for call compatibility; target strings are never logged.
 #[allow(clippy::too_many_arguments)]
 pub async fn send_request(
     uri: http::Uri,
-    log_display: &str,
+    _log_display: &str,
     method: http::Method,
     headers: http::HeaderMap,
     original_extensions: http::Extensions,
@@ -277,12 +276,11 @@ pub async fn send_request(
         .map(|c| !c.cases.is_empty())
         .unwrap_or(false);
     log::debug!(
-        "[HyperClient] Sending request: target={}, header_count={}, \
-         has_host={}, has_original_cases={has_cases}, proxy={:?}",
-        log_display,
+        "[HyperClient] Sending request: header_count={}, \
+         has_host={}, has_original_cases={has_cases}, proxy_configured={}",
         headers.len(),
         headers.contains_key(http::header::HOST),
-        proxy_url.map(super::http_client::mask_url),
+        proxy_url.is_some(),
     );
 
     if let Some(original_cases) = original_cases
@@ -304,7 +302,10 @@ pub async fn send_request(
                     // Don't bypass configured proxy with direct connect fallback
                     return Err(e);
                 }
-                log::warn!("[HyperClient] Raw write failed, falling back to hyper-util: {e}");
+                log::warn!(
+                    "[HyperClient] Raw write failed, falling back to hyper-util: {}",
+                    super::error_mapper::get_safe_error_message(&e)
+                );
                 // Fall through to hyper-util Client
             }
         }
@@ -574,9 +575,7 @@ async fn connect_via_proxy(
     // the BufReader buffer should be empty at this point.
     drop(reader);
 
-    log::debug!(
-        "[HyperClient] CONNECT tunnel established via {proxy_host}:{proxy_port} -> {target_host}:{target_port}"
-    );
+    log::debug!("[HyperClient] CONNECT tunnel established: upstream_tunnel_ready");
 
     Ok(stream)
 }
@@ -705,8 +704,8 @@ where
 
     // Spawn the connection driver (reads responses from the stream)
     tokio::spawn(async move {
-        if let Err(e) = conn.await {
-            log::debug!("[HyperClient] raw conn driver error: {e}");
+        if conn.await.is_err() {
+            log::debug!("[HyperClient] raw conn driver error: upstream_connection_failed");
         }
     });
 

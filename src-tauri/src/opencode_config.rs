@@ -23,6 +23,16 @@ struct OsirRestore {
     model: Option<Value>,
     applied_models: Vec<Value>,
     nodes: std::collections::BTreeMap<String, (Option<Value>, Vec<Value>)>,
+    #[serde(default)]
+    native_nodes: std::collections::BTreeMap<String, (Option<Value>, Vec<Value>)>,
+    #[serde(default)]
+    provider_present: Option<bool>,
+    #[serde(default)]
+    providers_present: Option<bool>,
+    #[serde(default)]
+    native_available: Option<bool>,
+    #[serde(default)]
+    restored: bool,
 }
 
 fn osir_restore_path() -> PathBuf {
@@ -42,13 +52,56 @@ fn osir_restore_error() -> AppError {
 fn osir_restore_matches(record: &OsirRestore, config: &Value) -> bool {
     let model = config.get("model");
     (model.is_some_and(|m| record.applied_models.contains(m)) || model == record.model.as_ref())
-        && record.nodes.iter().all(|(id, (before, written))| {
-            let current = config.get("provider").and_then(|nodes| nodes.get(id));
-            current.is_some_and(|node| written.contains(node)) || current == before.as_ref()
+        && [
+            ("provider", &record.nodes),
+            ("providers", &record.native_nodes),
+        ]
+        .into_iter()
+        .all(|(key, nodes)| {
+            nodes.iter().all(|(id, (before, written))| {
+                let current = config.get(key).and_then(|nodes| nodes.get(id));
+                current.is_some_and(|node| written.contains(node)) || current == before.as_ref()
+            })
         })
 }
 
+/// Launch safety is independent of whether a native restore target exists.
+/// These errors expose no configuration bytes or materialized credentials.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum LaunchConfigError {
+    Unreadable,
+    RestoreConflict,
+}
+
+/// Pure read: an absent/default config is safe for OpenCode to initialize.
+/// If our restore intent exists, verify its owned fields and selected path;
+/// never settle, rewrite, create a native target, or accept unrelated bytes.
+pub(crate) fn validated_launch_config_path() -> Result<PathBuf, LaunchConfigError> {
+    let _guard = opencode_config_lock()
+        .lock()
+        .map_err(|_| LaunchConfigError::Unreadable)?;
+    let path = get_opencode_config_path().map_err(|_| LaunchConfigError::Unreadable)?;
+    let config =
+        read_opencode_config_from_path(&path).map_err(|_| LaunchConfigError::Unreadable)?;
+    let record = read_osir_restore().map_err(|_| LaunchConfigError::Unreadable)?;
+    if record
+        .as_ref()
+        .is_some_and(|record| record.path != path || !osir_restore_matches(record, &config))
+    {
+        return Err(LaunchConfigError::RestoreConflict);
+    }
+    Ok(path)
+}
+
+#[cfg(test)]
 pub fn osir_connection_mode() -> Result<crate::mode::controller::ConnectionModeView, AppError> {
+    osir_connection_mode_for_providers(&[])
+}
+
+pub fn osir_connection_mode_for_providers(
+    managed_ids: &[String],
+) -> Result<crate::mode::controller::ConnectionModeView, AppError> {
+    use crate::mode::controller::{ConnectionModeView, NativeConfiguration};
     let _guard = opencode_config_lock().lock()?;
     let path = get_opencode_config_path()?;
     let config = read_opencode_config_from_path(&path)?;
@@ -62,36 +115,66 @@ pub fn osir_connection_mode() -> Result<crate::mode::controller::ConnectionModeV
                 .get("model")
                 .is_some_and(|m| r.applied_models.contains(m))
         });
-    let untracked_osir = record.is_none() && osir_selected(&config);
-    let conflict = (record.is_some() && !valid) || untracked_osir;
-    Ok(crate::mode::controller::ConnectionModeView {
-        mode: if conflict {
-            "unavailable"
-        } else if active {
-            "osir_api"
-        } else {
-            "native"
-        },
-        can_restore_native: !conflict,
-        reason: conflict.then_some("OpenCode 配置已另行修改，无法安全恢复"),
-    })
-}
-
-fn osir_selected(config: &Value) -> bool {
-    config
+    let selected = config
         .get("model")
         .and_then(Value::as_str)
         .and_then(|m| m.split_once('/'))
-        .and_then(|(id, _)| config.get("provider").and_then(|nodes| nodes.get(id)))
-        .is_some_and(|node| {
-            node.to_string()
-                .to_ascii_lowercase()
-                .contains("osirclaw.com")
-        })
+        .filter(|(p, m)| !p.is_empty() && !m.is_empty());
+    let known = selected.is_some_and(|(id, _)| managed_ids.iter().any(|p| p == id));
+    let local = selected.is_some();
+    let conflict = record.is_some() && !valid;
+    let available = record.as_ref().map_or(local && !known, |r| {
+        r.model.is_some() && r.native_available != Some(false)
+    });
+    Ok(ConnectionModeView {
+        mode: if conflict {
+            "unavailable"
+        } else if active || (known && !record.as_ref().is_some_and(|r| r.restored)) {
+            "api_key"
+        } else if local {
+            "native"
+        } else {
+            "unavailable"
+        },
+        can_restore_native: !conflict && available,
+        reason: if conflict {
+            Some("OpenCode 配置已另行修改，无法安全恢复")
+        } else if !available {
+            Some("没有可验证的原配置")
+        } else {
+            None
+        },
+        native_configuration: Some(if known && record.is_none() {
+            NativeConfiguration::unknown()
+        } else {
+            NativeConfiguration::local(if available {
+                "available"
+            } else {
+                "unavailable"
+            })
+        }),
+    })
 }
 
+#[cfg(test)]
 pub fn osir_set_connection_mode(
     provider: Option<&crate::provider::Provider>,
+) -> Result<(), AppError> {
+    osir_set_connection_mode_with_model(provider, None)
+}
+
+#[cfg(test)]
+pub fn osir_set_connection_mode_with_model(
+    provider: Option<&crate::provider::Provider>,
+    model_id: Option<&str>,
+) -> Result<(), AppError> {
+    osir_set_connection_mode_with_sources(provider, model_id, &[])
+}
+
+pub fn osir_set_connection_mode_with_sources(
+    provider: Option<&crate::provider::Provider>,
+    model_id: Option<&str>,
+    managed_ids: &[String],
 ) -> Result<(), AppError> {
     // Resolve only in native memory. The restore record is private (0600).
     let resolved = provider
@@ -107,9 +190,6 @@ pub fn osir_set_connection_mode(
     let mut document = OpenCodeDocument::load(&path)?;
     let mut desired = document.document.value().clone();
     let previous = read_osir_restore()?;
-    if previous.is_none() && osir_selected(&desired) {
-        return Err(osir_restore_error());
-    }
     if previous
         .as_ref()
         .is_some_and(|r| r.path != path || !osir_restore_matches(r, &desired))
@@ -122,22 +202,69 @@ pub fn osir_set_connection_mode(
             &provider.settings_config,
             provider.opencode_config_format(),
         )?;
-        if format != OpenCodeConfigFormat::V1 {
+        let key = match format {
+            OpenCodeConfigFormat::V1 => {
+                if desired
+                    .get("providers")
+                    .and_then(|nodes| nodes.get(&provider.id))
+                    .is_some_and(is_native_provider)
+                {
+                    return Err(osir_restore_error());
+                }
+                "provider"
+            }
+            OpenCodeConfigFormat::V2 => {
+                validate_native_provider(&provider.id, fragment)?;
+                "providers"
+            }
+        };
+        if !fragment.is_object() || desired.get(key).is_some_and(|v| !v.is_object()) {
             return Err(osir_restore_error());
         }
-        let model = fragment
+        let fallback = fragment
             .get("models")
             .and_then(Value::as_object)
             .and_then(|models| models.keys().next())
+            .map(|model| format!("{}/{model}", provider.id));
+        let applied_model = model_id
+            .map(str::to_owned)
+            .or(fallback)
             .ok_or_else(osir_restore_error)?;
-        let mut record = previous.unwrap_or_else(|| OsirRestore {
-            path: path.clone(),
-            model: desired.get("model").cloned(),
-            applied_models: Vec::new(),
-            nodes: Default::default(),
-        });
-        record
-            .nodes
+        if !applied_model
+            .split_once('/')
+            .is_some_and(|(id, model)| id == provider.id && !model.trim().is_empty())
+        {
+            return Err(osir_restore_error());
+        }
+        let proven_native = previous
+            .as_ref()
+            .is_some_and(|r| r.restored && r.native_available != Some(false));
+        let mut record = previous
+            .filter(|r| !r.restored)
+            .unwrap_or_else(|| OsirRestore {
+                path: path.clone(),
+                model: desired.get("model").cloned(),
+                applied_models: Vec::new(),
+                nodes: Default::default(),
+                native_nodes: Default::default(),
+                provider_present: Some(desired.get("provider").is_some()),
+                providers_present: Some(desired.get("providers").is_some()),
+                native_available: Some(
+                    proven_native
+                        || !desired
+                            .get("model")
+                            .and_then(Value::as_str)
+                            .and_then(|m| m.split_once('/'))
+                            .is_some_and(|(id, _)| managed_ids.iter().any(|saved| saved == id)),
+                ),
+                restored: false,
+            });
+        let nodes = if key == "provider" {
+            &mut record.nodes
+        } else {
+            &mut record.native_nodes
+        };
+        nodes
             .entry(provider.id.clone())
             .and_modify(|(_, written)| {
                 if !written.contains(fragment) {
@@ -147,20 +274,17 @@ pub fn osir_set_connection_mode(
             .or_insert_with(|| {
                 (
                     desired
-                        .get("provider")
+                        .get(key)
                         .and_then(|nodes| nodes.get(&provider.id))
                         .cloned(),
                     vec![fragment.clone()],
                 )
             });
-        let applied_model = json!(format!("{}/{model}", provider.id));
+        let applied_model = json!(applied_model);
         if !record.applied_models.contains(&applied_model) {
             record.applied_models.push(applied_model.clone());
         }
-        if desired.get("provider").is_some_and(|v| !v.is_object()) {
-            return Err(osir_restore_error());
-        }
-        desired["provider"][&provider.id] = fragment.clone();
+        desired[key][&provider.id] = fragment.clone();
         desired["model"] = applied_model;
         // Persist intent first: a crash before config publication remains safe
         // to restore (both before and after values are recognized).
@@ -169,6 +293,13 @@ pub fn osir_set_connection_mode(
             &serde_json::to_vec(&record).map_err(|_| osir_restore_error())?,
         )?;
     } else if let Some(record) = previous {
+        if record.native_available == Some(false) || record.model.is_none() {
+            return Err(osir_restore_error());
+        }
+        if record.restored {
+            return Ok(());
+        }
+        let native_model = record.model.clone();
         if let Some(model) = record.model {
             desired["model"] = model;
         } else {
@@ -177,24 +308,54 @@ pub fn osir_set_connection_mode(
                 .ok_or_else(osir_restore_error)?
                 .remove("model");
         }
-        for (id, (before, _)) in record.nodes {
-            if let Some(before) = before {
-                desired["provider"][&id] = before;
-            } else if let Some(nodes) = desired.get_mut("provider").and_then(Value::as_object_mut) {
-                nodes.remove(&id);
+        for (key, nodes, was_present) in [
+            ("provider", record.nodes, record.provider_present),
+            ("providers", record.native_nodes, record.providers_present),
+        ] {
+            for (id, (before, _)) in nodes {
+                if let Some(before) = before {
+                    desired[key][&id] = before;
+                } else if let Some(nodes) = desired.get_mut(key).and_then(Value::as_object_mut) {
+                    nodes.remove(&id);
+                }
+            }
+            if was_present == Some(false)
+                && desired
+                    .get(key)
+                    .and_then(Value::as_object)
+                    .is_some_and(|nodes| nodes.is_empty())
+            {
+                desired
+                    .as_object_mut()
+                    .ok_or_else(osir_restore_error)?
+                    .remove(key);
             }
         }
+        // Retain only non-secret origin evidence for an original local model
+        // that also happens to have a saved client row. Do not retain API nodes.
+        let marker = OsirRestore {
+            path: path.clone(),
+            model: native_model,
+            applied_models: vec![],
+            nodes: Default::default(),
+            native_nodes: Default::default(),
+            provider_present: None,
+            providers_present: None,
+            native_available: Some(true),
+            restored: true,
+        };
+        document.document.apply(&desired)?;
+        document.save()?;
+        crate::config::atomic_write_private(
+            &osir_restore_path(),
+            &serde_json::to_vec(&marker).map_err(|_| osir_restore_error())?,
+        )?;
+        return Ok(());
     } else {
         return Ok(());
     }
     document.document.apply(&desired)?;
     document.save()?;
-    if provider.is_none() {
-        // Publication completed; remove the private record (including resolved
-        // credentials) so a future activation captures the latest native state.
-        std::fs::remove_file(osir_restore_path())
-            .map_err(|e| AppError::io(osir_restore_path(), e))?;
-    }
     Ok(())
 }
 
@@ -939,7 +1100,7 @@ mod tests {
         );
         assert_eq!(osir_connection_mode().unwrap().mode, "native");
         osir_set_connection_mode(Some(&provider)).unwrap();
-        assert_eq!(osir_connection_mode().unwrap().mode, "osir_api");
+        assert_eq!(osir_connection_mode().unwrap().mode, "api_key");
         // A process restart reads the same private record, with no memory flag.
         assert!(read_osir_restore().unwrap().is_some());
         set_default_model("external/changed").unwrap();
@@ -949,8 +1110,220 @@ mod tests {
         set_default_model("osir-fixture/model").unwrap();
         osir_set_connection_mode(None).unwrap();
         assert_eq!(read_opencode_config().unwrap(), original);
-        assert!(read_osir_restore().unwrap().is_none());
+        assert!(read_osir_restore().unwrap().unwrap().restored);
         assert_eq!(osir_connection_mode().unwrap().mode, "native");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn u1_opencode_manual_models_v1_v2_roundtrip_and_origin_are_journaled() {
+        for native in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let _guard = TestHomeGuard::set(temp.path());
+            let original = json!({"model":"original/model", "mcp":{"keep":{"type":"local","command":["fixture"]}}, "theme":"light"});
+            write_config(temp.path(), &original.to_string());
+            let fragment = if native {
+                json!({"package":"@ai-sdk/openai-compatible", "settings":{"baseURL":"https://fixture.invalid/v1"}, "models":{"first":{},"second":{}}})
+            } else {
+                json!({"npm":"@ai-sdk/openai-compatible", "options":{"baseURL":"https://fixture.invalid/v1","apiKey":"fixture-only"}, "models":{"first":{},"second":{}}})
+            };
+            let row = crate::provider::Provider::with_id(
+                "manual".into(),
+                "Manual".into(),
+                fragment,
+                None,
+            );
+            for model in ["manual/first", "manual/second"] {
+                osir_set_connection_mode_with_sources(Some(&row), Some(model), &[row.id.clone()])
+                    .unwrap();
+                assert_eq!(read_opencode_config().unwrap()["model"], model);
+                let before = std::fs::read(osir_restore_path()).unwrap();
+                assert_eq!(
+                    osir_connection_mode_for_providers(&[row.id.clone()])
+                        .unwrap()
+                        .mode,
+                    "api_key"
+                );
+                assert_eq!(std::fs::read(osir_restore_path()).unwrap(), before);
+            }
+            assert_eq!(
+                read_osir_restore().unwrap().unwrap().applied_models.len(),
+                2
+            );
+            osir_set_connection_mode_with_sources(None, None, &[row.id.clone()]).unwrap();
+            assert_eq!(read_opencode_config().unwrap(), original);
+            assert_eq!(
+                osir_connection_mode_for_providers(&[row.id.clone()])
+                    .unwrap()
+                    .mode,
+                "native"
+            );
+            // Marker retains source metadata, no materialized API nodes or keys.
+            assert!(
+                !String::from_utf8(std::fs::read(osir_restore_path()).unwrap())
+                    .unwrap()
+                    .contains("fixture-only")
+            );
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn u1_opencode_existing_managed_model_is_not_a_native_restore_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = TestHomeGuard::set(temp.path());
+        let original = json!({"model":"manual/first","provider":{"manual":{"npm":"@ai-sdk/openai-compatible","models":{"first":{},"second":{}}}}});
+        write_config(temp.path(), &original.to_string());
+        let row = crate::provider::Provider::with_id(
+            "manual".into(),
+            "Manual".into(),
+            original["provider"]["manual"].clone(),
+            None,
+        );
+        let before = osir_connection_mode_for_providers(&[row.id.clone()]).unwrap();
+        assert_eq!(before.mode, "api_key");
+        assert!(!before.can_restore_native);
+        osir_set_connection_mode_with_sources(Some(&row), Some("manual/second"), &[row.id.clone()])
+            .unwrap();
+        assert!(
+            !osir_connection_mode_for_providers(&[row.id.clone()])
+                .unwrap()
+                .can_restore_native
+        );
+        assert!(osir_set_connection_mode_with_sources(None, None, &[row.id.clone()]).is_err());
+        assert_eq!(read_opencode_config().unwrap()["model"], "manual/second");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn u1_opencode_empty_and_corrupt_records_are_read_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = TestHomeGuard::set(temp.path());
+        assert_eq!(osir_connection_mode().unwrap().mode, "unavailable");
+        assert!(!get_opencode_config_path().unwrap().exists());
+        crate::config::atomic_write_private(&osir_restore_path(), b"{broken").unwrap();
+        assert!(osir_connection_mode().is_err());
+        assert_eq!(std::fs::read(osir_restore_path()).unwrap(), b"{broken");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn u1_opencode_launch_allows_unknown_default_without_writing() {
+        for original in [
+            None,
+            Some("{}"),
+            Some(r#"{"mcp":{"keep":{"type":"local","command":["fixture"]}}}"#),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let _guard = TestHomeGuard::set(temp.path());
+            if let Some(original) = original {
+                write_config(temp.path(), original);
+            }
+            let path = get_opencode_config_path().unwrap();
+            let before = std::fs::read(&path).ok();
+            let state_path = crate::live::engine::DeviceStore::for_device().state_path();
+            let state_before = std::fs::read(&state_path).ok();
+            let view = osir_connection_mode().unwrap();
+            assert_eq!(view.mode, "unavailable");
+            assert!(!view.can_restore_native);
+            assert_eq!(validated_launch_config_path().unwrap(), path);
+            assert_eq!(std::fs::read(&path).ok(), before);
+            assert_eq!(std::fs::read(state_path).ok(), state_before);
+            assert!(!osir_restore_path().exists());
+            if original.is_none() {
+                assert!(!get_opencode_dir().exists());
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn u1_opencode_launch_validates_owned_restore_fields_without_requiring_native_target() {
+        for original in ["{}", r#"{"model":"original/model"}"#] {
+            let temp = tempfile::tempdir().unwrap();
+            let _guard = TestHomeGuard::set(temp.path());
+            write_config(temp.path(), original);
+            let row = launch_fixture_provider();
+            osir_set_connection_mode_with_sources(
+                Some(&row),
+                Some("manual/model"),
+                &[row.id.clone()],
+            )
+            .unwrap();
+            // MCP remains user-owned and is not a restore conflict.
+            set_mcp_server("keep", json!({"type":"local","command":["fixture"]})).unwrap();
+            let path = get_opencode_config_path().unwrap();
+            let config_before = std::fs::read(&path).unwrap();
+            let record_before = std::fs::read(osir_restore_path()).unwrap();
+            let view = osir_connection_mode().unwrap();
+            assert_eq!(view.mode, "api_key");
+            assert_eq!(view.can_restore_native, original != "{}");
+            assert_eq!(validated_launch_config_path().unwrap(), path);
+            assert_eq!(std::fs::read(&path).unwrap(), config_before);
+            assert_eq!(std::fs::read(osir_restore_path()).unwrap(), record_before);
+            set_default_model("external/changed").unwrap();
+            let external = std::fs::read(&path).unwrap();
+            assert_eq!(
+                validated_launch_config_path(),
+                Err(LaunchConfigError::RestoreConflict)
+            );
+            assert_eq!(std::fs::read(path).unwrap(), external);
+            assert_eq!(std::fs::read(osir_restore_path()).unwrap(), record_before);
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn u1_opencode_launch_rejects_corrupt_record_config_and_path_conflict_without_writing() {
+        for kind in ["config", "record", "path", "provider"] {
+            let temp = tempfile::tempdir().unwrap();
+            let _guard = TestHomeGuard::set(temp.path());
+            write_config(temp.path(), "{}");
+            let row = launch_fixture_provider();
+            osir_set_connection_mode_with_sources(
+                Some(&row),
+                Some("manual/model"),
+                &[row.id.clone()],
+            )
+            .unwrap();
+            let path = get_opencode_config_path().unwrap();
+            match kind {
+                "config" => std::fs::write(&path, b"{broken").unwrap(),
+                "record" => std::fs::write(osir_restore_path(), b"{broken").unwrap(),
+                "path" => {
+                    let mut record = read_osir_restore().unwrap().unwrap();
+                    record.path = temp.path().join("other-opencode.json");
+                    std::fs::write(osir_restore_path(), serde_json::to_vec(&record).unwrap())
+                        .unwrap();
+                }
+                "provider" => {
+                    let mut config = read_opencode_config().unwrap();
+                    config["provider"]["manual"]["options"]["baseURL"] =
+                        json!("https://external.invalid");
+                    std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let config_before = std::fs::read(&path).unwrap();
+            let record_before = std::fs::read(osir_restore_path()).unwrap();
+            let expected = if matches!(kind, "config" | "record") {
+                LaunchConfigError::Unreadable
+            } else {
+                LaunchConfigError::RestoreConflict
+            };
+            assert_eq!(validated_launch_config_path(), Err(expected), "{kind}");
+            assert_eq!(std::fs::read(path).unwrap(), config_before);
+            assert_eq!(std::fs::read(osir_restore_path()).unwrap(), record_before);
+        }
+    }
+
+    fn launch_fixture_provider() -> crate::provider::Provider {
+        crate::provider::Provider::with_id(
+            "manual".into(),
+            "Manual".into(),
+            json!({"npm":"@ai-sdk/openai-compatible", "options":{"baseURL":"https://fixture.invalid/v1"}, "models":{"model":{}}}),
+            None,
+        )
     }
 
     struct TestHomeGuard(Option<std::ffi::OsString>, crate::settings::AppSettings);

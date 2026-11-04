@@ -99,19 +99,21 @@ impl Database {
     pub fn init() -> Result<Self, AppError> {
         crate::osir_identity::initialize_storage()?;
         let db_path = crate::config::get_database_path();
-        let db_exists = db_path.exists();
-
-        // 确保父目录存在
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
-        }
+        Self::prepare_database_file(&db_path)?;
 
         let conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
+
+        // Inspect and back up the original schema before any DDL or persistent
+        // PRAGMA. In particular, v0 with user tables is a legacy DB, not a new DB.
+        Self::prepare_schema_upgrade(&conn, || {
+            let guard = backup::lock_backup_file_operations()?;
+            Self::backup_database_file_from_conn(&guard, &conn, &[])
+        })?;
 
         // 启用外键约束
         conn.execute("PRAGMA foreign_keys = ON;", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
-        if !db_exists {
+        if !Self::has_user_tables(&conn)? {
             // For a brand-new database, configure incremental auto-vacuum
             // before creating any tables so no rebuild is needed later.
             conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
@@ -124,21 +126,6 @@ impl Database {
             log_count_cache: Mutex::new(None),
         };
         db.create_tables()?;
-
-        // Pre-migration backup: only when upgrading from an existing database
-        {
-            let conn = lock_conn!(db.conn);
-            let version = Self::get_user_version(&conn)?;
-            drop(conn);
-            if version > 0 && version < SCHEMA_VERSION {
-                log::info!(
-                    "Creating pre-migration database backup (v{version} → v{SCHEMA_VERSION})"
-                );
-                if let Err(e) = db.backup_database_file() {
-                    log::warn!("Pre-migration backup failed, continuing migration: {e}");
-                }
-            }
-        }
 
         db.apply_schema_migrations()?;
         if let Err(e) = db.ensure_incremental_auto_vacuum() {
@@ -167,6 +154,105 @@ impl Database {
         Ok(db)
     }
 
+    /// Create an empty file privately, never replace a live SQLite inode.
+    /// Existing user-selected parent directories keep their permissions.
+    fn prepare_database_file(path: &std::path::Path) -> Result<(), AppError> {
+        if let Some(parent) = path.parent() {
+            Self::create_database_directory(parent)?;
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(path) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(AppError::io(path, e)),
+        }
+        Self::protect_database_file(path)?;
+        // SQLite inherits the main DB mode for newly created sidecars on Unix.
+        // Tighten existing sidecars in place before opening the connection too.
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let mut name = path.as_os_str().to_os_string();
+            name.push(suffix);
+            let sidecar = std::path::PathBuf::from(name);
+            match Self::protect_database_file(&sidecar) {
+                Err(AppError::Io { source, .. })
+                    if source.kind() == std::io::ErrorKind::NotFound => {}
+                result => result?,
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn create_database_directory(path: &std::path::Path) -> Result<(), AppError> {
+        crate::config::create_private_database_directory(path)
+    }
+
+    fn protect_database_file(path: &std::path::Path) -> Result<(), AppError> {
+        // Reject links instead of chmod'ing an unrelated file. No recursive
+        // permission changes and no atomic-write/rename of the live database.
+        let meta = std::fs::symlink_metadata(path).map_err(|e| AppError::io(path, e))?;
+        if !meta.is_file() {
+            return Err(AppError::Database(
+                "数据库文件路径不安全，请检查文件位置后重试。".into(),
+            ));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NOFOLLOW)
+                .open(path)
+                .map_err(|e| AppError::io(path, e))?;
+            let meta = file.metadata().map_err(|e| AppError::io(path, e))?;
+            if !meta.is_file() || meta.nlink() != 1 || meta.uid() != unsafe { libc::geteuid() } {
+                return Err(AppError::Database(
+                    "数据库文件路径不安全，请检查文件位置后重试。".into(),
+                ));
+            }
+            file.set_permissions(std::fs::Permissions::from_mode(meta.mode() & 0o600))
+                .map_err(|e| AppError::io(path, e))?;
+        }
+        #[cfg(windows)]
+        crate::config::protect_private_database_file(path)?;
+        Ok(())
+    }
+
+    /// The injected operation is the existing validated SQLite Backup engine.
+    /// Keeping this gate separate makes failures testable without writing HOME.
+    fn prepare_schema_upgrade<F>(conn: &Connection, backup: F) -> Result<(), AppError>
+    where
+        F: FnOnce() -> Result<Option<std::path::PathBuf>, AppError>,
+    {
+        let version = Self::get_user_version(conn)?;
+        if version > SCHEMA_VERSION {
+            return Err(AppError::Database(format!(
+                "数据库版本过新（{version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后重试。"
+            )));
+        }
+        if version < 0 {
+            return Err(AppError::Database(
+                "数据库版本无效，请检查数据库或从备份恢复。".into(),
+            ));
+        }
+        if version < SCHEMA_VERSION && Self::has_user_tables(conn)? {
+            log::info!("Creating pre-migration database backup (v{version} → v{SCHEMA_VERSION})");
+            // Do not include raw backup errors: they may contain SQL or data.
+            let fail = || {
+                AppError::Database(
+                "升级前备份未完成，数据库尚未升级。请检查备份目录的写入权限和可用磁盘空间后重试；如需恢复，请保留原数据库和已有备份。".into(),
+            )
+            };
+            backup().map_err(|_| fail())?.ok_or_else(fail)?;
+        }
+        Ok(())
+    }
+
     /// 读取磁盘上数据库的 `user_version`；仅当它比应用支持的 [`SCHEMA_VERSION`]
     /// 更新时返回 `Some(version)`。
     ///
@@ -178,7 +264,8 @@ impl Database {
         if !db_path.exists() {
             return Ok(None);
         }
-        let conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
+        let conn = Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let version = Self::get_user_version(&conn)?;
         Ok((version > SCHEMA_VERSION).then_some(version))
     }

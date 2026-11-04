@@ -46,6 +46,8 @@ import {
   disableAggregation,
 } from "./aggregation";
 import { ConnectionDrawer } from "./ConnectionDrawer";
+import { NativeConfigurationView } from "./NativeConfigurationView";
+import { connectionKind, type ConnectionModeView } from "./connectionMode";
 import { ModelSelection } from "./ModelSelection";
 import { ClaudeModelRoles } from "./ClaudeModelRoles";
 import { CodexCatalogStatus } from "./CodexCatalogStatus";
@@ -140,11 +142,6 @@ type AccountAuthCapability = {
   status: "available" | "unavailable";
   reason: string;
 };
-type ConnectionModeView = {
-  mode: "native" | "osir_api" | "unavailable";
-  canRestoreNative: boolean;
-  reason?: string;
-};
 const isTool = (s: Page): s is ToolId => TOOL_IDS.includes(s as ToolId);
 export const isDesktop = () => "__TAURI_INTERNALS__" in window;
 export default function OsirWorkbench() {
@@ -200,7 +197,6 @@ export default function OsirWorkbench() {
     {},
   );
   const [imageOpenRequest, setImageOpenRequest] = useState(0);
-  const [imagePanelVisible, setImagePanelVisible] = useState(false);
   const desktop = isDesktop();
   const clientBuild = useQuery({
     queryKey: ["osir-client-build"],
@@ -250,7 +246,7 @@ export default function OsirWorkbench() {
   }, [page, tab]);
   const tool: ToolId = isTool(page) ? page : "codex";
   const [previewSource, setPreviewSource] = useState<
-    Record<string, "native" | "osir_api">
+    Record<string, "native" | "api_key">
   >({});
   const connectionMode = useQuery({
     queryKey: ["osir-connection-mode", tool],
@@ -260,14 +256,16 @@ export default function OsirWorkbench() {
     retry: false,
     refetchOnWindowFocus: false,
   });
+  const [connectionPanels, setConnectionPanels] = useState<
+    Record<string, "native" | "api_key">
+  >({});
   const connectionSource = desktop
-    ? !connectionMode.isPending &&
-      !connectionMode.isError &&
-      (connectionMode.data?.mode === "native" ||
-        connectionMode.data?.mode === "osir_api")
-      ? connectionMode.data.mode
+    ? !connectionMode.isPending && !connectionMode.isError
+      ? connectionKind(connectionMode.data?.mode)
       : undefined
-    : previewSource[tool] || "osir_api";
+    : previewSource[tool] || "api_key";
+  const connectionPanel =
+    connectionPanels[tool] || connectionSource || "api_key";
   const [expandedProviders, setExpandedProviders] = useState<
     Record<string, boolean>
   >({});
@@ -302,8 +300,7 @@ export default function OsirWorkbench() {
         invoke<ConnectionModeView>("osir_get_connection_mode", {
           tool: target,
         }),
-      // Observe only modes that a tool page has already read. The command
-      // settles pending writes, so the overview must never invoke it itself.
+      // Reuse verified tool-page results without multiplying background reads.
       enabled: false,
       retry: false,
       staleTime: 60_000,
@@ -322,9 +319,8 @@ export default function OsirWorkbench() {
               ? "loading"
               : status.isError
                 ? "error"
-                : status.data?.mode === "native" ||
-                    status.data?.mode === "osir_api"
-                  ? status.data.mode
+                : connectionKind(status.data?.mode)
+                  ? connectionKind(status.data?.mode)!
                   : "unavailable",
           observedAt: status.dataUpdatedAt || undefined,
         },
@@ -334,13 +330,7 @@ export default function OsirWorkbench() {
   const allRows = Object.values(
     desktop ? providers.data || {} : previewProviders[tool] || {},
   ).sort((a, b) => (a.sortIndex ?? 999999) - (b.sortIndex ?? 999999));
-  const rows = allRows.filter((provider) =>
-    connectionSource === "native"
-      ? !provider.meta?.osirBinding
-      : connectionSource === "osir_api"
-        ? provider.category !== "official"
-        : true,
-  );
+  const rows = allRows.filter((provider) => provider.category !== "official");
   const openCodeDefault = useQuery({
     queryKey: ["osir-opencode-default"],
     queryFn: () => providersApi.getOpenCodeDefaultModel(),
@@ -419,9 +409,13 @@ export default function OsirWorkbench() {
         if (navigation.app && TOOL_IDS.includes(navigation.app as ToolId)) {
           setPage(navigation.app as ToolId);
           setTab("models");
-          if (navigation.intent === "add")
+          if (navigation.intent === "add") {
+            setConnectionPanels((state) => ({
+              ...state,
+              [navigation.app!]: "api_key",
+            }));
             setDrawer({ tool: navigation.app as ToolId });
-          else if (navigation.intent === "needsRoute")
+          } else if (navigation.intent === "needsRoute")
             toast.info("请在工具页面完成连接设置后切换。");
         } else if (section === "history") {
           setPage("codex");
@@ -502,6 +496,11 @@ export default function OsirWorkbench() {
       );
       return true;
     } catch (e) {
+      setConnectionPanels((panels) => {
+        const next = { ...panels };
+        delete next[tool];
+        return next;
+      });
       void refresh().catch(() => {});
       toast.error(connectionError(e), { duration: 4500 });
     } finally {
@@ -541,28 +540,17 @@ export default function OsirWorkbench() {
   async function switchTo(p: Provider) {
     if (!desktop) {
       setPreviewCurrent((s) => ({ ...s, [tool]: p.id }));
+      setPreviewSource((state) => ({ ...state, [tool]: "api_key" }));
       toast.info("仅切换浏览器预览状态，未修改本机配置。");
       return;
     }
     await action(async () => {
-      if (p.meta?.osirBinding) {
-        await invoke("osir_set_connection_mode", {
-          tool,
-          mode: "osir_api",
-          providerId: p.id,
-          aggregation: aggregationIntent(),
-        });
-        return;
-      }
-      if (tool === "opencode") {
-        const model = modelNames(p, tool)[0];
-        if (!model) throw new Error("请先配置模型。");
-        await providersApi.addToLiveConfig(p.id, tool);
-        await providersApi.setOpenCodeDefaultModel(p.id + "/" + model);
-        return;
-      }
-      const result = await providersApi.switch(p.id, tool);
-      return result.warnings.join("；");
+      await invoke("osir_set_connection_mode", {
+        tool,
+        mode: "api_key",
+        providerId: p.id,
+        aggregation: tool === "codex" && aggregationIntent(),
+      });
     }, "供应商已切换，重新启动工具后使用新连接。");
   }
   const saved = (p: Provider, savedTool: ToolId) => {
@@ -585,7 +573,7 @@ export default function OsirWorkbench() {
       ) {
         await invoke("osir_set_connection_mode", {
           tool: savedTool,
-          mode: "osir_api",
+          mode: "api_key",
           providerId: p.id,
           aggregation: aggregationIntent(),
         });
@@ -610,7 +598,7 @@ export default function OsirWorkbench() {
       setPage("codex");
       setUsageGroup(undefined);
       setTab("models");
-      setImagePanelVisible(true);
+      setConnectionPanels((state) => ({ ...state, codex: "api_key" }));
       setImageOpenRequest((request) => request + 1);
     });
   };
@@ -943,6 +931,11 @@ export default function OsirWorkbench() {
                         }
                         onClick={() =>
                           requestLeave(() => {
+                            setConnectionPanels((state) => ({
+                              ...state,
+                              [tool]: "native",
+                            }));
+                            if (connectionSource === "native") return;
                             if (!desktop) {
                               setPreviewSource((state) => ({
                                 ...state,
@@ -966,15 +959,15 @@ export default function OsirWorkbench() {
                         </span>
                         <div>
                           <strong>原生配置</strong>
-                          <small>使用本机配置与官方账号登录</small>
+                          <small>使用工具原有登录或本机配置</small>
                         </div>
                         {connectionSource === "native" && <Check size={17} />}
                       </button>
                       <button
                         className={
-                          connectionSource === "osir_api" ? "highlight" : ""
+                          connectionSource === "api_key" ? "highlight" : ""
                         }
-                        aria-pressed={connectionSource === "osir_api"}
+                        aria-pressed={connectionSource === "api_key"}
                         disabled={
                           busy ||
                           (desktop &&
@@ -983,20 +976,25 @@ export default function OsirWorkbench() {
                         }
                         onClick={() =>
                           requestLeave(() => {
+                            setConnectionPanels((state) => ({
+                              ...state,
+                              [tool]: "api_key",
+                            }));
                             if (!desktop) {
                               setPreviewSource((state) => ({
                                 ...state,
-                                [tool]: "osir_api",
+                                [tool]: "api_key",
                               }));
                               return;
                             }
-                            if (connectionMode.data?.mode === "osir_api")
+                            if (
+                              connectionKind(connectionMode.data?.mode) ===
+                              "api_key"
+                            )
                               return;
                             const provider =
-                              allRows.find(
-                                (row) =>
-                                  row.id === activeId && row.meta?.osirBinding,
-                              ) || allRows.find((row) => row.meta?.osirBinding);
+                              rows.find((row) => row.id === activeId) ||
+                              rows[0];
                             if (!provider) {
                               setDrawer({ tool, source: "account" });
                               return;
@@ -1004,7 +1002,7 @@ export default function OsirWorkbench() {
                             void action(async () => {
                               await invoke("osir_set_connection_mode", {
                                 tool,
-                                mode: "osir_api",
+                                mode: "api_key",
                                 providerId: provider.id,
                                 aggregation: aggregationIntent(),
                               });
@@ -1012,11 +1010,11 @@ export default function OsirWorkbench() {
                                 if (aggregationIntent())
                                   await applyAggregation(
                                     allRows.filter(
-                                      (row) => !!row.meta?.osirBinding,
+                                      (row) => row.category !== "official",
                                     ),
                                   );
                               }
-                            }, "已切换至 OSIR API。");
+                            }, "已切换至 API 密钥连接。");
                           })
                         }
                       >
@@ -1024,10 +1022,10 @@ export default function OsirWorkbench() {
                           <Cloud size={22} />
                         </span>
                         <div>
-                          <strong>OSIR API</strong>
-                          <small>选择账户密钥，接入可用模型</small>
+                          <strong>API 密钥</strong>
+                          <small>使用账户密钥或自定义服务连接</small>
                         </div>
-                        {connectionSource === "osir_api" && <Check size={17} />}
+                        {connectionSource === "api_key" && <Check size={17} />}
                       </button>
                     </div>
                     {desktop && !connectionSource && (
@@ -1041,7 +1039,7 @@ export default function OsirWorkbench() {
                           ? "正在读取连接方式…"
                           : connectionMode.isError
                             ? "连接方式读取失败，暂时无法确认当前使用的连接。"
-                            : "尚未确认当前连接。使用 OSIR API 前，请在供应商卡片点击“切换使用”；直接打开会沿用本机已有配置。"}
+                            : "尚未确认当前连接。使用 API 密钥前，请在供应商卡片点击“切换使用”；直接打开会沿用本机已有配置。"}
                         {!connectionMode.isPending && (
                           <button
                             disabled={connectionMode.isFetching}
@@ -1052,467 +1050,515 @@ export default function OsirWorkbench() {
                         )}
                       </p>
                     )}
-                    <div className="osir-section-title">
-                      <h2>
-                        已添加供应商 <span>{rows.length}</span>
-                      </h2>
-                      <div className="osir-actions">
-                        <button
-                          disabled={busy}
-                          onClick={() => setDrawer({ tool })}
-                        >
-                          <Plus size={16} />
-                          添加供应商
-                        </button>
-                        <button
-                          disabled={busy || !desktop}
-                          onClick={() => void refresh()}
-                          aria-label="刷新供应商"
-                        >
-                          <RefreshCw size={16} />
-                        </button>
-                      </div>
-                    </div>
-                    {(providers.isError ||
-                      current.isError ||
-                      (tool === "codex" && (mode.isError || stack.isError)) ||
-                      (tool === "opencode" && openCodeDefault.isError)) && (
-                      <div role="alert" className="osir-error">
-                        {providers.isError
-                          ? "供应商列表读取失败。"
-                          : "供应商已保存，使用状态暂时无法确认。"}
-                        <button
-                          disabled={
-                            busy || providers.isFetching || current.isFetching
-                          }
-                          onClick={() => void refresh()}
-                        >
-                          重新读取
-                        </button>
-                      </div>
-                    )}
-                    {providers.isPending && desktop ? (
-                      <div className="osir-empty" role="status">
-                        正在读取供应商…
-                      </div>
-                    ) : providers.isError && desktop && rows.length === 0 ? (
-                      <div className="osir-empty">
-                        供应商列表暂不可用，请点击刷新重试。
-                      </div>
-                    ) : rows.length === 0 ? (
-                      <div className="osir-empty">
-                        <KeyRound size={28} />
-                        <h3>添加第一个供应商</h3>
-                        <p>选择账户密钥，或手动添加供应商连接。</p>
-                        <button
-                          className="primary"
-                          onClick={() => setDrawer({ tool })}
-                        >
-                          添加供应商
-                        </button>
-                      </div>
+                    {connectionPanel === "native" ? (
+                      <NativeConfigurationView
+                        configuration={connectionMode.data?.nativeConfiguration}
+                        loading={desktop && connectionMode.isPending}
+                        failed={desktop && connectionMode.isError}
+                        refreshing={connectionMode.isFetching}
+                        onRefresh={() => void connectionMode.refetch()}
+                      />
                     ) : (
-                      <ProviderSortList
-                        ids={rows.map((p) => p.id)}
-                        disabled={busy || tool !== "codex"}
-                        onMove={(from, to) => {
-                          const fromIndex = rows.findIndex(
-                            (p) => p.id === from,
-                          );
-                          const toIndex = rows.findIndex((p) => p.id === to);
-                          if (fromIndex < 0 || toIndex < 0) return;
-                          const reordered = arrayMove(rows, fromIndex, toIndex);
-                          const visible = new Set(rows.map((p) => p.id));
-                          let index = 0;
-                          const next = allRows.map((p) =>
-                            visible.has(p.id) ? reordered[index++] : p,
-                          );
-                          requestLeave(
-                            () =>
-                              void action(async () => {
-                                if (desktop) {
-                                  await providersApi.updateSortOrder(
-                                    next.map((p, sortIndex) => ({
-                                      id: p.id,
-                                      sortIndex,
-                                    })),
-                                    tool,
-                                  );
-                                } else {
-                                  setPreviewProviders((state) => ({
-                                    ...state,
-                                    [tool]: Object.fromEntries(
-                                      next.map((p, sortIndex) => [
-                                        p.id,
-                                        { ...p, sortIndex },
-                                      ]),
-                                    ),
-                                  }));
-                                }
-                              }, "供应商顺序已更新，重新打开 Codex 后可看到模型顺序。"),
-                          );
-                        }}
-                      >
-                        {rows.map((p) => (
-                          <SortableProviderCard
-                            key={p.id}
-                            providerId={p.id}
-                            name={p.name}
-                            sortable={tool === "codex" && rows.length > 1}
-                            disabled={busy}
-                            onClick={(event) => {
-                              const target = event.target as HTMLElement;
-                              if (
-                                !target.closest(
-                                  ".osir-provider-body, button, input, select, textarea, a, label, [role='switch']",
-                                )
-                              ) {
-                                setExpandedProviders((state) => ({
-                                  ...state,
-                                  [tool + p.id]: false,
-                                }));
+                      <>
+                        <div className="osir-section-title">
+                          <h2>
+                            已添加供应商 <span>{rows.length}</span>
+                          </h2>
+                          <div className="osir-actions">
+                            <button
+                              disabled={busy}
+                              onClick={() => setDrawer({ tool })}
+                            >
+                              <Plus size={16} />
+                              添加供应商
+                            </button>
+                            <button
+                              disabled={busy || !desktop}
+                              onClick={() => void refresh()}
+                              aria-label="刷新供应商"
+                            >
+                              <RefreshCw size={16} />
+                            </button>
+                          </div>
+                        </div>
+                        {(providers.isError ||
+                          current.isError ||
+                          (tool === "codex" &&
+                            (mode.isError || stack.isError)) ||
+                          (tool === "opencode" && openCodeDefault.isError)) && (
+                          <div role="alert" className="osir-error">
+                            {providers.isError
+                              ? "供应商列表读取失败。"
+                              : "供应商已保存，使用状态暂时无法确认。"}
+                            <button
+                              disabled={
+                                busy ||
+                                providers.isFetching ||
+                                current.isFetching
                               }
-                            }}
-                            className={
-                              "osir-provider " +
-                              (providerInUse(p) ? "active" : "")
-                            }
-                          >
-                            <div className="osir-provider-head">
-                              <span className="osir-provider-icon">
-                                <ConnectionBrandIcon
-                                  provider={p}
-                                  tool={tool}
-                                  size={24}
-                                />
-                              </span>
-                              <div className="osir-provider-name">
-                                <strong>{connectionBrandName(p, tool)}</strong>
-                                <small>{p.name}</small>
-                              </div>
-                              <div className="osir-provider-tags">
-                                <span>
-                                  {modelNames(p, tool).length
-                                    ? modelNames(p, tool).length + " 个模型"
-                                    : "原生模型"}
-                                </span>
-                                {(() => {
-                                  const id =
-                                    p.meta?.osirBinding?.binding?.group_id;
-                                  const group = providerGroups.data?.data.find(
-                                    (g) => g.id === id,
-                                  );
-                                  return group ? (
-                                    <span className="osir-group-tag">
-                                      {group.name || "已关联分组"}
-                                      {group.subscription_type ===
-                                      "subscription"
-                                        ? " · 订阅"
-                                        : group.subscription_type === "standard"
-                                          ? " · 按量"
-                                          : ""}
-                                    </span>
-                                  ) : !p.meta?.osirBinding ? (
-                                    <span className="osir-group-tag">
-                                      原生配置
-                                    </span>
-                                  ) : null;
-                                })()}
-                              </div>
-                              {providerInUse(p) ? (
-                                <span className="osir-badge">使用中</span>
-                              ) : !aggregateActive ? (
-                                <button
-                                  disabled={busy}
-                                  onClick={() => void switchTo(p)}
-                                >
-                                  切换使用
-                                </button>
-                              ) : (
-                                <span className="osir-badge">未接入</span>
-                              )}
-                              {p.meta?.osirBinding?.masked_key && (
-                                <span className="osir-provider-key">
-                                  Key: {p.meta.osirBinding.masked_key}
-                                </span>
-                              )}
-                              <button
-                                disabled={busy}
-                                onClick={() => {
-                                  if (p.meta?.osirBinding) {
-                                    requestLeave(() =>
-                                      setDrawer({
+                              onClick={() => void refresh()}
+                            >
+                              重新读取
+                            </button>
+                          </div>
+                        )}
+                        {providers.isPending && desktop ? (
+                          <div className="osir-empty" role="status">
+                            正在读取供应商…
+                          </div>
+                        ) : providers.isError &&
+                          desktop &&
+                          rows.length === 0 ? (
+                          <div className="osir-empty">
+                            供应商列表暂不可用，请点击刷新重试。
+                          </div>
+                        ) : rows.length === 0 ? (
+                          <div className="osir-empty">
+                            <KeyRound size={28} />
+                            <h3>添加第一个供应商</h3>
+                            <p>选择账户密钥，或手动添加供应商连接。</p>
+                            <button
+                              className="primary"
+                              onClick={() => setDrawer({ tool })}
+                            >
+                              添加供应商
+                            </button>
+                          </div>
+                        ) : (
+                          <ProviderSortList
+                            ids={rows.map((p) => p.id)}
+                            disabled={busy || tool !== "codex"}
+                            onMove={(from, to) => {
+                              const fromIndex = rows.findIndex(
+                                (p) => p.id === from,
+                              );
+                              const toIndex = rows.findIndex(
+                                (p) => p.id === to,
+                              );
+                              if (fromIndex < 0 || toIndex < 0) return;
+                              const reordered = arrayMove(
+                                rows,
+                                fromIndex,
+                                toIndex,
+                              );
+                              const visible = new Set(rows.map((p) => p.id));
+                              let index = 0;
+                              const next = allRows.map((p) =>
+                                visible.has(p.id) ? reordered[index++] : p,
+                              );
+                              requestLeave(
+                                () =>
+                                  void action(async () => {
+                                    if (desktop) {
+                                      await providersApi.updateSortOrder(
+                                        next.map((p, sortIndex) => ({
+                                          id: p.id,
+                                          sortIndex,
+                                        })),
                                         tool,
-                                        provider: p,
-                                        source: "account",
-                                      }),
-                                    );
-                                  } else if (simpleEditable(p, tool)) {
-                                    requestLeave(() =>
-                                      setDrawer({ tool, provider: p }),
-                                    );
-                                  } else {
-                                    toast.info(
-                                      "此连接使用工具原生配置，请在对应工具中调整。",
-                                    );
+                                      );
+                                    } else {
+                                      setPreviewProviders((state) => ({
+                                        ...state,
+                                        [tool]: Object.fromEntries(
+                                          next.map((p, sortIndex) => [
+                                            p.id,
+                                            { ...p, sortIndex },
+                                          ]),
+                                        ),
+                                      }));
+                                    }
+                                  }, "供应商顺序已更新，重新打开 Codex 后可看到模型顺序。"),
+                              );
+                            }}
+                          >
+                            {rows.map((p) => (
+                              <SortableProviderCard
+                                key={p.id}
+                                providerId={p.id}
+                                name={p.name}
+                                sortable={tool === "codex" && rows.length > 1}
+                                disabled={busy}
+                                onClick={(event) => {
+                                  const target = event.target as HTMLElement;
+                                  if (
+                                    !target.closest(
+                                      ".osir-provider-body, button, input, select, textarea, a, label, [role='switch']",
+                                    )
+                                  ) {
+                                    setExpandedProviders((state) => ({
+                                      ...state,
+                                      [tool + p.id]: false,
+                                    }));
                                   }
                                 }}
-                              >
-                                配置
-                              </button>
-                              <button
-                                className="osir-provider-expand"
-                                aria-label={`${expandedProviders[tool + p.id] ? "收起" : "展开"} ${p.name} 的模型配置`}
-                                aria-expanded={!!expandedProviders[tool + p.id]}
-                                aria-controls={`provider-models-${tool}-${p.id}`}
-                                onClick={() =>
-                                  setExpandedProviders((state) => ({
-                                    ...state,
-                                    [tool + p.id]: !state[tool + p.id],
-                                  }))
+                                className={
+                                  "osir-provider " +
+                                  (providerInUse(p) ? "active" : "")
                                 }
                               >
-                                {expandedProviders[tool + p.id] ? (
-                                  <ChevronDown size={18} />
-                                ) : (
-                                  <ChevronRight size={18} />
-                                )}
-                              </button>
-                            </div>
-                            <div
-                              id={`provider-models-${tool}-${p.id}`}
-                              className="osir-provider-body"
-                              hidden={!expandedProviders[tool + p.id]}
-                            >
-                              {tool !== "opencode" &&
-                                !(
-                                  (tool === "codex" || tool === "claude") &&
-                                  (p.meta?.osirBinding ||
-                                    simpleEditable(p, tool))
-                                ) && (
-                                  <div className="osir-provider-models">
-                                    {modelNames(p, tool).map((m) => (
-                                      <span key={m}>{m}</span>
-                                    ))}
-                                    {!modelNames(p, tool).length && (
-                                      <span>由工具原生登录或配置决定模型</span>
-                                    )}
+                                <div className="osir-provider-head">
+                                  <span className="osir-provider-icon">
+                                    <ConnectionBrandIcon
+                                      provider={p}
+                                      tool={tool}
+                                      size={24}
+                                    />
+                                  </span>
+                                  <div className="osir-provider-name">
+                                    <strong>
+                                      {connectionBrandName(p, tool)}
+                                    </strong>
+                                    <small>{p.name}</small>
                                   </div>
-                                )}
-                              {tool === "claude" &&
-                                (p.meta?.osirBinding ||
-                                  simpleEditable(p, tool)) && (
-                                  <ClaudeModelRoles
-                                    provider={p}
-                                    preview={!desktop}
-                                    disabled={
-                                      actionBusy ||
-                                      (modelOperationCount > 0 &&
-                                        !modelOperations.current.has(p.id))
-                                    }
-                                    onDirtyChange={(dirty) => {
-                                      if (dirty) dirtyModels.current.add(p.id);
-                                      else dirtyModels.current.delete(p.id);
-                                    }}
-                                    onBusyChange={(pending) => {
-                                      if (pending)
-                                        modelOperations.current.add(p.id);
-                                      else modelOperations.current.delete(p.id);
-                                      setModelOperationCount(
-                                        modelOperations.current.size,
-                                      );
-                                    }}
-                                    onSaved={() => {
-                                      void refresh();
-                                    }}
-                                  />
-                                )}
-                              {tool === "codex" &&
-                                (p.meta?.osirBinding ||
-                                  simpleEditable(p, tool)) && (
-                                  <ModelSelection
-                                    provider={p}
-                                    onDirtyChange={(dirty) => {
-                                      if (dirty) dirtyModels.current.add(p.id);
-                                      else dirtyModels.current.delete(p.id);
-                                    }}
+                                  <div className="osir-provider-tags">
+                                    <span>
+                                      {modelNames(p, tool).length
+                                        ? modelNames(p, tool).length + " 个模型"
+                                        : "原生模型"}
+                                    </span>
+                                    {(() => {
+                                      const id =
+                                        p.meta?.osirBinding?.binding?.group_id;
+                                      const group =
+                                        providerGroups.data?.data.find(
+                                          (g) => g.id === id,
+                                        );
+                                      return group ? (
+                                        <span className="osir-group-tag">
+                                          {group.name || "已关联分组"}
+                                          {group.subscription_type ===
+                                          "subscription"
+                                            ? " · 订阅"
+                                            : group.subscription_type ===
+                                                "standard"
+                                              ? " · 按量"
+                                              : ""}
+                                        </span>
+                                      ) : !p.meta?.osirBinding ? (
+                                        <span className="osir-group-tag">
+                                          手动添加
+                                        </span>
+                                      ) : null;
+                                    })()}
+                                  </div>
+                                  {providerInUse(p) ? (
+                                    <span className="osir-badge">使用中</span>
+                                  ) : !aggregateActive ? (
+                                    <button
+                                      disabled={busy}
+                                      onClick={() => void switchTo(p)}
+                                    >
+                                      切换使用
+                                    </button>
+                                  ) : (
+                                    <span className="osir-badge">未接入</span>
+                                  )}
+                                  {p.meta?.osirBinding?.masked_key && (
+                                    <span className="osir-provider-key">
+                                      Key: {p.meta.osirBinding.masked_key}
+                                    </span>
+                                  )}
+                                  <button
                                     disabled={busy}
-                                    preview={!desktop}
-                                    onSave={async (next) => {
-                                      if (!desktop) {
-                                        setPreviewProviders((s) => ({
-                                          ...s,
-                                          [tool]: {
-                                            ...s[tool],
-                                            [next.id]: next,
-                                          },
-                                        }));
-                                        return;
+                                    onClick={() => {
+                                      if (p.meta?.osirBinding) {
+                                        requestLeave(() =>
+                                          setDrawer({
+                                            tool,
+                                            provider: p,
+                                            source: "account",
+                                          }),
+                                        );
+                                      } else if (simpleEditable(p, tool)) {
+                                        requestLeave(() =>
+                                          setDrawer({ tool, provider: p }),
+                                        );
+                                      } else {
+                                        toast.info(
+                                          "此连接使用工具原生配置，请在对应工具中调整。",
+                                        );
                                       }
-                                      const ok = await action(async () => {
-                                        const confirmed =
-                                          await providersApi.update(next, tool);
-                                        if (!confirmed)
-                                          throw new Error(
-                                            "模型保存未确认，请刷新核对后重试。",
-                                          );
-                                        try {
-                                          await syncSavedAggregation(next);
-                                        } catch (e) {
-                                          throw new Error(
-                                            "模型已保存，聚合未完成：" +
-                                              connectionError(e),
-                                          );
-                                        }
-                                      }, "模型选择已保存，请重启 Codex 读取新目录。");
-                                      if (!ok) throw new Error("保存失败");
                                     }}
-                                  />
-                                )}
-                              {tool === "opencode" &&
-                                (modelNames(p, tool).length ? (
-                                  <div className="osir-opencode-model-control">
-                                    <label htmlFor={`opencode-model-${p.id}`}>
-                                      <strong>模型</strong>
-                                      <select
-                                        id={`opencode-model-${p.id}`}
-                                        aria-label={`${p.name} 的默认模型`}
-                                        value={
+                                  >
+                                    配置
+                                  </button>
+                                  <button
+                                    className="osir-provider-expand"
+                                    aria-label={`${expandedProviders[tool + p.id] ? "收起" : "展开"} ${p.name} 的模型配置`}
+                                    aria-expanded={
+                                      !!expandedProviders[tool + p.id]
+                                    }
+                                    aria-controls={`provider-models-${tool}-${p.id}`}
+                                    onClick={() =>
+                                      setExpandedProviders((state) => ({
+                                        ...state,
+                                        [tool + p.id]: !state[tool + p.id],
+                                      }))
+                                    }
+                                  >
+                                    {expandedProviders[tool + p.id] ? (
+                                      <ChevronDown size={18} />
+                                    ) : (
+                                      <ChevronRight size={18} />
+                                    )}
+                                  </button>
+                                </div>
+                                <div
+                                  id={`provider-models-${tool}-${p.id}`}
+                                  className="osir-provider-body"
+                                  hidden={!expandedProviders[tool + p.id]}
+                                >
+                                  {tool !== "opencode" &&
+                                    !(
+                                      (tool === "codex" || tool === "claude") &&
+                                      (p.meta?.osirBinding ||
+                                        simpleEditable(p, tool))
+                                    ) && (
+                                      <div className="osir-provider-models">
+                                        {modelNames(p, tool).map((m) => (
+                                          <span key={m}>{m}</span>
+                                        ))}
+                                        {!modelNames(p, tool).length && (
+                                          <span>
+                                            由工具原生登录或配置决定模型
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  {tool === "claude" &&
+                                    (p.meta?.osirBinding ||
+                                      simpleEditable(p, tool)) && (
+                                      <ClaudeModelRoles
+                                        provider={p}
+                                        preview={!desktop}
+                                        disabled={
+                                          actionBusy ||
+                                          (modelOperationCount > 0 &&
+                                            !modelOperations.current.has(p.id))
+                                        }
+                                        onDirtyChange={(dirty) => {
+                                          if (dirty)
+                                            dirtyModels.current.add(p.id);
+                                          else dirtyModels.current.delete(p.id);
+                                        }}
+                                        onBusyChange={(pending) => {
+                                          if (pending)
+                                            modelOperations.current.add(p.id);
+                                          else
+                                            modelOperations.current.delete(
+                                              p.id,
+                                            );
+                                          setModelOperationCount(
+                                            modelOperations.current.size,
+                                          );
+                                        }}
+                                        onSaved={() => {
+                                          void refresh();
+                                        }}
+                                      />
+                                    )}
+                                  {tool === "codex" &&
+                                    (p.meta?.osirBinding ||
+                                      simpleEditable(p, tool)) && (
+                                      <ModelSelection
+                                        provider={p}
+                                        onDirtyChange={(dirty) => {
+                                          if (dirty)
+                                            dirtyModels.current.add(p.id);
+                                          else dirtyModels.current.delete(p.id);
+                                        }}
+                                        disabled={busy}
+                                        preview={!desktop}
+                                        onSave={async (next) => {
+                                          if (!desktop) {
+                                            setPreviewProviders((s) => ({
+                                              ...s,
+                                              [tool]: {
+                                                ...s[tool],
+                                                [next.id]: next,
+                                              },
+                                            }));
+                                            return;
+                                          }
+                                          const ok = await action(async () => {
+                                            const confirmed =
+                                              await providersApi.update(
+                                                next,
+                                                tool,
+                                              );
+                                            if (!confirmed)
+                                              throw new Error(
+                                                "模型保存未确认，请刷新核对后重试。",
+                                              );
+                                            try {
+                                              await syncSavedAggregation(next);
+                                            } catch (e) {
+                                              throw new Error(
+                                                "模型已保存，聚合未完成：" +
+                                                  connectionError(e),
+                                              );
+                                            }
+                                          }, "模型选择已保存，请重启 Codex 读取新目录。");
+                                          if (!ok) throw new Error("保存失败");
+                                        }}
+                                      />
+                                    )}
+                                  {tool === "opencode" &&
+                                    (modelNames(p, tool).length ? (
+                                      <div className="osir-opencode-model-control">
+                                        <label
+                                          htmlFor={`opencode-model-${p.id}`}
+                                        >
+                                          <strong>模型</strong>
+                                          <select
+                                            id={`opencode-model-${p.id}`}
+                                            aria-label={`${p.name} 的默认模型`}
+                                            value={
+                                              openCodeDefault.data?.startsWith(
+                                                p.id + "/",
+                                              ) &&
+                                              modelNames(p, tool).includes(
+                                                openCodeDefault.data.slice(
+                                                  p.id.length + 1,
+                                                ),
+                                              )
+                                                ? openCodeDefault.data.slice(
+                                                    p.id.length + 1,
+                                                  )
+                                                : ""
+                                            }
+                                            disabled={
+                                              !desktop ||
+                                              busy ||
+                                              openCodeDefault.isPending
+                                            }
+                                            onChange={(event) => {
+                                              const model =
+                                                event.currentTarget.value;
+                                              if (!model) return;
+                                              void action(async () => {
+                                                await invoke(
+                                                  "osir_set_connection_mode",
+                                                  {
+                                                    tool,
+                                                    mode: "api_key",
+                                                    providerId: p.id,
+                                                    modelId: p.id + "/" + model,
+                                                  },
+                                                );
+                                              }, "OpenCode 默认模型已更新。");
+                                            }}
+                                          >
+                                            <option value="" disabled>
+                                              {openCodeDefault.isPending
+                                                ? "正在读取当前模型…"
+                                                : "请选择模型"}
+                                            </option>
+                                            {modelNames(p, tool).map(
+                                              (model) => (
+                                                <option
+                                                  key={model}
+                                                  value={model}
+                                                >
+                                                  {model}
+                                                </option>
+                                              ),
+                                            )}
+                                          </select>
+                                        </label>
+                                        {modelNames(p, tool).includes(
                                           openCodeDefault.data?.startsWith(
                                             p.id + "/",
-                                          ) &&
-                                          modelNames(p, tool).includes(
-                                            openCodeDefault.data.slice(
-                                              p.id.length + 1,
-                                            ),
                                           )
                                             ? openCodeDefault.data.slice(
                                                 p.id.length + 1,
                                               )
-                                            : ""
-                                        }
-                                        disabled={
-                                          !desktop ||
-                                          busy ||
-                                          openCodeDefault.isPending
-                                        }
-                                        onChange={(event) => {
-                                          const model =
-                                            event.currentTarget.value;
-                                          if (!model) return;
-                                          void action(async () => {
-                                            await providersApi.addToLiveConfig(
-                                              p.id,
-                                              tool,
-                                            );
-                                            await providersApi.setOpenCodeDefaultModel(
-                                              p.id + "/" + model,
-                                            );
-                                          }, "OpenCode 默认模型已更新。");
-                                        }}
+                                            : "",
+                                        ) && (
+                                          <span className="osir-opencode-model-status">
+                                            当前默认模型
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div
+                                        className="osir-opencode-model-control"
+                                        role="status"
                                       >
-                                        <option value="" disabled>
-                                          {openCodeDefault.isPending
-                                            ? "正在读取当前模型…"
-                                            : "请选择模型"}
-                                        </option>
-                                        {modelNames(p, tool).map((model) => (
-                                          <option key={model} value={model}>
-                                            {model}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-                                    {modelNames(p, tool).includes(
-                                      openCodeDefault.data?.startsWith(
-                                        p.id + "/",
-                                      )
-                                        ? openCodeDefault.data.slice(
-                                            p.id.length + 1,
-                                          )
-                                        : "",
-                                    ) && (
-                                      <span className="osir-opencode-model-status">
-                                        当前默认模型
-                                      </span>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div
-                                    className="osir-opencode-model-control"
-                                    role="status"
-                                  >
-                                    暂无已配置模型
-                                  </div>
-                                ))}
+                                        暂无已配置模型
+                                      </div>
+                                    ))}
+                                </div>
+                              </SortableProviderCard>
+                            ))}
+                          </ProviderSortList>
+                        )}
+                        {tool === "codex" && stack.data && (
+                          <CodexCatalogStatus
+                            stack={stack.data}
+                            disabled={!desktop || busy}
+                            onAction={action}
+                          />
+                        )}
+                        {tool === "codex" && (
+                          <div className="osir-capability osir-aggregation-control">
+                            <Layers size={20} />
+                            <div>
+                              <strong id="osir-aggregation-label">
+                                启用聚合
+                              </strong>
+                              <p role="status">
+                                {!desktop
+                                  ? "仅预览"
+                                  : mode.isError
+                                    ? "状态读取失败，请刷新"
+                                    : mode.isPending
+                                      ? "正在读取状态"
+                                      : mode.data?.mode === "stack" &&
+                                          mode.data.attached
+                                        ? aggregationEnabled
+                                          ? "已生效"
+                                          : "仍在生效，关闭未完成，请重试"
+                                        : aggregationEnabled
+                                          ? rows.length
+                                            ? "尚未生效，保存连接后接入"
+                                            : "待添加连接"
+                                          : "已关闭"}
+                              </p>
                             </div>
-                          </SortableProviderCard>
-                        ))}
-                      </ProviderSortList>
-                    )}
-                    {tool === "codex" && stack.data && (
-                      <CodexCatalogStatus
-                        stack={stack.data}
-                        disabled={!desktop || busy}
-                        onAction={action}
-                      />
-                    )}
-                    {tool === "codex" && connectionSource === "osir_api" && (
-                      <div className="osir-capability osir-aggregation-control">
-                        <Layers size={20} />
-                        <div>
-                          <strong id="osir-aggregation-label">启用聚合</strong>
-                          <p role="status">
-                            {!desktop
-                              ? "仅预览"
-                              : mode.isError
-                                ? "状态读取失败，请刷新"
-                                : mode.isPending
-                                  ? "正在读取状态"
-                                  : mode.data?.mode === "stack" &&
-                                      mode.data.attached
-                                    ? aggregationEnabled
-                                      ? "已生效"
-                                      : "仍在生效，关闭未完成，请重试"
-                                    : aggregationEnabled
-                                      ? rows.length
-                                        ? "尚未生效，保存连接后接入"
-                                        : "待添加连接"
-                                      : "已关闭"}
-                          </p>
-                        </div>
-                        <Switch
-                          aria-labelledby="osir-aggregation-label"
-                          checked={aggregationEnabled}
-                          disabled={
-                            busy ||
-                            (desktop && (mode.isPending || mode.isError))
-                          }
-                          onCheckedChange={(enabled) => {
-                            void action(async () => {
-                              if (desktop) {
-                                if (enabled) await applyAggregation(rows);
-                                else await disableAggregation();
+                            <Switch
+                              aria-labelledby="osir-aggregation-label"
+                              checked={aggregationEnabled}
+                              disabled={
+                                busy ||
+                                (desktop && (mode.isPending || mode.isError))
                               }
-                              saveAggregationIntent(enabled);
-                              setAggregationEnabled(enabled);
-                            }, "聚合偏好已保存。");
-                          }}
-                        />
-                      </div>
+                              onCheckedChange={(enabled) => {
+                                void action(async () => {
+                                  if (desktop) {
+                                    if (enabled) await applyAggregation(rows);
+                                    else await disableAggregation();
+                                  }
+                                  saveAggregationIntent(enabled);
+                                  setAggregationEnabled(enabled);
+                                }, "聚合偏好已保存。");
+                              }}
+                            />
+                          </div>
+                        )}
+                        <p className="osir-muted">
+                          更改连接或模型后，请重新启动工具使配置生效。
+                        </p>
+                        {tool === "codex" && (
+                          <OsirImageBindingPanel
+                            key={accountSession.data?.generation}
+                            openRequest={imageOpenRequest}
+                            onOpenHandled={() => setImageOpenRequest(0)}
+                          />
+                        )}
+                      </>
                     )}
-                    <p className="osir-muted">
-                      更改连接或模型后，请重新启动工具使配置生效。
-                    </p>
-                    {tool === "codex" &&
-                      (connectionSource === "osir_api" ||
-                        imagePanelVisible) && (
-                        <OsirImageBindingPanel
-                          key={accountSession.data?.generation}
-                          openRequest={imageOpenRequest}
-                          onOpenHandled={() => setImageOpenRequest(0)}
-                        />
-                      )}
                   </>
                 ) : (
                   <OsirToolManagement

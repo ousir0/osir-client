@@ -25,9 +25,9 @@ const INSERT_BATCH_MAX_BYTES: usize = 1024 * 1024;
 /// Serialize every operation that observes or mutates the database-backup
 /// directory. Always acquire this guard before `Database.conn`.
 static BACKUP_FILE_OPERATION_LOCK: Mutex<()> = Mutex::new(());
-type BackupFileOperationGuard = MutexGuard<'static, ()>;
+pub(super) type BackupFileOperationGuard = MutexGuard<'static, ()>;
 
-fn lock_backup_file_operations() -> Result<BackupFileOperationGuard, AppError> {
+pub(super) fn lock_backup_file_operations() -> Result<BackupFileOperationGuard, AppError> {
     BACKUP_FILE_OPERATION_LOCK
         .lock()
         .map_err(|e| AppError::Database(format!("Backup file operation lock failed: {e}")))
@@ -137,7 +137,7 @@ impl Database {
             fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
         }
 
-        crate::config::atomic_write(target_path, dump.as_bytes())
+        crate::config::atomic_write_private_export(target_path, dump.as_bytes())
     }
 
     /// 从 SQL 文件导入，返回生成的备份 ID（若无备份则为空字符串）
@@ -495,7 +495,7 @@ impl Database {
 
     /// Create a safety backup from a connection whose caller already owns both
     /// the backup-file operation guard and the appropriate database guard.
-    fn backup_database_file_from_conn(
+    pub(super) fn backup_database_file_from_conn(
         backup_file_guard: &BackupFileOperationGuard,
         source_conn: &Connection,
         protected_paths: &[&Path],
@@ -527,7 +527,7 @@ impl Database {
             .ok_or_else(|| AppError::Config("无效的数据库路径".to_string()))?
             .join("backups");
 
-        fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+        Self::create_database_directory(&backup_dir)?;
 
         let base_id = format!("db_backup_{}", Local::now().format("%Y%m%d_%H%M%S"));
         let mut next_suffix = 0;
@@ -558,6 +558,13 @@ impl Database {
         dest_conn
             .close()
             .map_err(|(_, e)| AppError::Database(format!("关闭数据库安全备份失败: {e}")))?;
+        // A successful snapshot must reach disk before an upgrade can use it
+        // as its recovery gate. Keep the writer handle for Windows flushes.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(temp_db_path)
+            .and_then(|file| file.sync_all())
+            .map_err(|e| AppError::io(temp_db_path, e))?;
         before_publish(temp_db_path, &backup_path)?;
 
         loop {
@@ -571,6 +578,11 @@ impl Database {
                 Err(error) => return Err(AppError::io(&backup_path, error.error)),
             }
         }
+
+        #[cfg(unix)]
+        fs::File::open(&backup_dir)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|e| AppError::io(&backup_dir, e))?;
 
         // The newly created safety backup must never be the cleanup victim.
         // During restore, the selected source is protected as well. If the
@@ -1217,7 +1229,8 @@ mod tests {
             // an existing default DB keeps get_app_config_dir() anchored under
             // CC_SWITCH_TEST_HOME and makes import exercise its safety backup.
             let config_dir = temp_dir.path().join(".cc-switch");
-            std::fs::create_dir_all(&config_dir).expect("create isolated config directory");
+            crate::config::create_private_database_directory(&config_dir)
+                .expect("create isolated config directory");
             std::fs::File::create(config_dir.join("cc-switch.db"))
                 .expect("create isolated database sentinel");
             let guard = Self {
@@ -1265,6 +1278,103 @@ mod tests {
         fn drop(&mut self) {
             let _ = update_settings(self.previous.clone());
         }
+    }
+
+    #[test]
+    #[serial]
+    fn migration_preflight_backup_failure_leaves_legacy_database_unchanged() -> Result<(), AppError>
+    {
+        let _test_home = TestHomeGuard::new();
+        let path = crate::config::get_database_path();
+        if let Some(parent) = path.parent() {
+            Database::create_database_directory(parent)?;
+        }
+        {
+            let conn = Connection::open(&path)?;
+            conn.execute_batch(
+                "CREATE TABLE legacy_data (value TEXT); INSERT INTO legacy_data VALUES ('synthetic'); PRAGMA user_version=0;",
+            )?;
+        }
+        let backup_dir = path.parent().unwrap().join("backups");
+        std::fs::write(&backup_dir, b"synthetic directory obstruction")
+            .map_err(|e| AppError::io(&backup_dir, e))?;
+        let error = match Database::init() {
+            Ok(_) => panic!("migration must stop when the backup directory is unavailable"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("升级前备份未完成"));
+        let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        assert_eq!(Database::get_user_version(&conn)?, 0);
+        assert!(!Database::table_exists(&conn, "providers")?);
+        let value: String =
+            conn.query_row("SELECT value FROM legacy_data", [], |row| row.get(0))?;
+        assert_eq!(value, "synthetic");
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn migration_preflight_snapshot_preserves_original_version_and_data() -> Result<(), AppError> {
+        let _test_home = TestHomeGuard::new();
+        let path = crate::config::get_database_path();
+        if let Some(parent) = path.parent() {
+            Database::create_database_directory(parent)?;
+        }
+        let conn = Connection::open(&path)?;
+        conn.execute_batch(
+            "CREATE TABLE legacy_data (value TEXT); INSERT INTO legacy_data VALUES ('synthetic-key'); PRAGMA user_version=1;",
+        )?;
+        let mut snapshot = None;
+        Database::prepare_schema_upgrade(&conn, || {
+            let guard = lock_backup_file_operations()?;
+            snapshot = Database::backup_database_file_from_conn(&guard, &conn, &[])?;
+            Ok(snapshot.clone())
+        })?;
+        let snapshot = snapshot.expect("legacy database must be backed up");
+        let saved =
+            Connection::open_with_flags(&snapshot, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        assert_eq!(Database::get_user_version(&saved)?, 1);
+        assert!(!Database::table_exists(&saved, "providers")?);
+        let value: String =
+            saved.query_row("SELECT value FROM legacy_data", [], |row| row.get(0))?;
+        assert_eq!(value, "synthetic-key");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&snapshot).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn complete_sql_export_replaces_existing_file_privately() -> Result<(), AppError> {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("export.sql");
+        std::fs::write(&path, b"old contents").map_err(|e| AppError::io(&path, e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let db = Database::memory()?;
+        db.export_sql(&path)?;
+        let contents = std::fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
+        assert!(contents.contains("CREATE TABLE"));
+        assert_ne!(contents, "old contents");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        #[cfg(windows)]
+        crate::config::verify_private_database_file(&path)?;
+        Ok(())
     }
 
     #[test]

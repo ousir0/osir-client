@@ -16,7 +16,15 @@ import type { UpdateInfo } from "@/lib/updater";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import "./client-update.css";
 
-type Phase = "ready" | "downloading" | "restarting" | "current";
+type Phase =
+  | "ready"
+  | "downloading"
+  | "waiting"
+  | "installing"
+  | "restarting"
+  | "current";
+const isPending = (phase: Phase) =>
+  ["downloading", "waiting", "installing", "restarting"].includes(phase);
 interface DownloadProgress {
   downloaded: number;
   total: number | null;
@@ -42,18 +50,22 @@ export function OsirClientUpdateDialogView({
   onInstall: () => void;
   onDismiss: () => void;
 }) {
-  const pending = phase === "downloading" || phase === "restarting";
+  const pending = isPending(phase);
   const percent = progress?.total
     ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
     : undefined;
   const progressLabel =
     phase === "restarting"
       ? "更新已安装，正在重启客户端…"
-      : percent === 100
-        ? "下载完成，正在校验并安装…"
-        : percent === undefined
-          ? "正在准备下载更新…"
-          : `正在下载更新 ${percent}%`;
+      : phase === "waiting"
+        ? "正在等待当前请求结束…"
+        : phase === "installing"
+          ? "正在安装更新…"
+          : percent === 100
+            ? "下载完成，正在校验并安装…"
+            : percent === undefined
+              ? "正在准备下载更新…"
+              : `正在下载更新 ${percent}%`;
 
   return (
     <Dialog
@@ -74,7 +86,7 @@ export function OsirClientUpdateDialogView({
           <DialogDescription>
             {confirmUnsaved
               ? "更新完成后将重启客户端，未保存的修改会丢失。请先返回保存，或确认放弃修改后继续。"
-              : "安装更新后，客户端将自动重新启动。"}
+              : "下载期间可继续使用。当前请求结束后安装并重启；等待超时将取消更新。"}
           </DialogDescription>
         </DialogHeader>
         <div className="osir-client-update-body">
@@ -166,6 +178,7 @@ export function OsirClientUpdateDialog() {
   const installing = useRef(false);
   const mounted = useRef(false);
   const unlisten = useRef<(() => void) | null>(null);
+  const unlistenPhase = useRef<(() => void) | null>(null);
   const enabled =
     "__TAURI_INTERNALS__" in window &&
     distribution?.kind === "osir" &&
@@ -177,6 +190,8 @@ export function OsirClientUpdateDialog() {
       mounted.current = false;
       unlisten.current?.();
       unlisten.current = null;
+      unlistenPhase.current?.();
+      unlistenPhase.current = null;
     };
   }, []);
 
@@ -228,6 +243,22 @@ export function OsirClientUpdateDialog() {
         return;
       }
       unlisten.current = stop;
+      const stopPhase = await listen<string>(
+        "update-install-phase",
+        ({ payload }) => {
+          if (
+            mounted.current &&
+            installing.current &&
+            (payload === "waiting" || payload === "installing")
+          )
+            setPhase(payload);
+        },
+      );
+      if (!mounted.current) {
+        stopPhase();
+        return;
+      }
+      unlistenPhase.current = stopPhase;
       const installed = await settingsApi.installUpdateAndRestart();
       if (!mounted.current) return;
       if (installed) {
@@ -247,13 +278,15 @@ export function OsirClientUpdateDialog() {
     } finally {
       unlisten.current?.();
       unlisten.current = null;
+      unlistenPhase.current?.();
+      unlistenPhase.current = null;
       // A successful install awaits native restart and must not run twice.
       installing.current = awaitingRestart;
     }
   }
 
   if (!enabled || !updateInfo) return null;
-  const pending = phase === "downloading" || phase === "restarting";
+  const pending = isPending(phase);
   return (
     <OsirClientUpdateDialogView
       open={pending || (hasUpdate && !isDismissed)}

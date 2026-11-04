@@ -117,9 +117,8 @@ impl RequestContext {
         let session_id = session_result.session_id.clone();
 
         log::debug!(
-            "[{}] Session ID: {} (from {:?}, client_provided: {})",
+            "[{}] Session selected (from {:?}, client_provided: {})",
             tag,
-            session_id,
             session_result.source,
             session_result.client_provided
         );
@@ -131,14 +130,7 @@ impl RequestContext {
                 // 不转移」处理：换成有效副本，转发和读响应两个阶段都从这里取，超时和重试
                 // 跟着关掉（见 `create_forwarder`）。
                 app_config.auto_failover_enabled = false;
-                log::debug!(
-                    "[{}] Stacked model {} → provider {}, upstream model {}, session: {}",
-                    tag,
-                    target.original_model,
-                    target.provider.name,
-                    target.upstream_model,
-                    session_id
-                );
+                log::debug!("[{}] Stacked model route selected", tag);
                 (
                     target.provider.clone(),
                     vec![target.provider.clone()],
@@ -193,12 +185,9 @@ impl RequestContext {
                     .ok_or(ProxyError::NoAvailableProvider)?;
 
                 log::debug!(
-                    "[{}] Provider: {}, model: {}, failover chain: {} providers, session: {}",
+                    "[{}] Provider route selected, failover chain: {} providers",
                     tag,
-                    provider.name,
-                    request_model,
-                    providers.len(),
-                    session_id
+                    providers.len()
                 );
                 (provider, providers, current_provider_id, request_model)
             }

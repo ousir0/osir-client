@@ -17,6 +17,7 @@ mod history;
 pub mod history_inspect;
 pub mod history_repair;
 pub mod key_vault;
+pub(crate) mod key_creation_state;
 mod local_key_store;
 pub mod managed;
 pub mod models;

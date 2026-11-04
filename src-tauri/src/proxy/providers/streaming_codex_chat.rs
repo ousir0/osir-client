@@ -595,13 +595,11 @@ impl ChatToResponsesState {
                 // 只记结构信息：arguments 内容可能包含用户代码，且前端日志出口是
                 // allowlist 脱敏，新字段不进白名单就不会被处理，因此只输出字节数。
                 log::warn!(
-                    "[Codex] dropped streaming tool call: model={} chat_index={} \
-                     call_id_empty={} args_bytes={} finish_reason={} tools_total={}",
-                    self.model,
+                    "[Codex] dropped streaming tool call: chat_index={} \
+                     call_id_empty={} args_bytes={} tools_total={}",
                     key,
                     call_id_empty,
                     args_bytes,
-                    self.finish_reason.as_deref().unwrap_or("<none>"),
                     self.tools.len()
                 );
                 continue;

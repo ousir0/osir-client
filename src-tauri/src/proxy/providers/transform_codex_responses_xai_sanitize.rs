@@ -647,11 +647,10 @@ pub(crate) fn apply_xai_native_responses_request_compat(
     // name first or those fields survive the strip.
     if let Some(upstream_model) = upstream_model {
         let allowed = collect_xai_catalog_model_ids(settings);
-        if let Some((from, to)) = rewrite_xai_unknown_request_model(body, upstream_model, &allowed)
+        if let Some((_from, _to)) =
+            rewrite_xai_unknown_request_model(body, upstream_model, &allowed)
         {
-            log::info!(
-                "[Codex] Rewrote xAI-unknown request model {from} -> {to} (provider={provider_id})"
-            );
+            log::info!("[Codex] Rewrote xAI-unknown request model: model_remapped");
         }
     }
     if sanitize_xai_responses_request(body) {
@@ -971,9 +970,9 @@ fn normalize_function_call_arguments_field(obj: &mut Map<String, Value>) -> bool
                 true
             }
             Ok(None) => false,
-            Err(error) => {
+            Err(_) => {
                 log::debug!(
-                    "[Codex] xAI function_call arguments were not rewritten; passing through unchanged: {error}"
+                    "[Codex] xAI function_call arguments were not rewritten; passing through unchanged: tool_arguments_invalid"
                 );
                 false
             }
@@ -1151,6 +1150,22 @@ fn rewrite_xai_native_sse_block(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a1_xai_invalid_tool_arguments_pass_through_without_logging_payload() {
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        let secret = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+        let mut call = json!({"name": secret, "arguments": format!("{{\"{secret}\":")});
+        let original = call.clone();
+        assert!(!normalize_function_call_arguments_field(
+            call.as_object_mut().unwrap()
+        ));
+        assert_eq!(call, original);
+        let logs = capture.text();
+        assert!(logs.contains("tool_arguments_invalid"));
+        assert!(!logs.contains("fixture-"), "{logs}");
+    }
+
     use super::*;
     use serde_json::json;
     use std::collections::HashSet;

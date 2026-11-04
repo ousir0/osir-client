@@ -216,6 +216,267 @@ fn schema_migration_rejects_future_version() {
 }
 
 #[test]
+fn migration_preflight_rejects_failed_or_missing_backups_without_writes() {
+    for version in [0, 1, SCHEMA_VERSION - 1] {
+        for missing in [false, true] {
+            let conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch(&format!(
+                "CREATE TABLE legacy (value TEXT); INSERT INTO legacy VALUES ('synthetic-value'); PRAGMA user_version={version};"
+            )).unwrap();
+            let error = Database::prepare_schema_upgrade(&conn, || {
+                if missing {
+                    Ok(None)
+                } else {
+                    Err(AppError::Database("synthetic secret from backup".into()))
+                }
+            })
+            .unwrap_err();
+            assert!(!error.to_string().contains("synthetic secret"));
+            assert_eq!(Database::get_user_version(&conn).unwrap(), version);
+            let value: String = conn
+                .query_row("SELECT value FROM legacy", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(value, "synthetic-value");
+            assert!(!Database::table_exists(&conn, "providers").unwrap());
+        }
+    }
+}
+
+#[test]
+fn migration_preflight_rejects_future_and_skips_empty_or_current() {
+    let conn = Connection::open_in_memory().unwrap();
+    Database::prepare_schema_upgrade(&conn, || panic!("empty database must not need a backup"))
+        .unwrap();
+    conn.execute_batch(&format!(
+        "CREATE TABLE original (value TEXT); INSERT INTO original VALUES ('synthetic'); PRAGMA user_version={};",
+        SCHEMA_VERSION + 1
+    )).unwrap();
+    let error =
+        Database::prepare_schema_upgrade(&conn, || panic!("future version must not back up"))
+            .unwrap_err();
+    assert!(error.to_string().contains("数据库版本过新"));
+    assert_eq!(
+        Database::get_user_version(&conn).unwrap(),
+        SCHEMA_VERSION + 1
+    );
+    assert!(!Database::table_exists(&conn, "providers").unwrap());
+    Database::set_user_version(&conn, SCHEMA_VERSION).unwrap();
+    Database::prepare_schema_upgrade(&conn, || panic!("current version must not need a backup"))
+        .unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn database_file_protection_preserves_parent_and_live_inode() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let temp = tempfile::tempdir().unwrap();
+    let parent = temp.path().join("existing");
+    std::fs::create_dir(&parent).unwrap();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = parent.join("test.db");
+    std::fs::write(&path, b"fixture").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let inode = std::fs::metadata(&path).unwrap().ino();
+    let wal = parent.join("test.db-wal");
+    std::fs::write(&wal, b"synthetic sidecar").unwrap();
+    std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o644)).unwrap();
+    Database::prepare_database_file(&path).unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().ino(), inode);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(&wal).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    let fresh = temp.path().join("new-dir").join("new.db");
+    Database::prepare_database_file(&fresh).unwrap();
+    assert_eq!(
+        std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(fresh.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn database_file_protection_rejects_links_without_changing_the_target() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("target");
+    std::fs::write(&target, b"synthetic").unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let link = temp.path().join("database.db");
+    symlink(&target, &link).unwrap();
+    assert!(Database::prepare_database_file(&link).is_err());
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn database_file_protection_windows_preserves_files_and_rejects_public_parent() {
+    use std::{fs::File, os::windows::ffi::OsStrExt, os::windows::io::AsRawHandle, path::Path};
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            Authorization::{
+                ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
+                SE_FILE_OBJECT,
+            },
+            SetFileSecurityW, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        },
+        Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION},
+    };
+
+    // Use the same deliberately public fixture ACL as tool_backup_tests; the
+    // production config helper remains the authority for private DACL checks.
+    fn make_public(path: &Path) {
+        let sddl: Vec<u16> = "D:P(A;OICI;FA;;;WD)\0".encode_utf16().collect();
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        unsafe {
+            let mut descriptor = std::ptr::null_mut();
+            assert_ne!(
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl.as_ptr(),
+                    1,
+                    &mut descriptor,
+                    std::ptr::null_mut(),
+                ),
+                0
+            );
+            let ok = SetFileSecurityW(
+                wide.as_ptr(),
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                descriptor,
+            );
+            LocalFree(descriptor);
+            assert_ne!(ok, 0);
+        }
+    }
+
+    fn dacl(path: &Path) -> Vec<u8> {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        unsafe {
+            let mut acl = std::ptr::null_mut();
+            let mut descriptor = std::ptr::null_mut();
+            assert_eq!(
+                GetNamedSecurityInfoW(
+                    wide.as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    &mut acl,
+                    std::ptr::null_mut(),
+                    &mut descriptor,
+                ),
+                0
+            );
+            assert!(!acl.is_null());
+            let bytes =
+                std::slice::from_raw_parts(acl.cast::<u8>(), (*acl).AclSize as usize).to_vec();
+            LocalFree(descriptor);
+            bytes
+        }
+    }
+
+    fn file_id(file: &File) -> (u32, u32, u32) {
+        unsafe {
+            let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+            assert_ne!(
+                GetFileInformationByHandle(file.as_raw_handle(), &mut info),
+                0
+            );
+            (
+                info.dwVolumeSerialNumber,
+                info.nFileIndexHigh,
+                info.nFileIndexLow,
+            )
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let private = temp.path().join("private");
+    let fresh = private.join("fresh.db");
+    Database::prepare_database_file(&fresh).unwrap();
+    crate::config::verify_private_database_file(&fresh).unwrap();
+    assert!(std::fs::read(&fresh).unwrap().is_empty());
+    let private_acl = dacl(&private);
+
+    let legacy = private.join("legacy.db");
+    {
+        let conn = Connection::open(&legacy).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE fixture(value TEXT); INSERT INTO fixture VALUES ('synthetic');",
+        )
+        .unwrap();
+    }
+    let mut paths = vec![legacy.clone()];
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = private.join(format!("legacy.db{suffix}"));
+        std::fs::write(&sidecar, b"synthetic sidecar").unwrap();
+        paths.push(sidecar);
+    }
+    let originals: Vec<_> = paths
+        .iter()
+        .map(|path| {
+            make_public(path);
+            assert!(crate::config::verify_private_database_file(path).is_err());
+            // Keep the original handle alive so a replaced file cannot reuse
+            // its ID, even when the replacement has identical bytes.
+            (File::open(path).unwrap(), std::fs::read(path).unwrap())
+        })
+        .collect();
+    Database::prepare_database_file(&legacy).unwrap();
+    for (path, (original, bytes)) in paths.iter().zip(&originals) {
+        crate::config::verify_private_database_file(path).unwrap();
+        assert_eq!(file_id(original), file_id(&File::open(path).unwrap()));
+        assert_eq!(&std::fs::read(path).unwrap(), bytes);
+    }
+    assert_eq!(dacl(&private), private_acl);
+
+    let custom = temp.path().join("custom-public");
+    std::fs::create_dir(&custom).unwrap();
+    make_public(&custom);
+    let custom_db = custom.join("existing.db");
+    std::fs::write(&custom_db, b"untouched custom fixture").unwrap();
+    let custom_file = File::open(&custom_db).unwrap();
+    let custom_acl = dacl(&custom);
+    let custom_file_acl = dacl(&custom_db);
+    assert!(crate::config::create_private_database_directory(&custom).is_err());
+    assert!(Database::prepare_database_file(&custom_db).is_err());
+    let refused_new = custom.join("refused-new.db");
+    assert!(Database::prepare_database_file(&refused_new).is_err());
+    assert!(!refused_new.exists());
+    assert_eq!(dacl(&custom), custom_acl);
+    assert_eq!(dacl(&custom_db), custom_file_acl);
+    assert!(crate::config::verify_private_database_file(&custom_db).is_err());
+    assert_eq!(
+        file_id(&custom_file),
+        file_id(&File::open(&custom_db).unwrap())
+    );
+    assert_eq!(
+        std::fs::read(&custom_db).unwrap(),
+        b"untouched custom fixture"
+    );
+}
+
+#[test]
 fn schema_migration_adds_missing_columns_for_providers() {
     let conn = Connection::open_in_memory().expect("open memory db");
 

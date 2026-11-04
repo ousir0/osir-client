@@ -25,15 +25,11 @@ import { ToolCloseButton } from "./ToolCloseButton";
 import { useLocalTools } from "./toolsApi";
 import { connectionError } from "./errors";
 import { modelNames } from "./providerConfig";
+import { NativeConfigurationView } from "./NativeConfigurationView";
+import { connectionKind, type ConnectionModeView } from "./connectionMode";
 import "./claude-desktop.css";
 
 const TOOL = "claude-desktop" as const;
-type ConnectionMode = {
-  mode: "native" | "osir_api" | "unavailable";
-  canRestoreNative: boolean;
-  reason?: string | null;
-};
-
 /** Desktop has its own provider/profile contract; never use the CLI's live files. */
 export function OsirClaudeDesktop({
   desktop,
@@ -64,7 +60,7 @@ export function OsirClaudeDesktop({
   const mode = useQuery({
     queryKey: ["osir-connection-mode", TOOL],
     queryFn: () =>
-      invoke<ConnectionMode>("osir_get_connection_mode", { tool: TOOL }),
+      invoke<ConnectionModeView>("osir_get_connection_mode", { tool: TOOL }),
     enabled: desktop,
     retry: false,
     refetchOnWindowFocus: false,
@@ -85,6 +81,9 @@ export function OsirClaudeDesktop({
     onNavigationBlockedChange(busy || !!drawer || !!deletion);
     return () => onNavigationBlockedChange(false);
   }, [busy, drawer, deletion, onNavigationBlockedChange]);
+  const [connectionPanel, setConnectionPanel] = useState<
+    "native" | "api_key"
+  >();
   const rows = Object.values(providers.data ?? {}).filter(
     (provider) => provider.category !== "official",
   );
@@ -105,11 +104,10 @@ export function OsirClaudeDesktop({
         status.data.proxyRunning &&
         status.data.gatewayTokenConfigured);
   const actualMode =
-    !mode.isError &&
-    !mode.isPending &&
-    !(mode.data?.mode === "native" && status.data?.activeProviderId)
-      ? mode.data?.mode
+    !mode.isError && !mode.isPending
+      ? connectionKind(mode.data?.mode)
       : undefined;
+  const panel = connectionPanel || actualMode || "api_key";
 
   function refresh() {
     for (const key of [
@@ -132,6 +130,7 @@ export function OsirClaudeDesktop({
       toast.success(success);
       return true;
     } catch (error) {
+      setConnectionPanel(undefined);
       if (mounted.current) setFailure(connectionError(error));
       refresh();
     } finally {
@@ -142,15 +141,11 @@ export function OsirClaudeDesktop({
 
   const useProvider = (provider: Provider) =>
     apply(async () => {
-      if (provider.meta?.osirBinding) {
-        await invoke("osir_set_connection_mode", {
-          tool: TOOL,
-          mode: "osir_api",
-          providerId: provider.id,
-        });
-      } else {
-        await providersApi.switch(provider.id, TOOL);
-      }
+      await invoke("osir_set_connection_mode", {
+        tool: TOOL,
+        mode: "api_key",
+        providerId: provider.id,
+      });
     }, "Claude 桌面连接已应用。请保存工作后重启，并新建对话验证。");
 
   async function download() {
@@ -208,33 +203,37 @@ export function OsirClaudeDesktop({
               className={actualMode === "native" ? "highlight" : ""}
               aria-pressed={actualMode === "native"}
               disabled={!desktop || busy || mode.isPending || mode.isError}
-              onClick={() =>
+              onClick={() => {
+                setConnectionPanel("native");
+                if (actualMode === "native") return;
                 void apply(
                   () =>
                     invoke("osir_set_connection_mode", {
                       tool: TOOL,
                       mode: "native",
                     }),
-                  "已恢复 Claude 桌面官方配置。请保存工作后重启。",
-                )
-              }
+                  "已恢复 Claude 桌面原有配置。请保存工作后重启。",
+                );
+              }}
             >
               <span className="osir-small-icon">
                 <Monitor size={22} />
               </span>
               <div>
                 <strong>原生配置</strong>
-                <small>使用 Claude 官方账户</small>
+                <small>使用工具原有登录或本机配置</small>
               </div>
               {actualMode === "native" && <Check size={17} />}
             </button>
             <button
-              className={actualMode === "osir_api" ? "highlight" : ""}
-              aria-pressed={actualMode === "osir_api"}
+              className={actualMode === "api_key" ? "highlight" : ""}
+              aria-pressed={actualMode === "api_key"}
               disabled={!desktop || busy || mode.isPending || mode.isError}
               onClick={() => {
-                if (actualMode === "osir_api") return;
-                const provider = rows.find((row) => !!row.meta?.osirBinding);
+                setConnectionPanel("api_key");
+                if (actualMode === "api_key" && rows.length) return;
+                const provider =
+                  rows.find((row) => row.id === activeProvider?.id) || rows[0];
                 if (provider) void useProvider(provider);
                 else setDrawer({});
               }}
@@ -243,10 +242,10 @@ export function OsirClaudeDesktop({
                 <Cloud size={22} />
               </span>
               <div>
-                <strong>OSIR API</strong>
-                <small>选择账户密钥与可用模型</small>
+                <strong>API 密钥</strong>
+                <small>使用账户密钥或自定义服务连接</small>
               </div>
-              {actualMode === "osir_api" && <Check size={17} />}
+              {actualMode === "api_key" && <Check size={17} />}
             </button>
           </div>
           {(mode.isError || providers.isError || status.isError) && (
@@ -255,139 +254,162 @@ export function OsirClaudeDesktop({
               <button onClick={refresh}>重新读取连接</button>
             </div>
           )}
-          <div className="osir-section-title">
-            <h2>
-              已添加供应商 <span>{rows.length}</span>
-            </h2>
-            <div className="osir-actions">
-              <button disabled={!desktop || busy} onClick={() => setDrawer({})}>
-                <Plus size={16} /> 添加供应商
-              </button>
-              <button
-                aria-label="刷新 Claude 桌面供应商"
-                disabled={!desktop || busy || providers.isFetching}
-                onClick={refresh}
-              >
-                <RefreshCw
-                  size={16}
-                  className={providers.isFetching ? "animate-spin" : undefined}
-                />
-              </button>
-            </div>
-          </div>
-          {providers.isPending && desktop ? (
-            <p role="status">正在读取桌面连接…</p>
-          ) : !providers.isError && !rows.length ? (
-            <div className="osir-claude-desktop-empty">
-              <Cloud size={24} />
-              <strong>添加你的第一条桌面连接</strong>
-              <p>选择 OSIRAPI 账户密钥，或手动配置服务地址和模型。</p>
-              <button disabled={!desktop || busy} onClick={() => setDrawer({})}>
-                添加供应商
-              </button>
-            </div>
-          ) : null}
-          <div className="osir-provider-list">
-            {rows.map((provider) => {
-              const models = modelNames(provider, TOOL);
-              const active =
-                appliedConnection && activeProvider.id === provider.id;
-              const open = expanded[provider.id] === true;
-              return (
-                <article
-                  className="osir-claude-desktop-provider"
-                  key={provider.id}
-                  aria-label={`${provider.name} 桌面连接`}
-                  onClick={(event) => {
-                    const target = event.target as HTMLElement;
-                    if (
-                      !target.closest(
-                        ".osir-claude-desktop-models, button, input, select, a",
-                      )
-                    ) {
-                      setExpanded((state) => ({
-                        ...state,
-                        [provider.id]: false,
-                      }));
-                    }
-                  }}
-                >
-                  <div className="osir-claude-desktop-provider-heading">
-                    <SupportedToolIcon id={TOOL} size={22} />
-                    <div className="osir-claude-desktop-provider-name">
-                      <strong>{provider.name}</strong>
-                      <small>
-                        {models.length} 个模型
-                        {provider.meta?.osirBinding
-                          ? ` · ${provider.meta.osirBinding.masked_key}`
-                          : " · 手动连接"}
-                      </small>
-                    </div>
-                    {active ? (
-                      <span className="osir-claude-desktop-active">
-                        <Check size={14} />
-                        使用中
-                      </span>
-                    ) : (
-                      <button
-                        disabled={
-                          !desktop || busy || status.isPending || status.isError
-                        }
-                        onClick={() => void useProvider(provider)}
-                      >
-                        切换使用
-                      </button>
-                    )}
-                    <button
-                      aria-label={`配置 ${provider.name}`}
-                      disabled={busy}
-                      onClick={() => setDrawer({ provider })}
-                    >
-                      <Settings2 size={16} />
-                    </button>
-                    <button
-                      aria-label={`${open ? "收起" : "展开"} ${provider.name} 的模型`}
-                      aria-expanded={open}
-                      disabled={busy}
-                      onClick={() =>
-                        setExpanded((state) => ({
-                          ...state,
-                          [provider.id]: !open,
-                        }))
+          {panel === "native" ? (
+            <NativeConfigurationView
+              configuration={mode.data?.nativeConfiguration}
+              loading={desktop && mode.isPending}
+              failed={desktop && mode.isError}
+              refreshing={mode.isFetching}
+              onRefresh={() => void mode.refetch()}
+            />
+          ) : (
+            <>
+              <div className="osir-section-title">
+                <h2>
+                  已添加供应商 <span>{rows.length}</span>
+                </h2>
+                <div className="osir-actions">
+                  <button
+                    disabled={!desktop || busy}
+                    onClick={() => setDrawer({})}
+                  >
+                    <Plus size={16} /> 添加供应商
+                  </button>
+                  <button
+                    aria-label="刷新 Claude 桌面供应商"
+                    disabled={!desktop || busy || providers.isFetching}
+                    onClick={refresh}
+                  >
+                    <RefreshCw
+                      size={16}
+                      className={
+                        providers.isFetching ? "animate-spin" : undefined
                       }
+                    />
+                  </button>
+                </div>
+              </div>
+              {providers.isPending && desktop ? (
+                <p role="status">正在读取桌面连接…</p>
+              ) : !providers.isError && !rows.length ? (
+                <div className="osir-claude-desktop-empty">
+                  <Cloud size={24} />
+                  <strong>添加你的第一条桌面连接</strong>
+                  <p>选择 OSIRAPI 账户密钥，或手动配置服务地址和模型。</p>
+                  <button
+                    disabled={!desktop || busy}
+                    onClick={() => setDrawer({})}
+                  >
+                    添加供应商
+                  </button>
+                </div>
+              ) : null}
+              <div className="osir-provider-list">
+                {rows.map((provider) => {
+                  const models = modelNames(provider, TOOL);
+                  const active =
+                    appliedConnection && activeProvider.id === provider.id;
+                  const open = expanded[provider.id] === true;
+                  return (
+                    <article
+                      className="osir-claude-desktop-provider"
+                      key={provider.id}
+                      aria-label={`${provider.name} 桌面连接`}
+                      onClick={(event) => {
+                        const target = event.target as HTMLElement;
+                        if (
+                          !target.closest(
+                            ".osir-claude-desktop-models, button, input, select, a",
+                          )
+                        ) {
+                          setExpanded((state) => ({
+                            ...state,
+                            [provider.id]: false,
+                          }));
+                        }
+                      }}
                     >
-                      {open ? (
-                        <ChevronDown size={16} />
-                      ) : (
-                        <ChevronRight size={16} />
+                      <div className="osir-claude-desktop-provider-heading">
+                        <SupportedToolIcon id={TOOL} size={22} />
+                        <div className="osir-claude-desktop-provider-name">
+                          <strong>{provider.name}</strong>
+                          <small>
+                            {models.length} 个模型
+                            {provider.meta?.osirBinding
+                              ? ` · ${provider.meta.osirBinding.masked_key}`
+                              : " · 手动连接"}
+                          </small>
+                        </div>
+                        {active ? (
+                          <span className="osir-claude-desktop-active">
+                            <Check size={14} />
+                            使用中
+                          </span>
+                        ) : (
+                          <button
+                            disabled={
+                              !desktop ||
+                              busy ||
+                              status.isPending ||
+                              status.isError
+                            }
+                            onClick={() => void useProvider(provider)}
+                          >
+                            切换使用
+                          </button>
+                        )}
+                        <button
+                          aria-label={`配置 ${provider.name}`}
+                          disabled={busy}
+                          onClick={() => setDrawer({ provider })}
+                        >
+                          <Settings2 size={16} />
+                        </button>
+                        <button
+                          aria-label={`${open ? "收起" : "展开"} ${provider.name} 的模型`}
+                          aria-expanded={open}
+                          disabled={busy}
+                          onClick={() =>
+                            setExpanded((state) => ({
+                              ...state,
+                              [provider.id]: !open,
+                            }))
+                          }
+                        >
+                          {open ? (
+                            <ChevronDown size={16} />
+                          ) : (
+                            <ChevronRight size={16} />
+                          )}
+                        </button>
+                      </div>
+                      {open && (
+                        <div
+                          className="osir-claude-desktop-models"
+                          aria-label={`${provider.name} 的桌面模型`}
+                        >
+                          {models.map((model) => (
+                            <span key={model}>{model}</span>
+                          ))}
+                        </div>
                       )}
-                    </button>
-                  </div>
-                  {open && (
-                    <div
-                      className="osir-claude-desktop-models"
-                      aria-label={`${provider.name} 的桌面模型`}
-                    >
-                      {models.map((model) => (
-                        <span key={model}>{model}</span>
-                      ))}
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-          {status.data?.configured && (
-            <p className="osir-muted" role="status">
-              {appliedConnection
-                ? "连接已保存。请重启 Claude，并在新对话中选择模型。"
-                : "此连接尚未生效，请重新选择并应用。"}
-            </p>
+                    </article>
+                  );
+                })}
+              </div>
+              {status.data?.configured && (
+                <p className="osir-muted" role="status">
+                  {appliedConnection
+                    ? "连接已保存。请重启 Claude，并在新对话中选择模型。"
+                    : "此连接尚未生效，请重新选择并应用。"}
+                </p>
+              )}
+              <p className="osir-muted osir-claude-desktop-scope">
+                可在“历史会话”查看本机保存的 Code/Cowork 记录；普通云端聊天请在
+                Claude 应用中查看。
+              </p>
+            </>
           )}
-          <p className="osir-muted osir-claude-desktop-scope">
-            可在“历史会话”查看本机保存的 Code/Cowork 记录；普通云端聊天请在
-            Claude 应用中查看。
-          </p>
         </>
       ) : tab === "history" ? (
         <div className="osir-claude-desktop-history">

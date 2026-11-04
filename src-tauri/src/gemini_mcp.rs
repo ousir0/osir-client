@@ -2,7 +2,6 @@ use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::atomic_write;
 use crate::error::AppError;
 use crate::gemini_config::get_gemini_settings_path;
 
@@ -26,7 +25,7 @@ fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
     }
     let json =
         serde_json::to_string_pretty(value).map_err(|e| AppError::JsonSerialize { source: e })?;
-    atomic_write(path, json.as_bytes())
+    crate::live::engine::write_mcp_sections("gemini", path, json.as_bytes())
 }
 
 /// 读取 Gemini settings.json 中的 mcpServers 映射

@@ -606,6 +606,39 @@ pub(super) mod tests {
         ));
     }
     #[tokio::test]
+    async fn uncertain_create_after_restart_never_sends_a_second_post() {
+        use super::super::key_creation_state::KeyCreationState;
+        let directory = tempfile::tempdir().unwrap();
+        let journal = KeyCreationState::new(directory.path(), "fixture-account").unwrap();
+        journal.begin().unwrap();
+        // Accept the POST, then disconnect without a response. The server may
+        // have committed already, so the local record must remain uncertain.
+        let (client, worker) = response_fixture("");
+        let request = CreateKeyRequest {
+            name: "fixture".into(),
+            group_id: None,
+            quota: serde_json::Number::from(0),
+            expires_in_days: None,
+        };
+        assert!(matches!(
+            client
+                .create_key::<serde_json::Value>(&request, "fixture")
+                .await,
+            Err(CreateKeyError::Uncertain)
+        ));
+        worker.join().unwrap();
+        let restarted = KeyCreationState::new(directory.path(), "fixture-account").unwrap();
+        let mut post_count = 1;
+        if restarted.begin().is_ok() {
+            post_count += 1;
+            let _ = client
+                .create_key::<serde_json::Value>(&request, "fixture")
+                .await;
+        }
+        assert_eq!(post_count, 1);
+        assert_eq!(client.budget.failed_attempts(), 1);
+    }
+    #[tokio::test]
     async fn guard_counts_body_decode_failure_and_releases_slot_after_validation() {
         let (client, worker) =
             response_fixture("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");

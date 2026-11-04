@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "新增 DeepSeek Harness：支持保存与切换连接、选择默认模型、OSIRAPI 密钥接入、MCP、技能与本地历史。工具管理中位于 Codex 和 Claude 之后。修复窗口部分区域无法拖动、手动打开时仅显示菜单栏，以及 macOS 菜单栏图标更新后偶尔不可见的问题。"
+  "notes": "连接方式调整为“原生配置 / API 密钥”：原生配置只加载本机既有配置并显示来源，API 密钥保留账户密钥和自定义服务管理。增强配置切换与恢复，更新前等待当前请求完成，等待超时可重试。修复部分 TOML 配置编辑卡住的问题，减少错误日志中的敏感内容；增加创建密钥中断后的结果核对，并加强本地数据库与备份保护。"
 }

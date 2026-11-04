@@ -119,6 +119,10 @@ impl Planned {
         self.pre == self.planned
     }
 
+    pub(crate) fn planned_bytes(&self) -> Option<&[u8]> {
+        self.bytes.as_deref()
+    }
+
     pub fn pre_bytes(&self) -> Option<&[u8]> {
         self.pre_bytes.as_deref()
     }
@@ -143,6 +147,61 @@ pub(crate) fn plan_from(
         planned: digest(bytes.as_deref()),
         bytes,
     })
+}
+
+/// Legacy MCP callers have no database handle. Project only their MCP sections
+/// under the app lock and publish with the same pending journal/restore proof.
+/// A previous unfinished operation must be settled by the normal DB-aware entry.
+pub(crate) fn write_mcp_sections(app: &str, path: &Path, desired: &[u8]) -> Result<(), AppError> {
+    use super::patch::{KeyPath, LivePatch};
+    use crate::mode::{operation, state};
+    let patch: Box<dyn LivePatch> = if app == "codex" {
+        let doc = super::patch::toml::parse(path, Some(desired))?;
+        let mut patch = super::patch::toml::TomlPatch::default();
+        for segments in [&["mcp_servers"][..], &["mcp", "servers"][..]] {
+            let mut item = doc.get(segments[0]);
+            for key in &segments[1..] {
+                item = item.and_then(|item| item.get(*key));
+            }
+            match item {
+                Some(item) => patch.set.push((KeyPath::new(segments), item.clone())),
+                None => patch.remove.push(KeyPath::new(segments)),
+            }
+        }
+        Box::new(patch)
+    } else if app == "gemini" {
+        let value: serde_json::Value = serde_json::from_slice(desired)
+            .map_err(|_| AppError::Config("MCP 配置无法解析".into()))?;
+        let mut patch = super::patch::json::JsonPatch::default();
+        match value.get("mcpServers") {
+            Some(value) => patch
+                .set
+                .push((KeyPath::new(&["mcpServers"]), value.clone())),
+            None => patch.remove.push(KeyPath::new(&["mcpServers"])),
+        }
+        Box::new(patch)
+    } else {
+        return Err(AppError::Config("不支持的 MCP 配置".into()));
+    };
+    let store = DeviceStore::for_device();
+    let guard = lock_app(app);
+    if state::pending(&store, app)?.is_some() {
+        return Err(AppError::Config(
+            "上次配置尚未完成，请重新选择连接后重试".into(),
+        ));
+    }
+    operation::run(
+        &store,
+        &guard,
+        "mcp",
+        &[operation::FileChange {
+            file: LiveFile::private(path),
+            patch: patch.as_ref(),
+        }],
+        state::PendingTarget::default(),
+        &|_| Ok(()),
+    )?;
+    Ok(())
 }
 
 /// 把新内容写进目标旁边的临时文件（fsync 过，崩溃后可以靠它前滚）。要删文件时没有

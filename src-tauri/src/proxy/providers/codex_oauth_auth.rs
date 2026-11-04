@@ -418,8 +418,8 @@ impl CodexOAuthManager {
             storage_lock: Arc::new(Mutex::new(())),
         };
 
-        if let Err(e) = manager.load_from_disk_sync() {
-            log::warn!("[CodexOAuth] 加载存储失败: {e}");
+        if let Err(_e) = manager.load_from_disk_sync() {
+            log::warn!("[CodexOAuth] 加载存储失败: credential_store_failed");
         }
 
         manager
@@ -477,10 +477,7 @@ impl CodexOAuthManager {
         )
         .await?;
 
-        log::info!(
-            "[CodexOAuth] 获取 Device Code 成功，user_code: {}",
-            device.user_code
-        );
+        log::info!("[CodexOAuth] 获取 Device Code 成功");
 
         Ok(GitHubDeviceCodeResponse {
             device_code: device.device_auth_id,
@@ -1037,16 +1034,14 @@ impl CodexOAuthManager {
             &stored_refresh_token,
             &last_refresh,
         );
-        if let Err(err) = crate::codex_config::sync_codex_managed_oauth_live_auth_after_refresh(
+        if let Err(_err) = crate::codex_config::sync_codex_managed_oauth_live_auth_after_refresh(
             account_id,
             &refresh_token,
             &refreshed_auth,
         ) {
             // The manager token remains valid; a later provider write will
             // retry the live synchronization without rolling it back.
-            log::warn!(
-                "[CodexOAuth] 同步刷新后的 Codex live auth 失败（account={account_id}）: {err}"
-            );
+            log::warn!("[CodexOAuth] 同步刷新后的 Codex live auth 失败: credential_sync_failed");
         }
 
         // 在 accounts 读锁下确认账号仍存在，再写缓存：与 remove/clear（持 accounts

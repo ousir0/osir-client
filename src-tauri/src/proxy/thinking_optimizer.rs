@@ -25,7 +25,7 @@ pub fn optimize(body: &mut Value, config: &OptimizerConfig) {
     }
 
     if uses_adaptive_thinking(&model) {
-        log::info!("[OPT] thinking: adaptive({model})");
+        log::info!("[OPT] thinking: adaptive");
         body["thinking"] = json!({"type": "adaptive"});
         body["output_config"] = json!({"effort": "max"});
         append_beta(body, "context-1m-2025-08-07");
@@ -33,7 +33,7 @@ pub fn optimize(body: &mut Value, config: &OptimizerConfig) {
     }
 
     // legacy path
-    log::info!("[OPT] thinking: legacy({model})");
+    log::info!("[OPT] thinking: legacy");
 
     let max_tokens = body
         .get("max_tokens")

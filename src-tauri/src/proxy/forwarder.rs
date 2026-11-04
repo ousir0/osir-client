@@ -7,6 +7,7 @@ use super::{
     body_filter::filter_private_params_with_whitelist,
     content_encoding::{decompress_body_with_limit, get_content_encoding},
     error::*,
+    error_mapper::get_safe_error_message,
     failover_switch::FailoverSwitchManager,
     json_canonical::{canonicalize_value, short_value_hash},
     log_codes::fwd as log_fwd,
@@ -428,13 +429,7 @@ impl RequestForwarder {
             self.rectifier_config.request_media_heuristic,
         );
         if replaced_images > 0 {
-            let model = body.get("model").and_then(Value::as_str).unwrap_or("");
-            log::info!(
-                "[Media] Replaced {replaced_images} image block(s) with {} for text-only provider={}, model={}",
-                super::media_sanitizer::UNSUPPORTED_IMAGE_MARKER,
-                provider.id,
-                model
-            );
+            log::info!("[Media] Replaced {replaced_images} image block(s): image_input_replaced");
         }
         replaced_images
     }
@@ -557,13 +552,14 @@ impl RequestForwarder {
         used_half_open_permit: bool,
     ) {
         if used_half_open_permit {
-            if let Err(e) = self
+            if self
                 .router
                 .record_result(provider_id, app_type, true, true, None)
                 .await
+                .is_err()
             {
                 log::warn!(
-                    "[{app_type}] 记录 Provider 成功结果失败: provider_id={provider_id}, error={e}"
+                    "[{app_type}] 记录 Provider 成功结果失败: provider_id={provider_id}, error=health_write_failed"
                 );
             }
             return;
@@ -573,12 +569,13 @@ impl RequestForwarder {
         let provider_id = provider_id.to_string();
         let app_type = app_type.to_string();
         tokio::spawn(async move {
-            if let Err(e) = router
+            if router
                 .record_result(&provider_id, &app_type, false, true, None)
                 .await
+                .is_err()
             {
                 log::warn!(
-                    "[{app_type}] 异步记录 Provider 成功结果失败: provider_id={provider_id}, error={e}"
+                    "[{app_type}] 异步记录 Provider 成功结果失败: provider_id={provider_id}, error=health_write_failed"
                 );
             }
         });
@@ -597,7 +594,6 @@ impl RequestForwarder {
         provider: &Provider,
         app_type_str: &str,
         used_half_open_permit: bool,
-        rectifier_label: &str,
         last_error: &mut Option<ProxyError>,
         last_provider: &mut Option<Provider>,
     ) -> Option<ForwardError> {
@@ -610,17 +606,8 @@ impl RequestForwarder {
         };
 
         if is_provider_error {
-            self.record_provider_failure(
-                provider,
-                app_type_str,
-                used_half_open_permit,
-                &retry_err,
-                format!(
-                    "Provider {} {rectifier_label}重试失败: {}",
-                    provider.name, retry_err
-                ),
-            )
-            .await;
+            self.record_provider_failure(provider, app_type_str, used_half_open_permit, &retry_err)
+                .await;
             *last_error = Some(retry_err);
             *last_provider = Some(provider.clone());
             return None;
@@ -713,7 +700,6 @@ impl RequestForwarder {
         app_type_str: &str,
         used_half_open_permit: bool,
         error: &ProxyError,
-        last_error: String,
     ) {
         if !self.routing_state_enabled() {
             return;
@@ -725,10 +711,10 @@ impl RequestForwarder {
                 app_type_str,
                 used_half_open_permit,
                 false,
-                Some(error.to_string()),
+                Some(get_safe_error_message(error)),
             )
             .await;
-        self.status.write().await.last_error = Some(last_error);
+        self.status.write().await.last_error = Some(get_safe_error_message(error));
     }
 
     /// 不计入熔断的失败（客户端错误、整流后仍被拒）：只释放 HalfOpen 名额，这个请求记为失败。
@@ -743,7 +729,8 @@ impl RequestForwarder {
             self.router
                 .release_permit_neutral(&provider.id, app_type_str, used_half_open_permit)
                 .await;
-            self.record_failed_request(error.to_string()).await;
+            self.record_failed_request(get_safe_error_message(&error))
+                .await;
         }
         ForwardError {
             error,
@@ -979,15 +966,8 @@ impl RequestForwarder {
 
                         if replaced_images > 0 {
                             let _ = std::mem::replace(&mut media_rectifier_retried, true);
-                            let model = media_body
-                                .get("model")
-                                .and_then(Value::as_str)
-                                .unwrap_or("");
                             log::info!(
-                                "[{app_type_str}] [Media] Upstream rejected image input; retrying provider={} model={} with {replaced_images} image block(s) replaced by {}",
-                                provider.id,
-                                model,
-                                super::media_sanitizer::UNSUPPORTED_IMAGE_MARKER
+                                "[{app_type_str}] [Media] Upstream rejected image input; retrying with {replaced_images} image block(s) replaced: image_input_rejected"
                             );
 
                             let mut media_retry_codex_upstream_format = None;
@@ -1021,7 +1001,8 @@ impl RequestForwarder {
                                 }
                                 Err(retry_err) => {
                                     log::warn!(
-                                        "[{app_type_str}] [Media] Unsupported-image retry still failed: {retry_err}"
+                                        "[{app_type_str}] [Media] Unsupported-image retry still failed: {}",
+                                        get_safe_error_message(&retry_err)
                                     );
                                     if let Some(err) = self
                                         .handle_rectifier_retry_failure(
@@ -1029,7 +1010,6 @@ impl RequestForwarder {
                                             provider,
                                             app_type_str,
                                             used_half_open_permit,
-                                            "media 降级",
                                             &mut last_error,
                                             &mut last_provider,
                                         )
@@ -1112,7 +1092,8 @@ impl RequestForwarder {
                                 // 决定是否计入熔断、是否换下一家。
                                 Err(retry_err) => {
                                     log::warn!(
-                                        "[{app_type_str}] [RECT-022] 密文整流重试仍失败: {retry_err}"
+                                        "[{app_type_str}] [RECT-022] 密文整流重试仍失败: {}",
+                                        get_safe_error_message(&retry_err)
                                     );
                                     if agent_task
                                         && self
@@ -1216,7 +1197,8 @@ impl RequestForwarder {
                                     }
                                     Err(retry_err) => {
                                         log::warn!(
-                                            "[{app_type_str}] [RECT-003] 整流重试仍失败: {retry_err}"
+                                            "[{app_type_str}] [RECT-003] 整流重试仍失败: {}",
+                                            get_safe_error_message(&retry_err)
                                         );
                                         if let Some(err) = self
                                             .handle_rectifier_retry_failure(
@@ -1224,7 +1206,6 @@ impl RequestForwarder {
                                                 provider,
                                                 app_type_str,
                                                 used_half_open_permit,
-                                                "整流",
                                                 &mut last_error,
                                                 &mut last_provider,
                                             )
@@ -1315,7 +1296,8 @@ impl RequestForwarder {
                                 }
                                 Err(retry_err) => {
                                     log::warn!(
-                                        "[{app_type_str}] [RECT-012] budget 整流重试仍失败: {retry_err}"
+                                        "[{app_type_str}] [RECT-012] budget 整流重试仍失败: {}",
+                                        get_safe_error_message(&retry_err)
                                     );
                                     if let Some(err) = self
                                         .handle_rectifier_retry_failure(
@@ -1323,7 +1305,6 @@ impl RequestForwarder {
                                             provider,
                                             app_type_str,
                                             used_half_open_permit,
-                                            "budget 整流",
                                             &mut last_error,
                                             &mut last_provider,
                                         )
@@ -1361,7 +1342,6 @@ impl RequestForwarder {
                                 app_type_str,
                                 used_half_open_permit,
                                 &e,
-                                format!("Provider {} 失败: {}", provider.name, e),
                             )
                             .await;
 
@@ -1658,10 +1638,7 @@ impl RequestForwarder {
 
             // 4. Warmup 小模型降级
             if self.copilot_optimizer_config.warmup_downgrade && classification.is_warmup {
-                log::info!(
-                    "[Copilot] Warmup 请求降级到模型: {}",
-                    self.copilot_optimizer_config.warmup_model
-                );
+                log::info!("[Copilot] Warmup 请求降级到模型: warmup_model_selected");
                 mapped_body["model"] =
                     serde_json::json!(&self.copilot_optimizer_config.warmup_model);
             }
@@ -1771,11 +1748,7 @@ impl RequestForwarder {
 
                 // 只在动态 endpoint 与当前 base_url 不同时替换
                 if dynamic_endpoint != base_url {
-                    log::debug!(
-                        "[Copilot] 使用动态 API endpoint: {} (原: {})",
-                        dynamic_endpoint,
-                        base_url
-                    );
+                    log::debug!("[Copilot] 使用动态 API endpoint: endpoint_selected");
                     base_url = dynamic_endpoint;
                 }
             }
@@ -2220,10 +2193,7 @@ impl RequestForwarder {
                             );
                         }
                         Err(e) => {
-                            log::error!(
-                                "[Copilot] 获取 Copilot token 失败 (account={}): {e}",
-                                account_id.as_deref().unwrap_or("default")
-                            );
+                            log::error!("[Copilot] 获取 Copilot token 失败: 认证失败");
                             return Err(ProxyError::AuthError(format!(
                                 "GitHub Copilot 认证失败: {e}"
                             )));
@@ -2290,7 +2260,7 @@ impl RequestForwarder {
                             );
                         }
                         Err(e) => {
-                            log::error!("[CodexOAuth] 获取 access_token 失败: {e}");
+                            log::error!("[CodexOAuth] 获取 access_token 失败: 认证失败");
                             return Err(ProxyError::AuthError(format!(
                                 "Codex OAuth 认证失败: {e}"
                             )));
@@ -2329,7 +2299,7 @@ impl RequestForwarder {
                             );
                         }
                         Err(error) => {
-                            log::error!("[XaiOAuth] 获取 access_token 失败: {error}");
+                            log::error!("[XaiOAuth] 获取 access_token 失败: 认证失败");
                             return Err(ProxyError::AuthError(format!(
                                 "xAI OAuth 认证失败: {error}"
                             )));
@@ -2803,11 +2773,7 @@ impl RequestForwarder {
 
         // 输出请求信息日志
         let tag = adapter.name();
-        let request_model = filtered_body
-            .get("model")
-            .and_then(|v| v.as_str())
-            .unwrap_or("<none>");
-        log::info!("[{tag}] >>> 请求目标: {target_for_log} (model={request_model})");
+        log::info!("[{tag}] >>> 请求已准备: upstream_request_ready");
         log::debug!(
             "[{tag}] >>> 请求体已准备: bytes={}, hash={} (content omitted)",
             body_bytes.len(),
@@ -3311,8 +3277,10 @@ impl RequestForwarder {
 
         let models = match models_result {
             Ok(m) => m,
-            Err(err) => {
-                log::debug!("[Copilot] live model list unavailable, skip resolution: {err}");
+            Err(_err) => {
+                log::debug!(
+                    "[Copilot] live model list unavailable, skip resolution: model_lookup_failed"
+                );
                 return;
             }
         };
@@ -3320,7 +3288,7 @@ impl RequestForwarder {
         if let Some(resolved) =
             super::providers::copilot_model_map::resolve_against_models(&model_id, &models)
         {
-            log::info!("[Copilot] live-model resolve: {model_id} → {resolved}");
+            log::info!("[Copilot] live-model resolve: model_resolved");
             body["model"] = serde_json::Value::String(resolved);
         }
     }
@@ -3390,14 +3358,12 @@ impl RequestForwarder {
         match vendor_result {
             Ok(Some(vendor)) => Some(vendor),
             Ok(None) => {
-                log::debug!(
-                    "[Copilot] Model vendor unavailable for {model_id}, fallback to chat/completions"
-                );
+                log::debug!("[Copilot] Model vendor unavailable, fallback to chat/completions");
                 None
             }
-            Err(err) => {
+            Err(_err) => {
                 log::warn!(
-                    "[Copilot] Failed to resolve model vendor for {model_id}, fallback to chat/completions: {err}"
+                    "[Copilot] Failed to resolve model vendor, fallback to chat/completions: model_lookup_failed"
                 );
                 None
             }
@@ -3481,7 +3447,7 @@ fn refresh_success_rate(status: &mut ProxyStatus) {
 }
 
 fn build_retryable_failure_log(
-    provider_name: &str,
+    _provider_name: &str,
     attempted_providers: usize,
     total_providers: usize,
     error: &ProxyError,
@@ -3491,13 +3457,13 @@ fn build_retryable_failure_log(
     if total_providers <= 1 {
         (
             log_fwd::SINGLE_PROVIDER_FAILED,
-            format!("Provider {provider_name} 请求失败: {error_summary}"),
+            format!("Provider 请求失败: {error_summary}"),
         )
     } else {
         (
             log_fwd::PROVIDER_FAILED_RETRY,
             format!(
-                "Provider {provider_name} 失败，继续尝试下一个 ({attempted_providers}/{total_providers}): {error_summary}"
+                "Provider 失败，继续尝试下一个 ({attempted_providers}/{total_providers}): {error_summary}"
             ),
         )
     }
@@ -3525,63 +3491,7 @@ fn build_terminal_failure_log(
 }
 
 fn summarize_proxy_error(error: &ProxyError) -> String {
-    match error {
-        ProxyError::UpstreamError { status, body } => {
-            let body_summary = body
-                .as_deref()
-                .map(summarize_upstream_body)
-                .filter(|summary| !summary.is_empty());
-
-            match body_summary {
-                Some(summary) => format!("上游 HTTP {status}: {summary}"),
-                None => format!("上游 HTTP {status}"),
-            }
-        }
-        ProxyError::Timeout(message) => {
-            format!("请求超时: {}", summarize_text_for_log(message, 180))
-        }
-        ProxyError::ForwardFailed(message) => {
-            format!("请求转发失败: {}", summarize_text_for_log(message, 180))
-        }
-        ProxyError::TransformError(message) => {
-            format!("响应转换失败: {}", summarize_text_for_log(message, 180))
-        }
-        ProxyError::ConfigError(message) => {
-            format!("配置错误: {}", summarize_text_for_log(message, 180))
-        }
-        ProxyError::AuthError(message) => {
-            format!("认证失败: {}", summarize_text_for_log(message, 180))
-        }
-        _ => summarize_text_for_log(&error.to_string(), 180),
-    }
-}
-
-fn summarize_upstream_body(body: &str) -> String {
-    if let Ok(json_body) = serde_json::from_str::<Value>(body) {
-        if let Some(message) = extract_json_error_message(&json_body) {
-            return summarize_text_for_log(&message, 180);
-        }
-
-        if let Ok(compact_json) = serde_json::to_string(&json_body) {
-            return summarize_text_for_log(&compact_json, 180);
-        }
-    }
-
-    summarize_text_for_log(body, 180)
-}
-
-fn extract_json_error_message(body: &Value) -> Option<String> {
-    let candidates = [
-        body.pointer("/error/message"),
-        body.pointer("/message"),
-        body.pointer("/detail"),
-        body.pointer("/error"),
-    ];
-
-    candidates
-        .into_iter()
-        .flatten()
-        .find_map(|value| value.as_str().map(ToString::to_string))
+    get_safe_error_message(error)
 }
 
 fn split_endpoint_and_query(endpoint: &str) -> (&str, Option<&str>) {
@@ -4408,19 +4318,6 @@ fn map_reqwest_send_error(error: reqwest::Error) -> ProxyError {
     }
 }
 
-fn summarize_text_for_log(text: &str, max_chars: usize) -> String {
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let trimmed = normalized.trim();
-
-    if trimmed.chars().count() <= max_chars {
-        return trimmed.to_string();
-    }
-
-    let truncated: String = trimmed.chars().take(max_chars).collect();
-    let truncated = truncated.trim_end();
-    format!("{truncated}...")
-}
-
 fn apply_local_proxy_body_overrides(
     body: &mut Value,
     overrides: &LocalProxyRequestOverrides,
@@ -4496,7 +4393,9 @@ fn apply_local_proxy_header_overrides(
         }
 
         let Ok(name) = http::HeaderName::from_bytes(header_name.as_bytes()) else {
-            log::warn!("[LocalProxyOverrides] Ignoring invalid header override name: {raw_name}");
+            log::warn!(
+                "[LocalProxyOverrides] Ignoring invalid header override name: header_name_invalid"
+            );
             continue;
         };
 
@@ -4510,8 +4409,7 @@ fn apply_local_proxy_header_overrides(
 
         let Ok(value) = http::HeaderValue::from_str(raw_value) else {
             log::warn!(
-                "[LocalProxyOverrides] Ignoring invalid header override value for {}",
-                name.as_str()
+                "[LocalProxyOverrides] Ignoring invalid header override value: header_value_invalid"
             );
             continue;
         };
@@ -4575,9 +4473,9 @@ fn prepare_upstream_request_body(request_body: Value) -> Value {
 
 fn log_prompt_cache_trace(
     app_type: &AppType,
-    provider: &Provider,
-    endpoint: &str,
-    api_format: Option<&str>,
+    _provider: &Provider,
+    _endpoint: &str,
+    _api_format: Option<&str>,
     body: &Value,
     session_client_provided: bool,
 ) {
@@ -4601,12 +4499,8 @@ fn log_prompt_cache_trace(
     let cache_controls = cache_control_summary(body);
 
     log::debug!(
-        "[CacheTrace] app={}, provider={}, endpoint={}, api_format={}, session_client_provided={}, prompt_cache_key={}, store={}, stream={}, instructions_hash={}, system_hash={}, tools_hash={}, input_hash={}, messages_hash={}, include_hash={}, cache_controls={}, body_hash={}",
+        "[CacheTrace] app={}, session_client_provided={}, prompt_cache_key={}, store={}, stream={}, instructions_hash={}, system_hash={}, tools_hash={}, input_hash={}, messages_hash={}, include_hash={}, cache_controls={}, body_hash={}",
         app_type.as_str(),
-        provider.id,
-        // Gemini 的 endpoint 带 ?key=<API_KEY>；脱敏剥掉 query 再落盘。
-        crate::redact_url_for_log(endpoint),
-        api_format.unwrap_or("native"),
         session_client_provided,
         prompt_cache_key,
         store,
@@ -4632,7 +4526,13 @@ fn cache_control_summary(value: &Value) -> String {
                         .get("ttl")
                         .and_then(Value::as_str)
                         .unwrap_or("default");
-                    ttls.insert(ttl.to_string());
+                    ttls.insert(
+                        match ttl {
+                            "5m" | "1h" | "default" => ttl,
+                            _ => "other",
+                        }
+                        .to_string(),
+                    );
                 }
                 for child in object.values() {
                     walk(child, count, ttls);
@@ -4664,7 +4564,7 @@ fn value_for_log(value: &Value) -> String {
     match value {
         Value::Bool(value) => value.to_string(),
         Value::Number(value) => value.to_string(),
-        Value::String(value) => value.clone(),
+        Value::String(_) => "string".to_string(),
         Value::Null => "null".to_string(),
         Value::Array(values) => format!("array(len={})", values.len()),
         Value::Object(values) => format!("object(len={})", values.len()),
@@ -5068,7 +4968,6 @@ mod tests {
                 &provider,
                 "claude",
                 false,
-                "fixture",
                 &mut last_error,
                 &mut last_provider,
             )
@@ -5140,10 +5039,10 @@ mod tests {
         let (code, message) = build_retryable_failure_log("PackyCode-response", 1, 1, &error);
 
         assert_eq!(code, log_fwd::SINGLE_PROVIDER_FAILED);
-        assert!(message.contains("Provider PackyCode-response 请求失败"));
-        assert!(message.contains("上游 HTTP 429"));
-        // 上游错误消息保留(截断)，用于诊断失败原因。
-        assert!(message.contains("rate limit exceeded"));
+        assert!(message.contains("Provider 请求失败"));
+        assert!(message.contains("上游错误 (HTTP 429)"));
+        // Only a controlled classification may reach file logs.
+        assert!(!message.contains("rate limit exceeded"));
         assert!(!message.contains("切换下一个"));
     }
 
@@ -5172,14 +5071,8 @@ mod tests {
 
         assert_eq!(code, log_fwd::ALL_PROVIDERS_FAILED);
         assert!(message.contains("已尝试 2/2 个 Provider，均失败"));
-        assert!(message.contains("connection reset by peer"));
-    }
-
-    #[test]
-    fn summarize_text_for_log_collapses_whitespace_and_truncates() {
-        let summary = summarize_text_for_log("line1\n\n line2   line3", 12);
-
-        assert_eq!(summary, "line1 line2...");
+        assert!(message.contains("请求转发失败 (HTTP 502)"));
+        assert!(!message.contains("connection reset by peer"));
     }
 
     #[test]
@@ -8522,6 +8415,107 @@ mod tests {
             }
         }
 
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+
+        #[tokio::test]
+        async fn a1_retry_errors_keep_protocol_but_not_log_health_or_status_content() {
+            let capture = A1LogCapture::start();
+            let payload = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+            let up = upstream(vec![
+                error(400, &format!("{SIGNATURE_ERROR} {payload}")),
+                error(502, payload),
+            ])
+            .await;
+            let mut fwd = forwarder(1, "p1");
+            let db = Arc::new(Database::memory().unwrap());
+            fwd.router = Arc::new(ProviderRouter::new(db.clone()));
+            let provider = provider("p1", &up);
+            db.save_provider("claude", &provider).unwrap();
+            let mut request = body_with_thinking_signature();
+            request["messages"][0]["content"] = json!("fixture-prompt-A1");
+            let failure = expect_err(send(&fwd, vec![provider], request).await);
+            assert_eq!(up.requests.lock().await.len(), 2);
+            assert!(
+                matches!(&failure.error, ProxyError::UpstreamError { status: 502, body: Some(body) }
+                if body.contains(payload))
+            );
+            let health = db.get_provider_health("p1", "claude").await.unwrap();
+            assert_eq!(health.last_error.as_deref(), Some("上游错误 (HTTP 502)"));
+            assert!(!fwd
+                .status
+                .read()
+                .await
+                .last_error
+                .as_ref()
+                .unwrap()
+                .contains("fixture-"));
+            let text = capture.text();
+            assert!(
+                text.contains("[RECT-003]"),
+                "retry branch must emit a record"
+            );
+            assert!(text.contains("HTTP 502"));
+            // File output and full/sync backups must contain no error payload.
+            let file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(file.path(), &text).unwrap();
+            for artifact in [
+                std::fs::read_to_string(file.path()).unwrap(),
+                db.export_sql_string().unwrap(),
+                db.export_sql_string_for_sync().unwrap(),
+            ] {
+                for marker in payload.split_whitespace() {
+                    assert!(!artifact.contains(marker));
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn a1_stream_failure_before_output_uses_safe_health_and_logs() {
+            let capture = A1LogCapture::start();
+            let payload = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+            let event = format!(
+                "event: response.failed\ndata: {}\n\n",
+                json!({"type": "response.failed", "response": {"status": "failed",
+                    "error": {"type": payload, "message": payload}}})
+            );
+            let response =
+                ProxyResponse::buffered(StatusCode::OK, HeaderMap::new(), Bytes::from(event));
+            let mut fwd = forwarder(1, "p1");
+            let db = Arc::new(Database::memory().unwrap());
+            fwd.router = Arc::new(ProviderRouter::new(db.clone()));
+            let error = fwd
+                .validate_responses_stream_start(response)
+                .await
+                .err()
+                .expect("stream fails");
+            assert!(
+                matches!(&error, ProxyError::TransformError(message) if message.contains(payload))
+            );
+            let provider = test_provider_with_type(None);
+            db.save_provider("claude", &provider).unwrap();
+            fwd.record_provider_failure(&provider, "claude", false, &error)
+                .await;
+            let (_, message) = build_retryable_failure_log(payload, 1, 2, &error);
+            log::warn!("{message}");
+            assert_eq!(
+                fwd.status.read().await.last_error.as_deref(),
+                Some("请求或响应转换失败 (HTTP 422)")
+            );
+            assert_eq!(
+                db.get_provider_health(&provider.id, "claude")
+                    .await
+                    .unwrap()
+                    .last_error
+                    .as_deref(),
+                Some("请求或响应转换失败 (HTTP 422)")
+            );
+            for artifact in [capture.text(), db.export_sql_string().unwrap()] {
+                for marker in payload.split_whitespace() {
+                    assert!(!artifact.contains(marker));
+                }
+            }
+        }
+
         #[tokio::test]
         async fn success_on_the_first_provider() {
             let up = upstream(vec![ok()]).await;
@@ -8593,7 +8587,7 @@ mod tests {
                     failed: 1,
                     success_rate: 0.0,
                     failover_count: 0,
-                    last_error: Some(err.error.to_string()),
+                    last_error: Some(get_safe_error_message(&err.error)),
                     attempting: Some("p1".into()),
                     in_use: None,
                 }
@@ -8729,7 +8723,7 @@ mod tests {
                     failed: 1,
                     success_rate: 0.0,
                     failover_count: 0,
-                    last_error: Some(err.error.to_string()),
+                    last_error: Some(get_safe_error_message(&err.error)),
                     attempting: Some("p1".into()),
                     in_use: None,
                 }
@@ -8785,7 +8779,7 @@ mod tests {
                     failed: 1,
                     success_rate: 0.0,
                     failover_count: 0,
-                    last_error: Some(err.error.to_string()),
+                    last_error: Some(get_safe_error_message(&err.error)),
                     attempting: Some("p1".into()),
                     in_use: None,
                 }
@@ -8848,7 +8842,7 @@ mod tests {
                     failed: 1,
                     success_rate: 0.0,
                     failover_count: 0,
-                    last_error: Some(err.error.to_string()),
+                    last_error: Some(get_safe_error_message(&err.error)),
                     attempting: Some("p1".into()),
                     in_use: None,
                 }

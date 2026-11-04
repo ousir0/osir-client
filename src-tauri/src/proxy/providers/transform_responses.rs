@@ -2214,7 +2214,7 @@ pub(crate) fn build_anthropic_usage_from_responses(usage: Option<&Value>) -> Val
     // Log if only one field present (partial object). Streaming chunks legitimately
     // arrive with partial usage, so this stays at debug level to avoid noise.
     if (input == 0 && output > 0) || (input > 0 && output == 0) {
-        log::debug!("[Responses] Partial usage object: {:?}", u);
+        log::debug!("[Responses] Partial usage object: usage_incomplete");
     }
 
     let mut result = json!({
@@ -2695,9 +2695,9 @@ pub(crate) fn responses_to_anthropic_with_web_search_options(
                 } else {
                     match serde_json::from_str(args_str) {
                         Ok(value) => value,
-                        Err(error) if !response_completed => {
+                        Err(_) if !response_completed => {
                             log::warn!(
-                                "[Responses] Replacing incomplete function_call '{name}' arguments with an empty object: {error}"
+                                "[Responses] Replacing incomplete function_call arguments with an empty object: tool_arguments_invalid"
                             );
                             json!({})
                         }
@@ -2711,7 +2711,7 @@ pub(crate) fn responses_to_anthropic_with_web_search_options(
                 if !input.is_object() {
                     if !response_completed {
                         log::warn!(
-                            "[Responses] Replacing incomplete function_call '{name}' non-object arguments with an empty object"
+                            "[Responses] Replacing incomplete function_call non-object arguments with an empty object: tool_arguments_not_object"
                         );
                         content.push(json!({
                             "type": "tool_use",
@@ -2818,6 +2818,46 @@ pub(crate) fn responses_to_anthropic_with_web_search_options(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a1_incomplete_responses_keep_client_tools_without_logging_names_or_arguments() {
+        use crate::proxy::error_mapper::test_log_capture::A1LogCapture;
+        let capture = A1LogCapture::start();
+        let secret = "fixture-key-A1 fixture-token-A1 fixture-prompt-A1 fixture-image-A1";
+        for arguments in [
+            format!("{{\"{secret}\":"),
+            serde_json::to_string(&vec![secret]).unwrap(),
+        ] {
+            let mut input = json!({
+                "id": "resp_fixture", "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"}, "model": "gpt-fixture",
+                "output": [{"type": "function_call", "call_id": "call_fixture", "name": secret,
+                            "arguments": arguments}],
+                "usage": {"input_tokens": 10, "extra": {"message": secret}}
+            });
+            let response = responses_to_anthropic(input.clone()).unwrap();
+            assert_eq!(response["content"][0]["name"], secret);
+            assert_eq!(response["content"][0]["input"], json!({}));
+            assert_eq!(response["stop_reason"], "max_tokens");
+            assert_eq!(response["usage"]["input_tokens"], 10);
+            input["status"] = json!("completed");
+            let error = responses_to_anthropic(input).unwrap_err();
+            assert!(matches!(&error, ProxyError::TransformError(_)));
+            assert!(
+                error.to_string().contains(secret),
+                "caller error must retain its detail"
+            );
+        }
+        let logs = capture.text();
+        for category in [
+            "usage_incomplete",
+            "tool_arguments_invalid",
+            "tool_arguments_not_object",
+        ] {
+            assert!(logs.contains(category), "{logs}");
+        }
+        assert!(!logs.contains("fixture-"), "{logs}");
+    }
+
     use super::*;
 
     #[test]

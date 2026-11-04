@@ -61,9 +61,11 @@ pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
     if GLOBAL_CLIENT.set(RwLock::new(client.clone())).is_err() {
         log::warn!(
             "[GlobalProxy] [GP-003] Already initialized, updating instead: {}",
-            effective_url
-                .map(mask_url)
-                .unwrap_or_else(|| "direct connection".to_string())
+            if effective_url.is_some() {
+                "proxy_configured"
+            } else {
+                "direct_connection"
+            }
         );
         // 已初始化，改用 apply_proxy 更新
         return apply_proxy(proxy_url);
@@ -74,9 +76,11 @@ pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
 
     log::info!(
         "[GlobalProxy] Initialized: {}",
-        effective_url
-            .map(mask_url)
-            .unwrap_or_else(|| "direct connection".to_string())
+        if effective_url.is_some() {
+            "proxy_configured"
+        } else {
+            "direct_connection"
+        }
     );
 
     Ok(())
@@ -112,8 +116,8 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 
     // 更新客户端
     if let Some(lock) = GLOBAL_CLIENT.get() {
-        let mut client = lock.write().map_err(|e| {
-            log::error!("[GlobalProxy] [GP-001] Failed to acquire write lock: {e}");
+        let mut client = lock.write().map_err(|_| {
+            log::error!("[GlobalProxy] [GP-001] Failed to acquire write lock: operation_failed");
             "Failed to update proxy: lock poisoned".to_string()
         })?;
         *client = new_client;
@@ -124,8 +128,10 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 
     // 更新代理 URL 记录
     if let Some(lock) = CURRENT_PROXY_URL.get() {
-        let mut url = lock.write().map_err(|e| {
-            log::error!("[GlobalProxy] [GP-002] Failed to acquire URL write lock: {e}");
+        let mut url = lock.write().map_err(|_| {
+            log::error!(
+                "[GlobalProxy] [GP-002] Failed to acquire URL write lock: operation_failed"
+            );
             "Failed to update proxy URL record: lock poisoned".to_string()
         })?;
         *url = effective_url.map(|s| s.to_string());
@@ -133,9 +139,11 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 
     log::info!(
         "[GlobalProxy] Applied: {}",
-        effective_url
-            .map(mask_url)
-            .unwrap_or_else(|| "direct connection".to_string())
+        if effective_url.is_some() {
+            "proxy_configured"
+        } else {
+            "direct_connection"
+        }
     );
 
     Ok(())
@@ -156,8 +164,8 @@ pub fn update_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 
     // 更新客户端
     if let Some(lock) = GLOBAL_CLIENT.get() {
-        let mut client = lock.write().map_err(|e| {
-            log::error!("[GlobalProxy] [GP-001] Failed to acquire write lock: {e}");
+        let mut client = lock.write().map_err(|_| {
+            log::error!("[GlobalProxy] [GP-001] Failed to acquire write lock: operation_failed");
             "Failed to update proxy: lock poisoned".to_string()
         })?;
         *client = new_client;
@@ -168,8 +176,10 @@ pub fn update_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 
     // 更新代理 URL 记录
     if let Some(lock) = CURRENT_PROXY_URL.get() {
-        let mut url = lock.write().map_err(|e| {
-            log::error!("[GlobalProxy] [GP-002] Failed to acquire URL write lock: {e}");
+        let mut url = lock.write().map_err(|_| {
+            log::error!(
+                "[GlobalProxy] [GP-002] Failed to acquire URL write lock: operation_failed"
+            );
             "Failed to update proxy URL record: lock poisoned".to_string()
         })?;
         *url = effective_url.map(|s| s.to_string());
@@ -177,9 +187,11 @@ pub fn update_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 
     log::info!(
         "[GlobalProxy] Updated: {}",
-        effective_url
-            .map(mask_url)
-            .unwrap_or_else(|| "direct connection".to_string())
+        if effective_url.is_some() {
+            "proxy_configured"
+        } else {
+            "direct_connection"
+        }
     );
 
     Ok(())
@@ -228,8 +240,8 @@ fn upstream_proxy_for(url: &str, current: Option<String>) -> Option<String> {
 fn direct_client() -> Client {
     DIRECT_CLIENT
         .get_or_init(|| {
-            base_builder().no_proxy().build().unwrap_or_else(|e| {
-                log::warn!("[GlobalProxy] Failed to build direct client: {e}");
+            base_builder().no_proxy().build().unwrap_or_else(|_| {
+                log::warn!("[GlobalProxy] Failed to build direct client: operation_failed");
                 Client::new()
             })
         })
@@ -316,7 +328,7 @@ fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
         let proxy = reqwest::Proxy::all(url)
             .map_err(|e| format!("Invalid proxy URL '{}': {}", mask_url(url), e))?;
         builder = builder.proxy(proxy);
-        log::debug!("[GlobalProxy] Proxy configured: {}", mask_url(url));
+        log::debug!("[GlobalProxy] Proxy configured: proxy_configured");
     } else {
         // 未设置全局代理时，让 reqwest 自动检测系统代理（环境变量）
         // 若系统代理指向本机，禁用系统代理避免自环

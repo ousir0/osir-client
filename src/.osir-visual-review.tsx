@@ -950,6 +950,17 @@ mockIPC(
       case "osir_legacy_snapshot":
         return null;
       case "osir_get_connection_mode":
+        if (new URLSearchParams(location.search).has("connection-native"))
+          return {
+            mode: "native",
+            canRestoreNative: true,
+            nativeConfiguration: {
+              source: "local_config",
+              status: "available",
+              label: "本机已有配置",
+              detail: "检测到本机已有配置，沿用工具原有登录或连接。",
+            },
+          };
         return {
           mode: new URLSearchParams(location.search).has(
             "connection-unavailable",

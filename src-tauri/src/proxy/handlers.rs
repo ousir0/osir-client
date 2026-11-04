@@ -8,8 +8,8 @@
 //! - Claude 的格式转换逻辑保留在此文件（用于 OpenRouter 旧接口回退）
 
 use super::{
-    content_encoding::{decompress_body, get_content_encoding, is_supported_content_encoding},
-    error_mapper::{get_error_message, map_proxy_error_to_status},
+    content_encoding::get_content_encoding,
+    error_mapper::{get_error_message, get_safe_error_message, map_proxy_error_to_status},
     forwarder::{ActiveConnectionGuard, CodexUpstreamFormat},
     handler_config::{
         claude_stream_usage_event_filter, codex_stream_usage_event_filter, CLAUDE_PARSER_CONFIG,
@@ -40,7 +40,10 @@ use super::{
         read_decoded_body, strip_entity_headers_for_rebuilt_body,
         strip_hop_by_hop_response_headers, usage_logging_enabled, SseUsageCollector,
     },
-    server::ProxyState,
+    server::{
+        request_body::{decode_request_body as decode_codex_request_body, read_request_body},
+        ProxyState,
+    },
     sse::{strip_sse_field, take_sse_block},
     types::*,
     usage::parser::TokenUsage,
@@ -51,6 +54,7 @@ use crate::database::PRICING_SOURCE_REQUEST;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use bytes::Bytes;
 use futures::StreamExt;
+#[cfg(test)]
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 
@@ -109,8 +113,8 @@ pub async fn handle_models(
     {
         match crate::codex_config::read_codex_model_catalog_text(catalog_path) {
             Ok(text) => serde_json::from_str(&text).unwrap_or(json!({"models": []})),
-            Err(error) => {
-                log::warn!("[models] 拒绝读取越界或过大的目录文件: {error}");
+            Err(_) => {
+                log::warn!("[models] 拒绝读取越界或过大的目录文件: operation_failed");
                 json!({"models": []})
             }
         }
@@ -147,8 +151,8 @@ fn is_claude_model_discovery(uri: &axum::http::Uri, headers: &axum::http::Header
 /// Claude Code 的 Stack 模型列表（Anthropic 形状）。只读数据库和 `live-state.json`，不做网络
 /// 请求：客户端只等 3 秒。不在代理模式、名单为空时返回空列表。
 fn claude_model_discovery(state: &ProxyState) -> Value {
-    let models = crate::mode::stack::claude_published_now(&state.db).unwrap_or_else(|error| {
-        log::warn!("[Claude] 读取 Stack 模型失败，返回空列表: {error}");
+    let models = crate::mode::stack::claude_published_now(&state.db).unwrap_or_else(|_| {
+        log::warn!("[Claude] 读取 Stack 模型失败，返回空列表: operation_failed");
         Vec::new()
     });
     let data: Vec<Value> = models
@@ -208,7 +212,7 @@ fn resolve_stack_target(
         }
         Resolved::Miss(miss) => {
             let message = miss.message(&model);
-            log::warn!("[{}] {message}", app_type.as_str());
+            log::warn!("[{}] stack_model_unavailable", app_type.as_str());
             let body = stack_miss_body(app_type, &message);
             Err(Box::new(
                 (StatusCode::BAD_REQUEST, Json(body)).into_response(),
@@ -282,8 +286,8 @@ pub async fn handle_claude_desktop_models(
     let mut response = crate::claude_desktop_config::model_list_response(provider)
         .map_err(|e| ProxyError::ConfigError(e.to_string()))?;
     // 聚合模式下 profile 里关了模型发现，这里补上聚合的模型只是让两边一致
-    let stacked = crate::mode::stack::desktop_published_now(&state.db).unwrap_or_else(|error| {
-        log::warn!("[Claude Desktop] 读取聚合模型失败，只返回路由那家的: {error}");
+    let stacked = crate::mode::stack::desktop_published_now(&state.db).unwrap_or_else(|_| {
+        log::warn!("[Claude Desktop] 读取聚合模型失败，只返回路由那家的: operation_failed");
         Vec::new()
     });
     if let Some(data) = response.get_mut("data").and_then(Value::as_array_mut) {
@@ -318,13 +322,10 @@ async fn handle_messages_for_app(
     let (parts, body) = request.into_parts();
     let method = parts.method.clone();
     let uri = parts.uri;
-    let headers = parts.headers;
+    let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(body).await?;
+    let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
     let mut body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
     let stack = match resolve_stack_target(&state, &app_type, &mut body) {
@@ -749,7 +750,7 @@ async fn handle_claude_transform(
                         // 裸聚合错误、丢失非嗅探臂已有的诊断增强（C7）
                         aggregated.map_err(|e| {
                             log::error!(
-                                "[Claude] SSE 聚合兜底失败: {e}, body_bytes={}",
+                                "[Claude] SSE 聚合兜底失败: response_aggregation_failed, body_bytes={}",
                                 body_bytes.len()
                             );
                             aggregate_fallback_error(e, &response_headers, &body_str)
@@ -757,7 +758,7 @@ async fn handle_claude_transform(
                     }
                     Err(e) => {
                         log::error!(
-                            "[Claude] 解析上游响应失败: {e}, body_bytes={}",
+                            "[Claude] 解析上游响应失败: response_parse_failed, body_bytes={}",
                             body_bytes.len()
                         );
                         return Err(upstream_body_parse_error(
@@ -814,7 +815,7 @@ async fn handle_claude_transform(
     let anthropic_response = match transform_result {
         Ok(response) => response,
         Err(error) => {
-            log::error!("[Claude] 转换响应失败: {error}");
+            log::error!("[Claude] 转换响应失败: response_transform_failed");
             if usage_logging_enabled(state) {
                 if let Some(log) = raw_usage_response.as_ref().and_then(|response| {
                     prepare_claude_usage_log(ctx, response, status.as_u16(), false)
@@ -850,13 +851,13 @@ async fn handle_claude_transform(
     );
 
     let response_body = serde_json::to_vec(&anthropic_response).map_err(|e| {
-        log::error!("[Claude] 序列化响应失败: {e}");
+        log::error!("[Claude] 序列化响应失败: operation_failed");
         ProxyError::TransformError(format!("Failed to serialize response: {e}"))
     })?;
 
     let body = axum::body::Body::from(response_body);
     builder.body(body).map_err(|e| {
-        log::error!("[Claude] 构建响应失败: {e}");
+        log::error!("[Claude] 构建响应失败: operation_failed");
         ProxyError::Internal(format!("Failed to build response: {e}"))
     })
 }
@@ -866,49 +867,6 @@ fn endpoint_with_query(uri: &axum::http::Uri, endpoint: &str) -> String {
         Some(query) => format!("{endpoint}?{query}"),
         None => endpoint.to_string(),
     }
-}
-
-/// Codex 客户端（尤其 Desktop 登录态）可能对请求体启用 zstd 压缩，使得后续
-/// `serde_json::from_slice` 直接解析失败。这里在解析前解压，并剥掉已失真的实体头
-/// （content-encoding / content-length / transfer-encoding）——转发层会基于解压后的
-/// 明文 JSON 重新生成正确的头。
-fn decode_codex_request_body(
-    headers: &mut axum::http::HeaderMap,
-    body_bytes: Bytes,
-) -> Result<Bytes, ProxyError> {
-    let Some(encoding) = get_content_encoding(headers) else {
-        return Ok(body_bytes);
-    };
-
-    if !is_supported_content_encoding(&encoding) {
-        return Err(ProxyError::InvalidRequest(format!(
-            "Unsupported request content-encoding: {encoding}"
-        )));
-    }
-
-    log::debug!("[Codex] 解压请求体: content-encoding={encoding}");
-    let decompressed = match decompress_body(&encoding, &body_bytes) {
-        Ok(Some(decompressed)) => decompressed,
-        // is_supported_content_encoding 已确保编码受支持，正常不会返回 None；
-        // 防御性兜底：宁可报错，也不能把压缩字节当 JSON 透传下去。
-        Ok(None) => {
-            return Err(ProxyError::InvalidRequest(format!(
-                "Unsupported request content-encoding: {encoding}"
-            )));
-        }
-        Err(e) => {
-            log::warn!("[Codex] 请求体解压失败 ({encoding}): {e}");
-            return Err(ProxyError::InvalidRequest(format!(
-                "Failed to decompress request body ({encoding}): {e}"
-            )));
-        }
-    };
-
-    headers.remove(axum::http::header::CONTENT_ENCODING);
-    headers.remove(axum::http::header::CONTENT_LENGTH);
-    headers.remove(axum::http::header::TRANSFER_ENCODING);
-
-    Ok(Bytes::from(decompressed))
 }
 
 // ============================================================================
@@ -925,11 +883,7 @@ pub async fn handle_chat_completions(
     let uri = parts.uri;
     let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
     let mut body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
@@ -1044,11 +998,7 @@ async fn handle_responses_for_app(
     let uri = parts.uri;
     let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
     let mut body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
@@ -1234,7 +1184,7 @@ async fn handle_codex_native_compaction_response(
     builder
         .body(axum::body::Body::from_stream(logged_stream))
         .map_err(|e| {
-            log::error!("[{}] 构建压缩回合流式响应失败: {e}", ctx.tag);
+            log::error!("[{}] 构建压缩回合流式响应失败: operation_failed", ctx.tag);
             ProxyError::Internal(format!("Failed to build streaming response: {e}"))
         })
 }
@@ -1291,11 +1241,7 @@ async fn handle_codex_standalone_passthrough(
     let uri = parts.uri;
     let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
     let mut body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::InvalidRequest(format!("Failed to parse request body: {e}")))?;
@@ -1403,11 +1349,7 @@ async fn handle_responses_compact_for_app(
     let uri = parts.uri;
     let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
     let mut body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
@@ -1560,7 +1502,7 @@ async fn handle_codex_late_arguments_repair(
     builder
         .body(axum::body::Body::from_stream(logged_stream))
         .map_err(|e| {
-            log::error!("[{}] 构建补参数流式响应失败: {e}", ctx.tag);
+            log::error!("[{}] 构建补参数流式响应失败: operation_failed", ctx.tag);
             ProxyError::Internal(format!("Failed to build streaming response: {e}"))
         })
 }
@@ -1616,7 +1558,7 @@ async fn handle_codex_xai_native_responses_rewrite(
 
         let body = axum::body::Body::from_stream(logged_stream);
         return builder.body(body).map_err(|e| {
-            log::error!("[{}] 构建 namespace 还原流式响应失败: {e}", ctx.tag);
+            log::error!("[{}] 构建 namespace 还原流式响应失败: operation_failed", ctx.tag);
             ProxyError::Internal(format!("Failed to build streaming response: {e}"))
         });
     }
@@ -1688,8 +1630,8 @@ async fn handle_codex_xai_native_responses_rewrite(
             }
             match serde_json::to_vec(&value) {
                 Ok(bytes) => Bytes::from(bytes),
-                Err(e) => {
-                    log::error!("[{}] 序列化 namespace 还原响应失败: {e}", ctx.tag);
+                Err(_) => {
+                    log::error!("[{}] 序列化 namespace 还原响应失败: operation_failed", ctx.tag);
                     body_bytes
                 }
             }
@@ -1711,7 +1653,7 @@ async fn handle_codex_xai_native_responses_rewrite(
     builder
         .body(axum::body::Body::from(restored_bytes))
         .map_err(|e| {
-            log::error!("[{}] 构建 namespace 还原响应失败: {e}", ctx.tag);
+            log::error!("[{}] 构建 namespace 还原响应失败: operation_failed", ctx.tag);
             ProxyError::Internal(format!("Failed to build response: {e}"))
         })
 }
@@ -1844,7 +1786,7 @@ async fn handle_codex_chat_to_responses_transform(
             // 聚合也失败时：服务端日志只记录长度，并给客户端错误附带现场诊断（C7）
             chat_sse_to_response_value(&body_str).map_err(|e| {
                 log::error!(
-                    "[Codex] SSE 聚合兜底失败: {e}, body_bytes={}",
+                    "[Codex] SSE 聚合兜底失败: response_aggregation_failed, body_bytes={}",
                     body_bytes.len()
                 );
                 aggregate_fallback_error(e, &response_headers, &body_str)
@@ -1852,7 +1794,7 @@ async fn handle_codex_chat_to_responses_transform(
         }
         Err(e) => {
             log::error!(
-                "[Codex] 解析 Chat 上游响应失败: {e}, body_bytes={}",
+                "[Codex] 解析 Chat 上游响应失败: response_parse_failed, body_bytes={}",
                 body_bytes.len()
             );
             return Err(upstream_body_parse_error(
@@ -1868,7 +1810,7 @@ async fn handle_codex_chat_to_responses_transform(
         &tool_context,
     )
     .map_err(|e| {
-        log::error!("[Codex] Chat → Responses 响应转换失败: {e}");
+        log::error!("[Codex] Chat → Responses 响应转换失败: response_transform_failed");
         e
     })?;
     state
@@ -1936,14 +1878,14 @@ async fn handle_codex_chat_to_responses_transform(
     );
 
     let response_body = serde_json::to_vec(&responses_response).map_err(|e| {
-        log::error!("[Codex] 序列化 Responses 响应失败: {e}");
+        log::error!("[Codex] 序列化 Responses 响应失败: operation_failed");
         ProxyError::TransformError(format!("Failed to serialize responses response: {e}"))
     })?;
 
     builder
         .body(axum::body::Body::from(response_body))
         .map_err(|e| {
-            log::error!("[Codex] 构建 Responses 响应失败: {e}");
+            log::error!("[Codex] 构建 Responses 响应失败: operation_failed");
             ProxyError::Internal(format!("Failed to build response: {e}"))
         })
 }
@@ -2003,13 +1945,15 @@ async fn handle_codex_anthropic_to_responses_transform(
         Err(_) if body_looks_like_sse(&body_str) => {
             log::warn!("[Codex] Upstream returned an unmarked Anthropic SSE body, falling back to aggregation");
             transform_codex_anthropic::anthropic_sse_to_message_value(&body_str).map_err(|e| {
-                log::error!("[Codex] Failed to aggregate Anthropic SSE body: {e}");
+                log::error!(
+                    "[Codex] Failed to aggregate Anthropic SSE body: response_aggregation_failed"
+                );
                 e
             })?
         }
         Err(e) => {
             log::error!(
-                "[Codex] Failed to parse Anthropic upstream response: {e}, body_bytes={}",
+                "[Codex] Failed to parse Anthropic upstream response: response_parse_failed, body_bytes={}",
                 body_bytes.len()
             );
             return Err(upstream_body_parse_error(
@@ -2041,7 +1985,7 @@ async fn handle_codex_anthropic_to_responses_transform(
             &codex_tool_context,
         )
         .map_err(|e| {
-            log::error!("[Codex] Failed to convert Anthropic response to Responses: {e}");
+            log::error!("[Codex] Failed to convert Anthropic response to Responses: response_transform_failed");
             e
         })?;
 
@@ -2100,14 +2044,14 @@ async fn handle_codex_anthropic_to_responses_transform(
     );
 
     let response_body = serde_json::to_vec(&responses_response).map_err(|e| {
-        log::error!("[Codex] Failed to serialize Responses response: {e}");
+        log::error!("[Codex] Failed to serialize Responses response: operation_failed");
         ProxyError::TransformError(format!("Failed to serialize responses response: {e}"))
     })?;
 
     builder
         .body(axum::body::Body::from(response_body))
         .map_err(|e| {
-            log::error!("[Codex] Failed to build Responses response: {e}");
+            log::error!("[Codex] Failed to build Responses response: operation_failed");
             ProxyError::Internal(format!("Failed to build response: {e}"))
         })
 }
@@ -2266,12 +2210,12 @@ async fn handle_codex_chat_error_response(
     );
 
     let body = serde_json::to_vec(&responses_error).map_err(|e| {
-        log::error!("[Codex] 序列化 Responses 错误体失败: {e}");
+        log::error!("[Codex] 序列化 Responses 错误体失败: operation_failed");
         ProxyError::TransformError(format!("Failed to serialize responses error: {e}"))
     })?;
 
     builder.body(axum::body::Body::from(body)).map_err(|e| {
-        log::error!("[Codex] 构建 Responses 错误响应失败: {e}");
+        log::error!("[Codex] 构建 Responses 错误响应失败: operation_failed");
         ProxyError::Internal(format!("Failed to build response: {e}"))
     })
 }
@@ -2308,7 +2252,7 @@ fn build_codex_proxy_error_response(
         return Ok(response);
     }
     let body = serde_json::to_vec(&body).map_err(|e| {
-        log::error!("[Codex] 序列化代理错误体失败: {e}");
+        log::error!("[Codex] 序列化代理错误体失败: operation_failed");
         ProxyError::Internal(format!("Failed to serialize proxy error: {e}"))
     })?;
 
@@ -2320,7 +2264,7 @@ fn build_codex_proxy_error_response(
         )
         .body(axum::body::Body::from(body))
         .map_err(|e| {
-            log::error!("[Codex] 构建代理错误响应失败: {e}");
+            log::error!("[Codex] 构建代理错误响应失败: operation_failed");
             ProxyError::Internal(format!("Failed to build proxy error response: {e}"))
         })
 }
@@ -2532,13 +2476,10 @@ pub async fn handle_gemini(
 ) -> Result<axum::response::Response, ProxyError> {
     let (parts, req_body) = request.into_parts();
     let method = parts.method.clone();
-    let headers = parts.headers;
+    let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
+    let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
     // GET 类只读端点（/v1beta/models、/v1beta/models/<model> 等）没有请求体，
     // 不能强制 parse 为 JSON —— 否则空 body 会被拒绝。
     let body: Value = if body_bytes.is_empty() {
@@ -3235,7 +3176,8 @@ async fn log_forward_error(
     use super::usage::logger::UsageLogger;
 
     let status_code = map_proxy_error_to_status(error);
-    let error_message = get_error_message(error);
+    // A1: persistence is content-free; get_error_message is caller-facing only.
+    let error_message = get_safe_error_message(error);
     let request_id = uuid::Uuid::new_v4().to_string();
 
     // #7818：错误行的写入同样要拿 Database 的阻塞锁并做磁盘 IO，
@@ -3260,12 +3202,12 @@ async fn log_forward_error(
             None,
         )
     });
-    if let Err(e) = write.await.unwrap_or_else(|e| {
+    if let Err(_e) = write.await.unwrap_or_else(|e| {
         Err(crate::error::AppError::Database(format!(
             "usage 记录任务失败: {e}"
         )))
     }) {
-        log::warn!("记录失败请求日志失败: {e}");
+        log::warn!("记录失败请求日志失败: usage_write_failed");
     }
 }
 
@@ -3333,12 +3275,12 @@ async fn log_usage(
             is_streaming,
         )
     });
-    if let Err(e) = write.await.unwrap_or_else(|e| {
+    if let Err(_e) = write.await.unwrap_or_else(|e| {
         Err(crate::error::AppError::Database(format!(
             "usage 记录任务失败: {e}"
         )))
     }) {
-        log::warn!("[USG-001] 记录使用量失败: {e}");
+        log::warn!("[USG-001] 记录使用量失败: usage_write_failed");
     }
 }
 

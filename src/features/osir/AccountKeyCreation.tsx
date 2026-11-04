@@ -22,7 +22,13 @@ export type AccountKeyCreationProps = {
   actionContainer?: HTMLElement | null;
 };
 type Group = { id: number; name?: string; status?: string };
-type Attempt = { pending: boolean; uncertain: boolean; revision: number };
+type Attempt = {
+  pending: boolean;
+  uncertain: boolean;
+  operationId?: string;
+  revision: number;
+};
+type CreationStatus = { operation_id: string | null };
 const idle: Attempt = { pending: false, uncertain: false, revision: 0 };
 // Component timeouts/unmounts cannot cancel native mutations. Keep admission
 // and reconciliation state across remounts for this renderer's auth generation.
@@ -69,9 +75,17 @@ export function AccountKeyCreation({
   );
   const busy = attempt.pending;
   const uncertain = attempt.uncertain;
-  const [checked, setChecked] = useState(false);
+  const [checkedOperation, setCheckedOperation] = useState<string>();
+  const checked =
+    !!attempt.operationId && checkedOperation === attempt.operationId;
   const [message, setMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [inspection, setInspection] = useState<{
+    generation: number;
+    state: "loading" | "ready" | "error";
+  }>({ generation, state: "loading" });
+  const inspectionReady =
+    inspection.generation === generation && inspection.state === "ready";
   const refreshPending = useRef(false);
   const context = useRef({
     generation,
@@ -93,11 +107,8 @@ export function AccountKeyCreation({
     callbacks.current.onBusy(busy || refreshing);
   }, [busy, refreshing, generation]);
   useEffect(() => {
-    setChecked(false);
-  }, [attempt.revision]);
-  useEffect(() => {
     context.current.operation++;
-    setChecked(false);
+    setCheckedOperation(undefined);
     setMessage("");
     setName("");
     setGroup("");
@@ -106,6 +117,35 @@ export function AccountKeyCreation({
     refreshPending.current = false;
     setRefreshing(false);
   }, [generation]);
+  useEffect(() => {
+    // Native admission, not renderer memory, is authoritative after restart or
+    // reauthorization. Reads never send a creation request or clear a record.
+    if (!canCreateKeys || attempt.pending) return;
+    let active = true;
+    setInspection({ generation, state: "loading" });
+    void Promise.resolve()
+      .then(() =>
+        invoke<CreationStatus>("osir_create_key", {
+          generation,
+          action: "inspect",
+        }),
+      )
+      .then((status) => {
+        if (!active) return;
+        updateAttempt(generation, {
+          uncertain: status.operation_id !== null,
+          operationId: status.operation_id ?? undefined,
+        });
+        setCheckedOperation(undefined);
+        setInspection({ generation, state: "ready" });
+      })
+      .catch(() => {
+        if (active) setInspection({ generation, state: "error" });
+      });
+    return () => {
+      active = false;
+    };
+  }, [generation, canCreateKeys, attempt.pending]);
   const available =
     groups.data?.generation === generation
       ? groups.data.data.filter(
@@ -140,6 +180,7 @@ export function AccountKeyCreation({
     const existing = attempts.get(generation) ?? idle;
     if (
       !valid ||
+      !inspectionReady ||
       !canCreateKeys ||
       groups.isFetching ||
       groups.isError ||
@@ -155,11 +196,15 @@ export function AccountKeyCreation({
       context.current.generation === started &&
       context.current.operation === operation;
     updateAttempt(started, { pending: true, uncertain: false });
+    setCheckedOperation(undefined);
     setMessage("");
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     const execute = async () => {
       try {
-        return await invoke<CreatedKeyMetadata>("osir_create_key", {
+        const result = await invoke<
+          CreatedKeyMetadata & { operation_id: string }
+        >("osir_create_key", {
           request: {
             name: cleanName,
             group_id: Number(group),
@@ -168,6 +213,16 @@ export function AccountKeyCreation({
           },
           generation: started,
         });
+        // Do not acknowledge late/unmounted results. Retain durable uncertainty
+        // until this renderer receives a timely success or the user reviews it.
+        if (current() && !timedOut) {
+          await invoke<CreationStatus>("osir_create_key", {
+            generation: started,
+            action: "received",
+            operationId: result.operation_id,
+          });
+        }
+        return result;
       } finally {
         // Also runs for synchronous bridge failures. Timeout never releases
         // this lock; only completion of the actual native invocation does.
@@ -178,11 +233,14 @@ export function AccountKeyCreation({
       const result = await Promise.race([
         execute(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("timeout")), 30_000);
+          timer = setTimeout(() => {
+            timedOut = true;
+            reject(new Error("timeout"));
+          }, 30_000);
         }),
       ]);
       if (!current()) return;
-      updateAttempt(started, { uncertain: false });
+      updateAttempt(started, { uncertain: false, operationId: undefined });
       // Explicit projection prevents extra IPC fields from reaching callbacks.
       const {
         id,
@@ -209,7 +267,7 @@ export function AccountKeyCreation({
     } catch {
       if (current()) {
         updateAttempt(started, { uncertain: true });
-        setChecked(false);
+        setCheckedOperation(undefined);
         setMessage("创建结果未确认，请先刷新密钥列表并核对，避免重复创建。");
       }
     } finally {
@@ -230,18 +288,69 @@ export function AccountKeyCreation({
       context.current.operation === operation &&
       (attempts.get(started) ?? idle).revision === revision &&
       !(attempts.get(started) ?? idle).pending;
-    setChecked(false);
+    setCheckedOperation(undefined);
     try {
+      const status = await invoke<CreationStatus>("osir_create_key", {
+        generation: started,
+        action: "inspect",
+      });
+      if (!current()) return;
       const result = await keys.refetch();
       if (!current()) return;
       if (result.isError || result.data?.generation !== started)
         throw new Error("unavailable");
-      setChecked(true);
-      setMessage("密钥列表已刷新，请在密钥列表核对是否已经创建。");
+      updateAttempt(started, {
+        uncertain: status.operation_id !== null,
+        operationId: status.operation_id ?? undefined,
+      });
+      setInspection({ generation: started, state: "ready" });
+      setCheckedOperation(status.operation_id ?? undefined);
+      setMessage(
+        "密钥列表已刷新。请核对全部相关密钥，必要时到网站查看；当前列表不能保证覆盖全部结果。",
+      );
     } catch {
       if (current()) setMessage("密钥列表刷新失败，请稍后重新刷新核对。");
     } finally {
       if (context.current.active && context.current.generation === started) {
+        refreshPending.current = false;
+        setRefreshing(false);
+      }
+    }
+  }
+  async function acknowledge() {
+    const existing = attempts.get(generation) ?? idle;
+    if (
+      existing.pending ||
+      refreshPending.current ||
+      !checked ||
+      !existing.operationId
+    )
+      return;
+    refreshPending.current = true;
+    setRefreshing(true);
+    const started = generation;
+    const operation = context.current.operation;
+    const current = () =>
+      context.current.active &&
+      context.current.generation === started &&
+      context.current.operation === operation;
+    try {
+      await invoke<CreationStatus>("osir_create_key", {
+        generation: started,
+        action: "reviewed",
+        operationId: existing.operationId,
+      });
+      if (!current()) return;
+      updateAttempt(started, { uncertain: false, operationId: undefined });
+      setCheckedOperation(undefined);
+      setMessage("已解除创建限制。如需新密钥，请重新点击创建密钥。");
+    } catch {
+      if (current()) {
+        setCheckedOperation(undefined);
+        setMessage("创建限制解除结果未确认，请重新刷新并核对。");
+      }
+    } finally {
+      if (current()) {
         refreshPending.current = false;
         setRefreshing(false);
       }
@@ -258,7 +367,13 @@ export function AccountKeyCreation({
       type="button"
       className="primary"
       disabled={
-        busy || uncertain || !valid || groups.isFetching || groups.isError
+        busy ||
+        uncertain ||
+        refreshing ||
+        !inspectionReady ||
+        !valid ||
+        groups.isFetching ||
+        groups.isError
       }
       onClick={() => void create()}
     >
@@ -267,6 +382,22 @@ export function AccountKeyCreation({
   );
   return (
     <div className="osir-form" role="group" aria-label="创建账户密钥">
+      {!inspectionReady && !busy && (
+        <p role={inspection.state === "error" ? "alert" : "status"}>
+          {inspection.state === "error"
+            ? "上次创建状态读取失败，请刷新状态后再创建。"
+            : "正在核对上次创建状态…"}
+          {inspection.state === "error" && (
+            <button
+              type="button"
+              disabled={refreshing}
+              onClick={() => void refreshKeys()}
+            >
+              刷新创建状态
+            </button>
+          )}
+        </p>
+      )}
       <label>
         密钥名称
         <input
@@ -365,6 +496,9 @@ export function AccountKeyCreation({
       )}
       {uncertain && (
         <div>
+          <p className="osir-muted">
+            请核对密钥列表或网站。解除限制不会撤销已创建的密钥；再次创建可能产生重复密钥。
+          </p>
           <button
             type="button"
             disabled={busy || refreshing || keys.isFetching}
@@ -375,19 +509,9 @@ export function AccountKeyCreation({
           <button
             type="button"
             disabled={busy || refreshing || !checked || keys.isFetching}
-            onClick={() => {
-              if (
-                (attempts.get(generation) ?? idle).pending ||
-                refreshPending.current ||
-                !checked
-              )
-                return;
-              updateAttempt(generation, { uncertain: false });
-              setMessage("");
-              setChecked(false);
-            }}
+            onClick={() => void acknowledge()}
           >
-            已核对未创建，重新创建
+            已核对结果，解除限制
           </button>
         </div>
       )}
