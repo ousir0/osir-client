@@ -10,11 +10,11 @@ assert not db.exists(),'Preexisting app data: refusing to use it'
 feed=json.load(urllib.request.urlopen('https://osirclaw.com/api/v1/osir-client/updater/prod.json'))
 assert feed['version']==expected
 archive=root/'old.tar.gz'
-subprocess.run(['curl','--fail','--max-time','240','--output',str(archive),'https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.5/OSIR-Client-prod-0.1.5-x86_64-apple-darwin.app.tar.gz'],check=True)
-assert hashlib.sha256(archive.read_bytes()).hexdigest()=='95864c57d5716d5091dd706383849eaf1a0f3053f0fb856adae4c8b9618d1144'
+subprocess.run(['curl','--fail','--max-time','240','--output',str(archive),'https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.6/OSIR-Client-prod-0.1.6-x86_64-apple-darwin.app.tar.gz'],check=True)
+assert hashlib.sha256(archive.read_bytes()).hexdigest()=='16ee433b9bc293b7b6109687fa5e86ab162b05753143f795544bd76d76665d7a'
 subprocess.run(['tar','-xzf',str(archive),'-C',str(root)],check=True)
 app=root/'OSIR Client.app';binary=app/'Contents/MacOS/osir_client'
-assert hashlib.sha256(binary.read_bytes()).hexdigest()=='d1e9691a6f65dc2e1c211e3a26ed3a8d282649035b2e599595f5c79671334c94'
+assert hashlib.sha256(binary.read_bytes()).hexdigest()=='fce1c7f261c1c58996eae8538c96c22234a84b8028ed547906387bd3c9a6a976'
 subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True)
 helper=root/'click'
 subprocess.run(['swiftc',str(Path(__file__).with_name('osir-updater-click.swift')),'-o',str(helper)],check=True)
@@ -37,7 +37,7 @@ try:
  with sqlite3.connect(db) as conn:
   assert conn.execute('pragma quick_check').fetchone()==('ok',)
   conn.execute('create table osir_updater_acceptance(value text not null)')
-  conn.execute("insert into osir_updater_acceptance values('015-to-016-preserved')")
+  conn.execute("insert into osir_updater_acceptance values('016-to-017-preserved')")
   conn.execute("insert into providers(id,app_type,name,settings_config,meta,sort_index) values(?,?,?,?,?,?)",('updater-fixture','codex','更新验收供应商','{"model":"fixture-model"}','{}',42))
   conn.commit()
  process=subprocess.Popen([str(binary)],stdout=log,stderr=log)
@@ -54,9 +54,11 @@ try:
  subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True)
  with sqlite3.connect(db) as conn:
   assert conn.execute('pragma quick_check').fetchone()==('ok',)
-  assert conn.execute('pragma user_version').fetchone()==(24,)
+  assert conn.execute('pragma user_version').fetchone()==(25,)
+  assert "enabled_dsh" in {row[1] for row in conn.execute("pragma table_info(mcp_servers)")}
+  assert "enabled_dsh" in {row[1] for row in conn.execute("pragma table_info(skills)")}
   assert conn.execute("select count(*) from sqlite_master where type='table' and name='osir_model_credentials'").fetchone()==(1,)
-  assert conn.execute('select value from osir_updater_acceptance').fetchall()==[('015-to-016-preserved',)]
+  assert conn.execute('select value from osir_updater_acceptance').fetchall()==[('016-to-017-preserved',)]
   assert conn.execute("select name,settings_config,meta,sort_index,is_current from providers where id='updater-fixture' and app_type='codex'").fetchone()==('更新验收供应商','{"model":"fixture-model"}','{}',42,0)
  time.sleep(5)
  probe=root/'window-probe'
@@ -65,7 +67,7 @@ try:
  assert window['bundlePath']==str(app) and window['windows'],'Updated application has no visible product window'
  (out/'updated-window.json').write_text(json.dumps(window,indent=2))
  subprocess.run(['screencapture','-x',str(out/'updated.png')],check=True)
- (out/'result.json').write_text(json.dumps(dict(passed=True,fromVersion='0.1.5',toVersion=expected,oldPid=process.pid,newPid=new_pid,installedSha256=executable_sha,realUiClick=True,automaticRestart=True,syntheticDataPreserved=True,accountAuthorizationCovered=False),indent=2))
+ (out/'result.json').write_text(json.dumps(dict(passed=True,fromVersion='0.1.6',toVersion=expected,oldPid=process.pid,newPid=new_pid,installedSha256=executable_sha,realUiClick=True,automaticRestart=True,syntheticDataPreserved=True,accountAuthorizationCovered=False),indent=2))
 finally:
  if process.poll() is None:process.terminate();process.wait(15)
  if 'new_pid' in locals() and new_pid is not None:os.kill(new_pid,15)

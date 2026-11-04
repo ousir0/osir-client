@@ -12,19 +12,19 @@ if(Get-Process osir_client -ErrorAction SilentlyContinue){throw 'Preexisting OSI
 $feed=Invoke-RestMethod 'https://osirclaw.com/api/v1/osir-client/updater/prod.json'
 if($feed.version -ne $ExpectedVersion){throw 'Published update differs from expected release'}
 $baseline=Join-Path $root 'baseline.exe'
-& curl.exe --fail --max-time 240 --output $baseline 'https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.5/OSIR-Client-prod-0.1.5-x86_64-pc-windows-msvc-setup.exe'
-if($LASTEXITCODE -ne 0 -or (Get-FileHash $baseline -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'cd64621061e84f112573236694bf7ead2bb8f87b51d4443d133c51ca13ceb22b'){throw 'Baseline installer verification failed'}
+& curl.exe --fail --max-time 240 --output $baseline 'https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.6/OSIR-Client-prod-0.1.6-x86_64-pc-windows-msvc-setup.exe'
+if($LASTEXITCODE -ne 0 -or (Get-FileHash $baseline -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'b29a605f174f1eea73bcc0214ac0048d10b22304c93ec8bc6c3412a97990e8f4'){throw 'Baseline installer verification failed'}
 $p=Start-Process $baseline -ArgumentList ('/S /D='+$install) -Wait -PassThru
 if($p.ExitCode -ne 0){throw 'Baseline installation failed'}
 $exe=Join-Path $install 'osir_client.exe'
-if((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne '1836f134c0a3444b54b2f92eb01eda56ddf3ba8f04ebd68eda36e282ee0626e1'){throw 'Baseline executable verification failed'}
+if((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd827ace21a85a6ab4204364cd62e061282e8d437b7723b1d1e5a0cfeeb5feca8'){throw 'Baseline executable verification failed'}
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
 $key=[Microsoft.Win32.Registry]::LocalMachine.CreateSubKey('SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments')
 $owned=@()
 try{
  foreach($id in @('osir_client.exe','com.osir.client')){if($null -ne $key.GetValue($id)){throw 'Existing debug policy'};$key.SetValue($id,"--remote-debugging-port=$port --remote-debugging-address=127.0.0.1");$owned+=$id}
  $p=Start-Process $exe -PassThru
- & node "$PSScriptRoot/osir-live-updater-check.mjs" $port prepare $out '0.1.5'
+ & node "$PSScriptRoot/osir-live-updater-check.mjs" $port prepare $out '0.1.6'
  if($LASTEXITCODE -ne 0){throw 'Baseline renderer failed'}
  Stop-Process -Id $p.Id
  $p.WaitForExit()
@@ -33,14 +33,14 @@ import sqlite3,sys
 with sqlite3.connect(sys.argv[1]) as db:
  assert db.execute('pragma quick_check').fetchone()==('ok',)
  db.execute('create table osir_updater_acceptance(value text not null)')
- db.execute("insert into osir_updater_acceptance values('015-to-016-preserved')")
+ db.execute("insert into osir_updater_acceptance values('016-to-017-preserved')")
  db.execute("insert into providers(id,app_type,name,settings_config,meta,sort_index) values(?,?,?,?,?,?)",('updater-fixture','codex','更新验收供应商','{"model":"fixture-model"}','{}',42))
  db.commit()
 '@ | Set-Content (Join-Path $root 'prepare.py') -Encoding utf8NoBOM
  & python (Join-Path $root 'prepare.py') $db
  if($LASTEXITCODE -ne 0){throw 'Fixture preparation failed'}
  $p=Start-Process $exe -PassThru
- & node "$PSScriptRoot/osir-live-updater-check.mjs" $port update $out '0.1.5'
+ & node "$PSScriptRoot/osir-live-updater-check.mjs" $port update $out '0.1.6'
  if($LASTEXITCODE -ne 0){throw 'Real update click failed'}
  $deadline=[DateTime]::UtcNow.AddMinutes(10)
  $next=$null
@@ -60,14 +60,16 @@ with sqlite3.connect(sys.argv[1]) as db:
 import sqlite3,sys
 with sqlite3.connect(sys.argv[1]) as db:
  assert db.execute('pragma quick_check').fetchone()==('ok',)
- assert db.execute('pragma user_version').fetchone()==(24,)
+ assert db.execute('pragma user_version').fetchone()==(25,)
+ assert "enabled_dsh" in {row[1] for row in db.execute("pragma table_info(mcp_servers)")}
+ assert "enabled_dsh" in {row[1] for row in db.execute("pragma table_info(skills)")}
  assert db.execute("select count(*) from sqlite_master where type='table' and name='osir_model_credentials'").fetchone()==(1,)
- assert db.execute('select value from osir_updater_acceptance').fetchall()==[('015-to-016-preserved',)]
+ assert db.execute('select value from osir_updater_acceptance').fetchall()==[('016-to-017-preserved',)]
  assert db.execute("select name,settings_config,meta,sort_index,is_current from providers where id='updater-fixture' and app_type='codex'").fetchone()==('更新验收供应商','{"model":"fixture-model"}','{}',42,0)
 '@ | Set-Content (Join-Path $root 'verify.py') -Encoding utf8NoBOM
  & python (Join-Path $root 'verify.py') $db
  if($LASTEXITCODE -ne 0){throw 'Updated data not preserved'}
- @{passed=$true;fromVersion='0.1.5';toVersion=$ExpectedVersion;oldPid=$p.Id;newPid=$next.Id;installedSha256=$ExpectedExecutableSha256;realUiClick=$true;automaticRestart=$true;syntheticDataPreserved=$true;accountAuthorizationCovered=$false;scope='ephemeral-Windows-runner-published-updater'} | ConvertTo-Json | Set-Content (Join-Path $out 'result.json') -Encoding utf8NoBOM
+ @{passed=$true;fromVersion='0.1.6';toVersion=$ExpectedVersion;oldPid=$p.Id;newPid=$next.Id;installedSha256=$ExpectedExecutableSha256;realUiClick=$true;automaticRestart=$true;syntheticDataPreserved=$true;accountAuthorizationCovered=$false;scope='ephemeral-Windows-runner-published-updater'} | ConvertTo-Json | Set-Content (Join-Path $out 'result.json') -Encoding utf8NoBOM
 }finally{
  foreach($id in $owned){$key.DeleteValue($id,$false)};$key.Dispose()
  Get-Process osir_client -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $exe} | Stop-Process
