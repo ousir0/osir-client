@@ -94,6 +94,7 @@ test("resume accepts only a matching pre-publication failure after upload", (t) 
   writeJson("upload-result.json", {
     release_id: plan.release_id,
     immutable: true,
+    object_storage_verified: true,
     uploaded: new Set(plan.artifacts.map(({ file_name }) => file_name)).size,
   });
   const steps = [
@@ -163,6 +164,17 @@ test("resume accepts only a matching pre-publication failure after upload", (t) 
     remoteScriptSha256,
   );
   const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+  const upload = JSON.parse(
+    readFileSync(join(directory, "upload-result.json"), "utf8"),
+  );
+  const legacyUpload = { ...upload };
+  delete legacyUpload.object_storage_verified;
+  writeJson("upload-result.json", legacyUpload);
+  assert.throws(
+    () => verifyResumeReceipt(receiptPath, spec, plan),
+    /object-storage/,
+  );
+  writeJson("upload-result.json", upload);
   const registered = JSON.parse(
     readFileSync(join(directory, "register.json"), "utf8"),
   );

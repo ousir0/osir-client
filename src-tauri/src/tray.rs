@@ -2661,8 +2661,8 @@ fn update_problem_indicator(app: &tauri::AppHandle, texts: &TrayTexts, problems:
     let handle = app.clone();
     // Keep the replacement image and its template flag in the same AppKit
     // turn. Separate queued calls can paint a black image on a dark menu bar.
-    if let Err(error) = app.run_on_main_thread(move || {
-        let Some(tray) = handle.tray_by_id(TRAY_ID) else {
+    if let Err(error) = crate::tray_dispatch::with_tray(app, move |tray| {
+        let Some(tray) = tray else {
             return;
         };
         let previous = lock(&APPLIED_INDICATOR).clone();
@@ -2744,10 +2744,14 @@ pub fn refresh_tray_menu(app: &tauri::AppHandle) {
         if crate::tray_panel::uses_native_menu() {
             match create_tray_menu(app, state.inner()) {
                 Ok(new_menu) => {
-                    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-                        if let Err(e) = tray.set_menu(Some(new_menu)) {
-                            log::error!("刷新托盘菜单失败: {e}");
+                    if let Err(error) = crate::tray_dispatch::with_tray(app, move |tray| {
+                        if let Some(tray) = tray {
+                            if let Err(e) = tray.set_menu(Some(new_menu)) {
+                                log::error!("刷新托盘菜单失败: {e}");
+                            }
                         }
+                    }) {
+                        log::error!("刷新托盘菜单调度失败: {error}");
                     }
                 }
                 Err(e) => log::error!("创建托盘菜单失败: {e}"),
@@ -2763,19 +2767,23 @@ pub fn refresh_tray_menu(app: &tauri::AppHandle) {
 /// 换成原生菜单时挂上重建的菜单、收起面板；换成面板时摘掉菜单（`refresh_tray_menu` 只更新图标状态）。
 pub fn apply_tray_style(app: &tauri::AppHandle) {
     let native = crate::tray_panel::uses_native_menu();
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        if native {
-            crate::tray_panel::hide_panel(app);
-        } else {
+    if native {
+        crate::tray_panel::hide_panel(app);
+    } else {
+        lock(&TRAY_SECTION_SUBMENUS).clear();
+    }
+    if let Err(error) = crate::tray_dispatch::with_tray(app, move |tray| {
+        let Some(tray) = tray else { return };
+        if !native {
             if let Err(e) = tray.set_menu(None::<Menu<tauri::Wry>>) {
                 log::error!("摘掉托盘菜单失败: {e}");
             }
-            // 菜单没了，旧句柄不再更新标题。
-            lock(&TRAY_SECTION_SUBMENUS).clear();
         }
         if let Err(e) = tray.set_show_menu_on_left_click(native_menu_on_left_click(native)) {
             log::warn!("设置托盘左键行为失败: {e}");
         }
+    }) {
+        log::warn!("切换托盘样式调度失败: {error}");
     }
     refresh_tray_menu(app);
 }
@@ -2935,8 +2943,12 @@ pub fn show_main_window(app: &tauri::AppHandle) {
         if let Err(error) = app.show() {
             log::warn!("[Window] 激活应用失败: {error}");
         }
-        if let Some(tray) = app.tray_by_id(TRAY_ID) {
-            let _ = tray.set_visible(true);
+        if let Err(error) = crate::tray_dispatch::with_tray(app, |tray| {
+            if let Some(tray) = tray {
+                let _ = tray.set_visible(true);
+            }
+        }) {
+            log::warn!("显示托盘图标调度失败: {error}");
         }
     }
     if let Some(window) = app.get_webview_window("main") {

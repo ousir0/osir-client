@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "连接方式调整为“原生配置 / API 密钥”：原生配置只加载本机既有配置并显示来源，API 密钥保留账户密钥和自定义服务管理。增强配置切换与恢复，更新前等待当前请求完成，等待超时可重试。修复部分 TOML 配置编辑卡住的问题，减少错误日志中的敏感内容；增加创建密钥中断后的结果核对，并加强本地数据库与备份保护。"
+  "notes": "修复 macOS 菜单栏操作可能导致的闪退。保留现有供应商、模型与工具配置，继续支持从分组获取并添加 gpt-6.2-astra、gpt-6.2-sol；云端同步修正安全策略拒绝的错误分类，避免误暂停账号调度。上游明确拒绝的请求仍会返回真实原因。"
 }

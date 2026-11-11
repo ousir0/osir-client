@@ -53,6 +53,7 @@ mod startup;
 mod store;
 
 mod tray;
+mod tray_dispatch;
 mod tray_panel;
 mod update_distribution;
 mod usage_events;
@@ -345,16 +346,28 @@ async fn update_tray_menu(
     if !tray_panel::uses_native_menu() {
         // 用托盘面板、不挂原生菜单：更新图标状态，通知开着的面板重新取数据。
         tray::refresh_tray_menu(&app);
-        return Ok(app.tray_by_id(tray::TRAY_ID).is_some());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tray_dispatch::with_tray(&app, move |tray| {
+            let _ = tx.send(tray.is_some());
+        })
+        .map_err(|e| format!("更新托盘菜单失败: {e}"))?;
+        return rx.await.map_err(|_| "更新托盘菜单未完成".to_string());
     }
     match tray::create_tray_menu(&app, state.inner()) {
         Ok(new_menu) => {
-            if let Some(tray) = app.tray_by_id(tray::TRAY_ID) {
-                tray.set_menu(Some(new_menu))
-                    .map_err(|e| format!("更新托盘菜单失败: {e}"))?;
-                return Ok(true);
-            }
-            Ok(false)
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            tray_dispatch::with_tray(&app, move |tray| {
+                let result = match tray {
+                    Some(tray) => tray
+                        .set_menu(Some(new_menu))
+                        .map(|_| true)
+                        .map_err(|e| format!("更新托盘菜单失败: {e}")),
+                    None => Ok(false),
+                };
+                let _ = tx.send(result);
+            })
+            .map_err(|e| format!("更新托盘菜单失败: {e}"))?;
+            rx.await.map_err(|_| "更新托盘菜单未完成".to_string())?
         }
         Err(err) => {
             log::error!("创建托盘菜单失败: {err}");
@@ -2199,15 +2212,23 @@ fn cleanup_before_system_exit(app_handle: &tauri::AppHandle) {
 ///
 /// 通过 `set_visible(false)` 走 `WM_USER_HIDE_TRAYICON` 消息路径，
 /// 触发 tray-icon 内部的 `remove_tray_icon` → `Shell_NotifyIconW(NIM_DELETE)`，
-/// 在进程结束前干净地把图标摘掉。其它平台 `set_visible(false)` 也是
-/// 正常的隐藏/移除语义，作为跨平台兜底也安全。
+/// 在进程结束前干净地把图标摘掉。查找、隐藏及释放句柄全部在主线程完成；
+/// 等待确认后才能退出，否则事件循环可能还没处理排队的移除操作。
 pub(crate) fn remove_tray_icon_before_exit(app_handle: &tauri::AppHandle) {
-    if let Some(tray) = app_handle.tray_by_id(tray::TRAY_ID) {
-        if let Err(e) = tray.set_visible(false) {
-            log::warn!("退出时移除托盘图标失败: {e}");
-        } else {
-            log::info!("已显式从系统托盘移除图标");
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    if let Err(error) = tray_dispatch::with_tray(app_handle, move |tray| {
+        if let Some(tray) = tray {
+            if let Err(e) = tray.set_visible(false) {
+                log::warn!("退出时移除托盘图标失败: {e}");
+            } else {
+                log::info!("已显式从系统托盘移除图标");
+            }
         }
+        let _ = tx.send(());
+    }) {
+        log::warn!("退出时托盘清理调度失败: {error}");
+    } else if rx.recv_timeout(std::time::Duration::from_secs(2)).is_err() {
+        log::warn!("退出时等待托盘清理超时");
     }
 }
 
@@ -2504,8 +2525,8 @@ pub fn destroy_single_instance_lock(app_handle: &tauri::AppHandle) {
 /// 窗口状态、代理/Live 恢复（调用方）；托盘图标、single-instance 锁（本函数）。
 ///
 /// 有意不调 `AppHandle::cleanup_before_exit()`：它会在调用线程上 Drop 托盘
-/// 图标，而 macOS 的 NSStatusItem 操作要求主线程；`set_visible(false)` 走
-/// `run_item_main_thread` 代理，跨线程安全（见 `remove_tray_icon_before_exit`）。
+/// 图标，而 macOS 的 NSStatusItem 操作要求主线程；显式托盘清理包含句柄的
+/// 查找和释放（见 `remove_tray_icon_before_exit`）。
 pub fn restart_process(app_handle: &tauri::AppHandle) -> ! {
     remove_tray_icon_before_exit(app_handle);
     destroy_single_instance_lock(app_handle);

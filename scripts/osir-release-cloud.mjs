@@ -200,6 +200,7 @@ export function loadOperatorConfig(path) {
     ops: "osir_client_release_ops.py",
     remote: "osir_client_release_remote.py",
     upload: "osir_client_artifacts.py",
+    storage: "osir_client_storage.py",
   })) {
     const file = ordinaryFile(
       join(serverCheckout, "tools", name),
@@ -849,6 +850,7 @@ export async function runCloudRelease(
             ).size,
             immutable: true,
             reused: true,
+            object_storage_verified: true,
             previous_receipt_sha256: resumeReceiptSha256,
           };
           writeJson(join(runDirectory, "upload-result.json"), uploaded);
@@ -878,6 +880,7 @@ export async function runCloudRelease(
         requireThat(
           uploaded?.release_id === plan.release_id &&
             uploaded.immutable === true &&
+            uploaded.object_storage_verified === true &&
             uploaded.uploaded ===
               new Set(plan.artifacts.map((artifact) => artifact.file_name))
                 .size,

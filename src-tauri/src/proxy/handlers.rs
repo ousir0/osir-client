@@ -4402,7 +4402,7 @@ wire_api = "responses"
                         if id == "a" && failing.load(Ordering::SeqCst) {
                             (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error":{"message":"fixture unavailable"}})))
                         } else {
-                            (StatusCode::OK, Json(json!({"id":id,"object":"response","model":"shared","output":[]})))
+                            (StatusCode::OK, Json(json!({"id":id,"object":"response","model":body["model"],"output":[]})))
                         }
                     }
                 }
@@ -4416,7 +4416,7 @@ wire_api = "responses"
                 json!({
                     "auth": {"OPENAI_API_KEY":format!("fixture-key-{id}")},
                     "config":format!("model_provider = \"custom\"\nmodel = \"shared\"\n[model_providers.custom]\nname = \"custom\"\nbase_url = \"{base}\"\nwire_api = \"responses\"\n"),
-                    "modelCatalog": {"models":[{"model":"shared"}]},
+                    "modelCatalog": {"models":[{"model":"shared"},{"model":"gpt-6.2-astra"},{"model":"gpt-6.2-sol"}]},
                 }),
                 None,
             );
@@ -4438,7 +4438,14 @@ wire_api = "responses"
         config.auto_failover_enabled = true;
         config.max_retries = 3;
         state.db.update_proxy_config_for_app(config).await.unwrap();
-        for (model, expected) in [("ccs-a/shared", "a"), ("ccs-b/shared", "b")] {
+        for (model, expected) in [
+            ("ccs-a/shared", "a"),
+            ("ccs-b/shared", "b"),
+            ("ccs-a/gpt-6.2-astra", "a"),
+            ("ccs-b/gpt-6.2-astra", "b"),
+            ("ccs-a/gpt-6.2-sol", "a"),
+            ("ccs-b/gpt-6.2-sol", "b"),
+        ] {
             let response = tokio::time::timeout(
                 std::time::Duration::from_secs(5),
                 handle_responses(State(state.clone()), post("/v1/responses", model)),
@@ -4449,12 +4456,16 @@ wire_api = "responses"
             let (status, body) = json_of(response).await;
             assert_eq!(status, StatusCode::OK);
             assert_eq!(body["id"], expected);
+            assert_eq!(body["model"], model.split_once('/').unwrap().1);
         }
         for (calls, id) in upstreams.iter().zip(["a", "b"]) {
-            assert_eq!(
-                *calls.lock().await,
-                vec![json!({"model":"shared","authorization":format!("Bearer fixture-key-{id}")})]
-            );
+            let expected_calls = ["shared", "gpt-6.2-astra", "gpt-6.2-sol"]
+                .into_iter()
+                .map(|model| {
+                    json!({"model":model,"authorization":format!("Bearer fixture-key-{id}")})
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(*calls.lock().await, expected_calls);
             calls.lock().await.clear();
         }
         failing.store(true, Ordering::SeqCst);

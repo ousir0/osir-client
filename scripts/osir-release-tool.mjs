@@ -232,6 +232,11 @@ export function verifyResumeReceipt(path, spec, plan) {
   assert.equal(upload.release_id, plan.release_id);
   assert.equal(upload.immutable, true);
   assert.equal(
+    upload.object_storage_verified,
+    true,
+    "Resume requires a verified object-storage upload; legacy server-only receipts cannot resume.",
+  );
+  assert.equal(
     upload.uploaded,
     new Set(plan.artifacts.map(({ file_name }) => file_name)).size,
   );

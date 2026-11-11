@@ -163,7 +163,7 @@ test("cloud bytes are backed up, independently signed, sealed and restored witho
     false,
   );
   for (const { options } of f.requests) {
-    assert.equal(options.redirect, "error");
+    assert.equal(options.redirect, "manual");
     assert.equal(Object.hasOwn(options.headers, "authorization"), false);
   }
   const restored = restoreRelease({

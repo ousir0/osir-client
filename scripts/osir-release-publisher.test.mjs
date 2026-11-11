@@ -172,7 +172,7 @@ test("public verification receipt binds raw service metadata and full artifact b
   writeFileSync(path, raw);
   const fetchImpl = async (url, options) => {
     assert.equal(options.headers.authorization, undefined);
-    assert.equal(options.redirect, "error");
+    assert.equal(options.redirect, "manual");
     return artifactReply(plan.artifacts.find((item) => item.url === url));
   };
   const receipt = await verifyPublicReleaseArtifacts(plan, {
