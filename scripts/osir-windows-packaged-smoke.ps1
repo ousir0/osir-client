@@ -468,10 +468,10 @@ try {
 
     $stage = 'crossVersionUpgrade'
     $baselineInstaller = $env:OSIR_UPGRADE_BASELINE
-    Assert-Smoke ($manifest.version -eq '0.1.8') 'This acceptance requires target 0.1.8.'
-    Assert-Smoke ((Get-Hash $baselineInstaller) -eq '3c419f776bd890cd7101ae9bf252e4892eb47601d5043242e2c0fe8e8855a6a0') 'Published 0.1.7 installer differs from the pinned baseline.'
+    Assert-Smoke ($manifest.version -eq '0.1.9') 'This acceptance requires target 0.1.9.'
+    Assert-Smoke ((Get-Hash $baselineInstaller) -eq '644c20ec43233f9eca8c53cc62bb4f8a9f65e94071796e1dde7f64d16b89b382') 'Published 0.1.8 installer differs from the pinned baseline.'
     Invoke-Installer $baselineInstaller ("/S /D=" + $installDir)
-    Assert-Smoke ((Get-Hash $mainExe) -eq 'e781489c52608fdb76cdcbb4ed9b5874a06ee783e82da140257771b58691e350') 'Installed 0.1.7 executable differs from the published baseline.'
+    Assert-Smoke ((Get-Hash $mainExe) -eq '16c303d495ad7c420d3daf6b31cd610555e0479854593ee0c88a72fcbde096ed') 'Installed 0.1.8 executable differs from the published baseline.'
     $ownedLaunch = Start-Isolated $mainExe
     $deadline = [DateTime]::UtcNow.AddSeconds($LaunchSeconds)
     do {
@@ -595,9 +595,9 @@ print('Published baseline database preserved')
     & python $upgradeFixture verify (Join-Path $isolatedToolHome '.osir_client/osir_client.db')
     Assert-Smoke ($LASTEXITCODE -eq 0) 'Cross-version installer upgrade lost the synthetic baseline row.'
     $report.stages.crossVersionUpgrade = [ordered]@{
-        passed = $true; fromVersion = '0.1.7'; toVersion = '0.1.8'
+        passed = $true; fromVersion = '0.1.8'; toVersion = '0.1.9'
         kind = 'published-installer-to-new-installer-UPDATE-isolated-home'
-        baselineInstallerSha256 = '3c419f776bd890cd7101ae9bf252e4892eb47601d5043242e2c0fe8e8855a6a0'
+        baselineInstallerSha256 = '644c20ec43233f9eca8c53cc62bb4f8a9f65e94071796e1dde7f64d16b89b382'
         baselineWindowObserved = $true; newRendererAndNativeIpcPassed = $true
         databaseQuickCheck = $true; syntheticRowPreserved = $true
         updaterDownloadAndRestartCovered = $false

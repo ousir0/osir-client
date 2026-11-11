@@ -3,7 +3,7 @@ import hashlib,json,os,plistlib,sqlite3,subprocess,sys,time,urllib.request
 from pathlib import Path
 assert sys.platform=='darwin' and os.environ.get('GITHUB_ACTIONS')=='true'
 expected, executable_sha=sys.argv[1:]
-assert expected=='0.1.8' and len(executable_sha)==64 and all(c in '0123456789abcdef' for c in executable_sha),'Exact 0.1.8 target identity required'
+assert expected=='0.1.9' and len(executable_sha)==64 and all(c in '0123456789abcdef' for c in executable_sha),'Exact 0.1.9 target identity required'
 root=Path(os.environ['RUNNER_TEMP'])/'osir-live-update';root.mkdir()
 out=Path(os.environ['GITHUB_WORKSPACE'])/'updater-evidence';out.mkdir()
 db=Path.home()/'.osir_client/osir_client.db'
@@ -11,12 +11,12 @@ assert not db.exists(),'Preexisting app data: refusing to use it'
 feed=json.load(urllib.request.urlopen('https://osirclaw.com/api/v1/osir-client/updater/prod.json'))
 assert feed['version']==expected
 archive=root/'old.tar.gz'
-subprocess.run(['curl','--fail','--max-time','240','--output',str(archive),'https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.7/OSIR-Client-prod-0.1.7-x86_64-apple-darwin.app.tar.gz'],check=True)
-assert archive.stat().st_size==20951268
-assert hashlib.sha256(archive.read_bytes()).hexdigest()=='6757050218eb4320c744c70a56a2c48cda3636ec37314379d33801f06921cfe4'
+subprocess.run([sys.executable,str(Path(__file__).with_name('osir-download-approved-baseline.py')),'darwin-x86_64',str(archive)],check=True)
+assert archive.stat().st_size==21043942
+assert hashlib.sha256(archive.read_bytes()).hexdigest()=='928203d32218b5bfd3c687f8fbf6a54f10de105d5a848b84f2e687badef4c581'
 subprocess.run(['tar','-xzf',str(archive),'-C',str(root)],check=True)
 app=root/'OSIR Client.app';binary=app/'Contents/MacOS/osir_client'
-assert hashlib.sha256(binary.read_bytes()).hexdigest()=='2024de5983ffead7ef370e1db6f96232ae25d3fb275af597e76e91a5b44525f8'
+assert hashlib.sha256(binary.read_bytes()).hexdigest()=='737421b89e62e797aa0b6a8351f8938f8e27d20c29b77b3a2632aea4e053d98e'
 subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True)
 helper=root/'click'
 subprocess.run(['swiftc',str(Path(__file__).with_name('osir-updater-click.swift')),'-o',str(helper)],check=True)
@@ -39,7 +39,7 @@ try:
  with sqlite3.connect(db) as conn:
   assert conn.execute('pragma quick_check').fetchone()==('ok',)
   conn.execute('create table osir_updater_acceptance(value text not null)')
-  conn.execute("insert into osir_updater_acceptance values('017-to-018-preserved')")
+  conn.execute("insert into osir_updater_acceptance values('018-to-019-preserved')")
   conn.execute("insert into providers(id,app_type,name,settings_config,meta,sort_index) values(?,?,?,?,?,?)",('updater-fixture','codex','更新验收供应商','{"model":"fixture-model"}','{}',42))
   conn.commit()
  process=subprocess.Popen([str(binary)],stdout=log,stderr=log)
@@ -60,7 +60,7 @@ try:
   assert "enabled_dsh" in {row[1] for row in conn.execute("pragma table_info(mcp_servers)")}
   assert "enabled_dsh" in {row[1] for row in conn.execute("pragma table_info(skills)")}
   assert conn.execute("select count(*) from sqlite_master where type='table' and name='osir_model_credentials'").fetchone()==(1,)
-  assert conn.execute('select value from osir_updater_acceptance').fetchall()==[('017-to-018-preserved',)]
+  assert conn.execute('select value from osir_updater_acceptance').fetchall()==[('018-to-019-preserved',)]
   assert conn.execute("select name,settings_config,meta,sort_index,is_current from providers where id='updater-fixture' and app_type='codex'").fetchone()==('更新验收供应商','{"model":"fixture-model"}','{}',42,0)
  time.sleep(5)
  probe=root/'window-probe'
@@ -69,7 +69,7 @@ try:
  assert window['bundlePath']==str(app) and window['windows'],'Updated application has no visible product window'
  (out/'updated-window.json').write_text(json.dumps(window,indent=2))
  subprocess.run(['screencapture','-x',str(out/'updated.png')],check=True)
- (out/'result.json').write_text(json.dumps(dict(passed=True,fromVersion='0.1.7',toVersion=expected,oldPid=process.pid,newPid=new_pid,installedSha256=executable_sha,realUiClick=True,automaticRestart=True,syntheticDataPreserved=True,accountAuthorizationCovered=False),indent=2))
+ (out/'result.json').write_text(json.dumps(dict(passed=True,fromVersion='0.1.8',toVersion=expected,oldPid=process.pid,newPid=new_pid,installedSha256=executable_sha,realUiClick=True,automaticRestart=True,syntheticDataPreserved=True,accountAuthorizationCovered=False),indent=2))
 finally:
  if process.poll() is None:process.terminate();process.wait(15)
  if 'new_pid' in locals() and new_pid is not None:os.kill(new_pid,15)
