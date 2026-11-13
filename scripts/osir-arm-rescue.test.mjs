@@ -43,6 +43,8 @@ test('workflow keeps separate checkouts, original gates, single Cargo, failure c
   assert.match(workflow, /path: control/);
   assert.match(workflow, /path: source/);
   assert.match(workflow, /cache-on-failure: true/);
+  assert.match(workflow, /OSIR_RESCUE_EVIDENCE: \$\{\{ github.workspace \}\}\/osir-arm-rescue-evidence/);
+  assert.doesNotMatch(workflow, /\$\{\{ runner.temp \}\}/);
   assert.match(workflow, /CARGO_BUILD_JOBS: '1'/);
   assert.doesNotMatch(workflow, /\brg\b|GITHUB_SHA:|continue-on-error|git push|workflow run|--local-unsigned/);
   for (const step of ['preflight', 'check', 'build', 'output', 'smoke', 'accept'])

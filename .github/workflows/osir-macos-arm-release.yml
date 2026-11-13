@@ -34,7 +34,7 @@ jobs:
       OSIR_SOURCE_SHA256: ${{ inputs.source_sha256 }}
       OSIR_RESCUE_SOURCE_COMMIT: ${{ inputs.source_commit }}
       OSIR_RESCUE_SOURCE: ${{ github.workspace }}/source
-      OSIR_RESCUE_EVIDENCE: ${{ runner.temp }}/osir-arm-rescue-evidence
+      OSIR_RESCUE_EVIDENCE: ${{ github.workspace }}/osir-arm-rescue-evidence
       CARGO_TARGET_DIR: ${{ github.workspace }}/source/src-tauri/target
       CARGO_BUILD_JOBS: '1'
       CARGO_INCREMENTAL: '0'
