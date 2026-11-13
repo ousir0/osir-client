@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Native Intel CI lifecycle evidence. All app data belongs to a temporary home.
+// Native macOS CI lifecycle evidence. All app data belongs to a temporary home.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -17,9 +17,13 @@ import {
 import { join, resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import {
+  ciTarget,
+  assertNativeCiHost,
+  assertMacCiManifest,
+} from "./osir-ci-artifact.mjs";
 
 assert.equal(process.platform, "darwin");
-assert.equal(process.arch, "x64");
 assert.equal(process.env.GITHUB_ACTIONS, "true");
 assert.equal(process.env.CI, "true");
 const directory = resolve(process.argv[2] || "");
@@ -30,7 +34,9 @@ assert.ok(
 );
 const manifestPath = join(directory, "build-manifest.json");
 const manifest = JSON.parse(readFileSync(manifestPath));
-assert.equal(manifest.target, "x86_64-apple-darwin");
+assertNativeCiHost(manifest.target);
+assertMacCiManifest(manifest, process.env.OSIR_CHANNEL, manifest.target);
+const target = ciTarget(manifest.target);
 assert.equal(
   manifest.sourceProvenance.sourceSha256,
   process.env.OSIR_SOURCE_SHA256,
@@ -48,9 +54,9 @@ function run(command, args, timeout = 15000) {
   return result.stdout.trim();
 }
 run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app]);
-assert.equal(run("/usr/bin/lipo", ["-archs", binary]), "x86_64");
+assert.equal(run("/usr/bin/lipo", ["-archs", binary]), target.binaryArch);
 const temporary = mkdtempSync(
-  join(process.env.RUNNER_TEMP, "osir-intel-smoke-"),
+  join(process.env.RUNNER_TEMP, `osir-${target.arch}-smoke-`),
 );
 const home = join(temporary, "isolated-home");
 mkdirSync(home, { mode: 0o700 });
@@ -234,11 +240,11 @@ try {
       name,
       sha256: digest(join(directory, name)),
       bytes: lstatSync(join(directory, name)).size,
-      scope: "native-intel-window-launch-reopen-no-renderer-ipc",
+      scope: target.smokeScope,
     };
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
   }
 }
 console.log(
-  "Native Intel app launch, product window, reopen and owned-process cleanup passed.",
+  `Native ${target.arch} app launch, product window, reopen and owned-process cleanup passed.`,
 );

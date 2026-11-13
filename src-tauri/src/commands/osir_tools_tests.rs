@@ -270,3 +270,33 @@ fn launch_response_reports_runtime_separately_from_request_acceptance() {
         serde_json::json!({"isolated": true, "alreadyRunning": false, "runtimeStatus": "unavailable", "foreground": true, "exitCode": null, "restarted": false})
     );
 }
+
+#[test]
+fn anywhere_codex_metadata_serializes_only_the_non_secret_allowlist() {
+    let cli = cli_result(
+        "codex",
+        false,
+        Ok(output(
+            true,
+            "codex-cli 1.2.3\nsecret-sentinel-key",
+            "secret-sentinel-token",
+        )),
+    );
+    let encoded = serde_json::to_value(OsirAnywhereCodexStatus {
+        configured: Some(true),
+        config_root: Some("/fixture/.codex".into()),
+        connection_mode: "direct",
+        proxy_running: None,
+        cli_status: cli.status,
+        cli_version: cli.version,
+    })
+    .unwrap();
+    assert_eq!(
+        encoded,
+        serde_json::json!({
+            "configured": true, "configRoot": "/fixture/.codex", "connectionMode": "direct",
+            "proxyRunning": null, "cliStatus": "installed", "cliVersion": "1.2.3"
+        })
+    );
+    assert!(!encoded.to_string().contains("secret-sentinel"));
+}

@@ -3,6 +3,86 @@ use serde_json::json;
 use std::os::unix::fs::symlink;
 
 #[tokio::test]
+#[ignore = "requires a local OSIR Anywhere app; does not launch it"]
+async fn anywhere_installed_app_acceptance() {
+    let expected = std::env::var_os("OSIR_ANYWHERE_ACCEPTANCE_APP")
+        .map(PathBuf::from)
+        .expect("set OSIR_ANYWHERE_ACCEPTANCE_APP to the expected installed bundle");
+    let expected = std::fs::canonicalize(expected).expect("installed application exists");
+    let detected = detect("osir-anywhere").await;
+    assert!(
+        detected.installed,
+        "local detection failed: {:?}",
+        detected.error
+    );
+    assert_eq!(
+        detected.path.as_deref().map(Path::new),
+        Some(expected.as_path())
+    );
+    assert_eq!(
+        checked_launch_path("osir-anywhere").await.unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn anywhere_manifest_requires_the_standalone_osir_identity() {
+    let manifest = anywhere_manifest().expect("valid checked-in manifest");
+    assert_eq!(manifest.product_id, "osir-anywhere");
+    assert_eq!(manifest.display_name, "OSIR Anywhere");
+    assert_eq!(manifest.bundle_display_name, "OSIR Anywhere");
+    assert_eq!(manifest.distribution, "osir_standalone");
+    assert_eq!(manifest.bundle_name, "OSIR Anywhere.app");
+    assert_eq!(manifest.bundle_id, "com.osir.anywhere.desktop");
+    assert!(!manifest.install_enabled);
+    assert!(manifest.download_url.is_none());
+    assert_eq!(
+        candidate_paths(
+            "osir-anywhere",
+            &[
+                PathBuf::from("/Users/fixture/Applications"),
+                PathBuf::from("/Applications")
+            ]
+        ),
+        vec![
+            PathBuf::from("/Users/fixture/Applications/OSIR Anywhere.app"),
+            PathBuf::from("/Applications/OSIR Anywhere.app")
+        ]
+    );
+}
+
+#[tokio::test]
+async fn anywhere_detection_accepts_only_the_standalone_bundle_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let valid = bundle(
+        root.path(),
+        "OSIR Anywhere.app",
+        "com.osir.anywhere.desktop",
+    );
+    let detected = detect_candidates("osir-anywhere", &[valid]).await;
+    assert!(detected.installed);
+    assert_eq!(detected.version.as_deref(), Some("5.5.6"));
+
+    let upstream = bundle(
+        root.path(),
+        "Agents Anywhere.app",
+        "dev.agentsanywhere.workbench",
+    );
+    assert!(
+        !detect_candidates("osir-anywhere", &[upstream])
+            .await
+            .installed
+    );
+
+    let wrong_identity = bundle(root.path(), "OSIR Anywhere.app", "com.example.lookalike");
+    assert!(
+        !detect_candidates("osir-anywhere", &[wrong_identity])
+            .await
+            .installed
+    );
+}
+
+#[tokio::test]
 async fn cold_desktop_launch_waits_for_registration_and_retries_refused_activation() {
     use std::cell::Cell;
     let polls = Cell::new(0);
@@ -731,4 +811,39 @@ async fn native_subprocess_deadline_is_enforced_without_launching_any_tool() {
     .await
     .is_err());
     assert!(start.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn anywhere_open_gate_rejects_overlap_without_blocking_other_tools() {
+    let gate = desktop_action_guard("osir-anywhere").unwrap();
+    assert!(desktop_action_guard("osir-anywhere").is_err());
+    assert!(desktop_action_guard("claude-desktop").is_ok());
+    drop(gate);
+    assert!(desktop_action_guard("osir-anywhere").is_ok());
+}
+
+#[tokio::test]
+async fn anywhere_broken_executable_keeps_identity_evidence_but_is_not_launchable() {
+    let root = tempfile::tempdir().unwrap();
+    let path = bundle(
+        root.path(),
+        "OSIR Anywhere.app",
+        "com.osir.anywhere.desktop",
+    );
+    std::fs::remove_dir_all(path.join("Contents/MacOS")).unwrap();
+    let record = detect_candidates("osir-anywhere", &[path]).await;
+    assert!(record.installed);
+    assert_eq!(record.status, ToolStatus::Error);
+    assert!(record.path.is_none());
+}
+
+#[tokio::test]
+async fn anywhere_detection_rejects_symlinked_application() {
+    let root = tempfile::tempdir().unwrap();
+    let real = bundle(root.path(), "Real.app", "com.osir.anywhere.desktop");
+    let link = root.path().join("OSIR Anywhere.app");
+    symlink(real, &link).unwrap();
+    let record = detect_candidates("osir-anywhere", &[link]).await;
+    assert_ne!(record.status, ToolStatus::Installed);
+    assert!(record.path.is_none());
 }

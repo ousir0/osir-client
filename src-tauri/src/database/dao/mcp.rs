@@ -137,10 +137,26 @@ impl Database {
 
     fn write_mcp_server(&self, server: &McpServer, replace: bool) -> Result<bool, AppError> {
         let conn = lock_conn!(self.conn);
-        let sql = format!("INSERT OR {} INTO mcp_servers (
+        // UPDATE only the columns this build manages. REPLACE would reset
+        // newer clients' enablement flags and any other unowned columns.
+        let conflict = if replace {
+            "ON CONFLICT(id) DO UPDATE SET
+             name=excluded.name, server_config=excluded.server_config,
+             description=excluded.description, homepage=excluded.homepage,
+             docs=excluded.docs, tags=excluded.tags, enabled_claude=excluded.enabled_claude,
+             enabled_codex=excluded.enabled_codex, enabled_gemini=excluded.enabled_gemini,
+             enabled_grokbuild=excluded.enabled_grokbuild, enabled_opencode=excluded.enabled_opencode,
+             enabled_hermes=excluded.enabled_hermes, enabled_mcode=excluded.enabled_mcode,
+             enabled_pi=excluded.enabled_pi, enabled_agy=excluded.enabled_agy,
+             enabled_kimi=excluded.enabled_kimi, enabled_omp=excluded.enabled_omp,
+             enabled_dsh=excluded.enabled_dsh"
+        } else {
+            "ON CONFLICT(id) DO NOTHING"
+        };
+        let sql = format!("INSERT INTO mcp_servers (
                 id, name, server_config, description, homepage, docs, tags,
                 enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes, enabled_mcode, enabled_pi, enabled_agy, enabled_kimi, enabled_omp, enabled_dsh
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)", if replace { "REPLACE" } else { "IGNORE" });
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19) {conflict}");
         let changed = conn
             .execute(
                 &sql,
@@ -323,5 +339,24 @@ mod tests {
             .expect("server exists");
         assert!(returned.apps.pi);
         assert!(db.get_all_mcp_servers().unwrap()["shared-server"].apps.pi);
+    }
+
+    #[test]
+    fn saving_mcp_preserves_newer_clients_columns() {
+        let db = Database::memory().expect("create memory db");
+        let server = test_server();
+        db.save_mcp_server(&server).expect("insert server");
+        db.conn.lock().unwrap().execute(
+            "UPDATE mcp_servers SET enabled_copilot=1,enabled_workbuddy=1 WHERE id='shared-server'",
+            [],
+        ).expect("set newer-client flags");
+        db.save_mcp_server(&server).expect("update server");
+        let conn = db.conn.lock().unwrap();
+        let flags: (i64, i64) = conn.query_row(
+            "SELECT enabled_copilot,enabled_workbuddy FROM mcp_servers WHERE id='shared-server'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).expect("read flags");
+        assert_eq!(flags, (1, 1));
     }
 }

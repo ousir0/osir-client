@@ -27,6 +27,47 @@
   border-radius: var(--osir-radius);
   overflow: hidden;
 }
+.osir-anywhere-product {
+  margin-bottom: 10px;
+}
+.osir-anywhere-product-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 0 16px 13px 68px;
+  margin: 0;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.osir-anywhere-product-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.osir-anywhere-local-config {
+  padding: 0 16px 13px 68px;
+  color: var(--osir-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.osir-anywhere-local-config summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.osir-anywhere-local-config summary:focus-visible {
+  outline: 2px solid var(--osir-accent-strong);
+  outline-offset: 3px;
+}
+.osir-anywhere-local-config p {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+.osir-anywhere-product .osir-supported-tool-row {
+  flex-wrap: wrap;
+}
+.osir-anywhere-product .osir-tools-state {
+  white-space: normal;
+}
 .osir-supported-tool-row {
   display: flex;
   align-items: center;

@@ -367,8 +367,13 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
     // Download leaves existing traffic untouched. Once bytes are ready, pause
     // admission and wait for complete response bodies before replacing files.
     let _ = app.emit("update-install-phase", "waiting");
-    let state = app.state::<crate::store::AppState>();
-    let _admission = state.proxy_service.prepare_restart().await?;
+    // Recovery mode returns before AppState/proxy creation. Updating from
+    // that screen must also work when there is no running proxy to drain.
+    let _admission = if let Some(state) = app.try_state::<crate::store::AppState>() {
+        Some(state.proxy_service.prepare_restart().await?)
+    } else {
+        None
+    };
     let _ = app.emit("update-install-phase", "installing");
     log::info!("开始安装应用更新: {}", update.version);
 
@@ -408,9 +413,7 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
 
 /// 检查是否有可用的应用更新，返回可用的新版本号（无更新时返回 None）。
 ///
-/// 数据库版本过新的恢复界面用它判断：升级应用能否解决问题。若返回 None，说明
-/// 已是最新版本，但数据库仍不兼容（通常由第三方客户端或更高版本创建），应提示用户
-/// 升级无法解决，而不是让其反复尝试。
+/// 恢复界面据此提供更新入口；无可用更新不代表后续版本无法支持该数据库。
 #[tauri::command]
 pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>, String> {
     crate::update_distribution::ensure_update_available(app.config())?;

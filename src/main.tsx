@@ -147,7 +147,7 @@ async function bootstrap() {
         <React.StrictMode>
           <FrontendErrorBoundary>
             <ThemeProvider defaultTheme="system" storageKey={themeStorageKey}>
-              <DatabaseUpgrade payload={initError} />
+              <DatabaseUpgrade payload={initError} osir={osir} />
               <Toaster />
             </ThemeProvider>
           </FrontendErrorBoundary>

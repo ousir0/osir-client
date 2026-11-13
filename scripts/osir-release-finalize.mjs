@@ -56,6 +56,21 @@ const digest = (path) => {
     bytes: value.size_bytes,
   };
 };
+export function macNativeAcceptance(target, reportRecord) {
+  ensure(
+    ["aarch64-apple-darwin", "x86_64-apple-darwin"].includes(target),
+    "Unsupported native Mac acceptance target.",
+  );
+  return {
+    path: reportRecord.name,
+    sha256: reportRecord.sha256,
+    bytes: reportRecord.bytes,
+    scope:
+      target === "aarch64-apple-darwin"
+        ? "native-arm64-ci-before-local-signing"
+        : "native-intel-ci-before-local-signing",
+  };
+}
 export function peMachine(path) {
   const data = readFileSync(path);
   ensure(
@@ -442,12 +457,7 @@ export async function finalize({ input, output, channel, target }) {
       });
     }
     metadata.packagedMacScreenshots = screenshots;
-    metadata.nativeAcceptance = {
-      path: reportRecord.name,
-      sha256: reportRecord.sha256,
-      bytes: reportRecord.bytes,
-      scope: "native-intel-ci-before-local-signing",
-    };
+    metadata.nativeAcceptance = macNativeAcceptance(target, reportRecord);
   }
   if (!windows)
     Object.assign(

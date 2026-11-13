@@ -14,6 +14,96 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { sourceSnapshot, gitProvenance } from "./osir-build.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const targets = {
+  "x86_64-pc-windows-msvc": {
+    platform: "win32",
+    arch: "x64",
+    binaryArch: "x86_64",
+  },
+  "x86_64-apple-darwin": {
+    platform: "darwin",
+    arch: "x64",
+    binaryArch: "x86_64",
+    smokeScope: "native-intel-window-launch-reopen-no-renderer-ipc",
+  },
+  "aarch64-apple-darwin": {
+    platform: "darwin",
+    arch: "arm64",
+    binaryArch: "arm64",
+    smokeScope: "native-arm64-window-launch-reopen-no-renderer-ipc",
+  },
+};
+
+export function ciTarget(target) {
+  assert.ok(Object.hasOwn(targets, target), "Unsupported CI target");
+  return targets[target];
+}
+
+export function assertNativeCiHost(target, host = process) {
+  const expected = ciTarget(target);
+  assert.equal(
+    host.platform,
+    expected.platform,
+    "Native target platform required",
+  );
+  assert.equal(host.arch, expected.arch, "Native target architecture required");
+}
+
+export function assertMacCiManifest(manifest, channel, target) {
+  const expected = ciTarget(target);
+  assert.equal(expected.platform, "darwin");
+  assert.ok(["prod", "beta"].includes(channel));
+  assert.equal(manifest.channel, channel);
+  assert.equal(manifest.target, target);
+  assert.equal(manifest.mode, "ci-pending-local-finalization");
+  assert.equal(manifest.signing, "ad-hoc-pending-local");
+  assert.equal(manifest.codeSignatureVerified, true);
+  assert.equal(manifest.distributionSignatureVerified, false);
+  assert.equal(manifest.updaterEnabled, true);
+  assert.equal(manifest.updaterRuntimeConfigured, true);
+  assert.equal(manifest.embeddedUpdaterPublicConfigVerified, true);
+  assert.equal(manifest.updaterSignature, "pending-local");
+  assert.deepEqual(manifest.architectures, [expected.binaryArch]);
+}
+
+export function assertMacCiSmokeReport(
+  report,
+  manifest,
+  { executableSha256, appPath },
+) {
+  const expected = ciTarget(manifest.target);
+  assert.equal(expected.platform, "darwin");
+  assert.equal(report.passed, true, "Mac packaged lifecycle did not pass");
+  assert.equal(report.target, manifest.target);
+  assert.equal(report.version, manifest.version);
+  assert.equal(report.sourceSha256, manifest.sourceProvenance.sourceSha256);
+  assert.equal(report.gitHead, manifest.sourceProvenance.git.head);
+  assert.equal(report.executableSha256, executableSha256);
+  assert.equal(report.hostArchitecture, expected.arch);
+  assert.equal(report.isolatedHome, true);
+  assert.equal(report.productionDataBlocked, true);
+  assert.equal(report.productionSocketBlocked, true);
+  assert.equal(report.rendererAndNativeIpcCovered, false);
+  assert.equal(manifest.packagedMacAcceptance.scope, expected.smokeScope);
+  assert.deepEqual(
+    report.stages.map(({ phase }) => phase),
+    ["launch", "reopen"],
+  );
+  for (const stage of report.stages) {
+    for (const key of [
+      "passed",
+      "windowObserved",
+      "remainedRunning",
+      "isolatedDatabaseCreated",
+      "stoppedOnlyVerifiedPid",
+    ])
+      assert.equal(stage[key], true, `Incomplete Mac ${stage.phase}: ${key}`);
+    assert.equal(stage.observation.bundleIdentifier, manifest.identifier);
+    assert.equal(stage.observation.bundlePath, appPath);
+    assert.deepEqual(stage.observation.otherInstancePids, []);
+  }
+}
+
 function json(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -53,8 +143,7 @@ function expectedSource() {
   );
   return { ...snapshot.provenance, git };
 }
-function validateProvenance(manifest) {
-  const source = expectedSource();
+export function assertCiProvenance(manifest, source) {
   assert.equal(manifest.sourceProvenance.verifiedAtEnd, true);
   assert.equal(manifest.sourceProvenance.sourceSha256, source.sourceSha256);
   assert.equal(
@@ -64,6 +153,42 @@ function validateProvenance(manifest) {
   assert.equal(manifest.sourceProvenance.git.head, source.git.head);
   assert.equal(manifest.sourceProvenance.git.dirtyAtStart, false);
   assert.equal(manifest.sourceProvenance.git.dirty, false);
+}
+
+function validateProvenance(manifest) {
+  assertCiProvenance(manifest, expectedSource());
+}
+
+export function acceptMacSmoke(directory, channel, target) {
+  directory = artifactDirectory(directory);
+  const manifest = json(join(directory, "build-manifest.json"));
+  assertMacCiManifest(manifest, channel, target);
+  validateProvenance(manifest);
+  const apps = readdirSync(directory).filter((name) => name.endsWith(".app"));
+  assert.equal(apps.length, 1);
+  const appPath = join(directory, apps[0]);
+  const reportPath = join(directory, "macos-packaged-smoke.json");
+  const { scope, ...record } = manifest.packagedMacAcceptance ?? {};
+  assert.deepEqual(
+    record,
+    digest(reportPath),
+    "Mac acceptance report bytes differ",
+  );
+  const report = json(reportPath);
+  assertMacCiSmokeReport(report, manifest, {
+    executableSha256: digest(join(appPath, "Contents/MacOS/osir_client"))
+      .sha256,
+    appPath,
+  });
+  for (const stage of report.stages) {
+    if (!stage.screenshot) continue;
+    assert.equal(stage.screenshot.name, `macos-${stage.phase}-window.png`);
+    assert.deepEqual(
+      stage.screenshot,
+      digest(join(directory, stage.screenshot.name)),
+    );
+  }
+  return directory;
 }
 function artifactDirectory(path) {
   const directory = resolve(path);
@@ -181,7 +306,7 @@ export function acceptWindowsSmoke(directory) {
 function main() {
   const [command, channel, target] = process.argv.slice(2);
   assert.ok(["prod", "beta"].includes(channel));
-  assert.ok(["x86_64-pc-windows-msvc", "x86_64-apple-darwin"].includes(target));
+  ciTarget(target);
   if (command === "preflight") {
     const source = expectedSource();
     const pkg = json(join(root, "package.json"));
@@ -189,11 +314,7 @@ function main() {
       process.versions.node,
       readFileSync(join(root, ".node-version"), "utf8").trim(),
     );
-    assert.equal(process.arch, "x64", "Native x64 runner required");
-    assert.equal(
-      process.platform,
-      target.includes("windows") ? "win32" : "darwin",
-    );
+    assertNativeCiHost(target);
     const rust = readFileSync(join(root, "rust-toolchain.toml"), "utf8").match(
       /^channel\s*=\s*"(\d+\.\d+(?:\.\d+)?)"/m,
     )?.[1];
@@ -203,6 +324,18 @@ function main() {
     output("sourceSha256", source.sourceSha256);
     if (process.env.GITHUB_ENV)
       appendFileSync(process.env.GITHUB_ENV, `RUSTUP_TOOLCHAIN=${rust}\n`);
+    return;
+  }
+  if (command === "accept-mac") {
+    const parent = join(root, "release/osir", channel, "pending-macos", target);
+    const outputs = readdirSync(parent, { withFileTypes: true }).filter(
+      (entry) => entry.isDirectory(),
+    );
+    assert.equal(outputs.length, 1, "Expected one output on a fresh CI runner");
+    output(
+      "directory",
+      acceptMacSmoke(join(parent, outputs[0].name), channel, target),
+    );
     return;
   }
   if (command === "windows-output" || command === "accept-windows") {
@@ -218,7 +351,7 @@ function main() {
     return;
   }
   assert.equal(command, "mac-output", "Unknown CI metadata command");
-  assert.equal(target, "x86_64-apple-darwin");
+  assert.equal(ciTarget(target).platform, "darwin");
   const parent = join(root, "release/osir", channel, "pending-macos", target);
   const outputs = readdirSync(parent, { withFileTypes: true }).filter((entry) =>
     entry.isDirectory(),
@@ -227,15 +360,7 @@ function main() {
   const directory = artifactDirectory(join(parent, outputs[0].name));
   const manifest = json(join(directory, "build-manifest.json"));
   validateProvenance(manifest);
-  assert.equal(manifest.channel, channel);
-  assert.equal(manifest.mode, "ci-pending-local-finalization");
-  assert.equal(manifest.signing, "ad-hoc-pending-local");
-  assert.equal(manifest.distributionSignatureVerified, false);
-  assert.equal(manifest.updaterEnabled, true);
-  assert.equal(manifest.updaterRuntimeConfigured, true);
-  assert.equal(manifest.embeddedUpdaterPublicConfigVerified, true);
-  assert.equal(manifest.updaterSignature, "pending-local");
-  assert.deepEqual(manifest.architectures, ["x86_64"]);
+  assertMacCiManifest(manifest, channel, target);
   const apps = readdirSync(directory).filter((name) => name.endsWith(".app"));
   assert.equal(apps.length, 1);
   output("directory", directory);

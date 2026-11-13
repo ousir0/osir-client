@@ -1,5 +1,7 @@
 //! Windows metadata and fixed-source policy. Pure policy tests never launch apps.
 use serde::Deserialize;
+#[path = "osir_tools_windows_anywhere.rs"]
+mod anywhere;
 
 use crate::services::osir::windows_codex_package::{
     PACKAGE_FAMILY, PACKAGE_IDENTITY as CODEX_PACKAGE, PACKAGE_PUBLISHER as CODEX_PUBLISHER,
@@ -106,6 +108,8 @@ impl Installation {
             {
                 return Err("无法确认官方 Codex Desktop 安装身份".into());
             }
+        } else if id == "osir-anywhere" {
+            anywhere::validate(self)?;
         } else if id != "claude-desktop"
             || !relative.eq_ignore_ascii_case("Claude.exe")
             || !self.publisher.to_ascii_lowercase().contains("anthropic")
@@ -237,6 +241,7 @@ pub(crate) async fn discover(id: &str) -> Result<Vec<Installation>, String> {
     let script = match id {
         "codex" => CODEX_DISCOVERY,
         "claude-desktop" => CLAUDE_DISCOVERY,
+        "osir-anywhere" => anywhere::DISCOVERY,
         _ => return Err("此 Windows 桌面应用尚未接入检测与控制".into()),
     };
     let json = powershell(script, DISCOVERY_BUDGET).await?;

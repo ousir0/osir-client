@@ -169,7 +169,7 @@ jobs:
 
       - name: Verify provider switching, credential recovery and update ownership
         run: |
-          $filters = @('mode::controller', 'services::provider', 'services::osir::session', 'commands::osir::recovery::tests', 'dsh_', 'startup::tests', 'update_installation_rejects_overlap', 'proxy::server', 'services::proxy::tests', 'proxy::content_encoding::tests', 'a1_', 'migration_preflight', 'database_file_protection', 'complete_sql_export', 'services::osir::key_creation_state::tests', 'uncertain_create_after_restart_never_sends_a_second_post')
+          $filters = @('anywhere_', 'database::compatibility::tests', 'mode::controller', 'services::provider', 'services::osir::session', 'commands::osir::recovery::tests', 'dsh_', 'startup::tests', 'update_installation_rejects_overlap', 'proxy::server', 'services::proxy::tests', 'proxy::content_encoding::tests', 'a1_', 'migration_preflight', 'database_file_protection', 'complete_sql_export', 'services::osir::key_creation_state::tests', 'uncertain_create_after_restart_never_sends_a_second_post')
           foreach ($filter in $filters) {
             $result = cargo test --release --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml --lib $filter -- --test-threads=1 | Out-String
             $code = $LASTEXITCODE
@@ -417,6 +417,9 @@ jobs:
         env:
           OSIR_ARTIFACT_DIRECTORY: ${{ steps.packaged.outputs.directory }}
         run: node scripts/osir-macos-packaged-smoke.mjs "$OSIR_ARTIFACT_DIRECTORY"
+
+      - name: Accept native Intel lifecycle evidence bound to the exact executable
+        run: node scripts/osir-ci-artifact.mjs accept-mac "$OSIR_CHANNEL" x86_64-apple-darwin
 
       - name: Archive application preserving executable modes and symlinks
         if: always() && steps.packaged.outputs.directory != ''

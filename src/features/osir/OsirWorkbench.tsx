@@ -26,6 +26,7 @@ import {
   ChevronDown,
   Check,
   ReceiptText,
+  PanelsTopLeft,
 } from "lucide-react";
 import { providersApi, proxyApi } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -79,6 +80,8 @@ import {
   type AccountProfile,
 } from "./accountApi";
 import { AccountOverview, AccountOverviewTools } from "./AccountOverview";
+import { OsirAnywhereEntry, OsirAnywhereProduct } from "./OsirAnywhereProduct";
+import { OsirAnywhereProvider } from "./useOsirAnywhere";
 import { ToolLaunchButton } from "./ToolLaunchButton";
 import { ToolCloseButton } from "./ToolCloseButton";
 import {
@@ -130,6 +133,7 @@ import {
 type Page =
   | SupportedToolId
   | "overview"
+  | "anywhere"
   | "keys"
   | "subscriptions"
   | "usage"
@@ -145,6 +149,14 @@ type AccountAuthCapability = {
 const isTool = (s: Page): s is ToolId => TOOL_IDS.includes(s as ToolId);
 export const isDesktop = () => "__TAURI_INTERNALS__" in window;
 export default function OsirWorkbench() {
+  return (
+    <OsirAnywhereProvider desktop={isDesktop()}>
+      <OsirWorkbenchContent />
+    </OsirAnywhereProvider>
+  );
+}
+
+function OsirWorkbenchContent() {
   const [page, setPage] = useState<Page>("overview");
   const [usageGroup, setUsageGroup] = useState<number>();
   const [tab, setTab] = useState("models");
@@ -635,6 +647,14 @@ export default function OsirWorkbench() {
           >
             <LayoutDashboard size={18} />
             总览
+          </button>
+          <button
+            aria-current={page === "anywhere" ? "page" : undefined}
+            className={page === "anywhere" ? "selected" : ""}
+            onClick={() => go("anywhere")}
+          >
+            <PanelsTopLeft size={18} />
+            Anywhere
           </button>
           <p id="osir-nav-tools-label">工具</p>
           <div
@@ -1599,6 +1619,7 @@ export default function OsirWorkbench() {
                   </button>
                 </header>
                 <AccountOverview onNavigate={go} />
+                <OsirAnywhereEntry onDetails={() => go("anywhere")} />
                 <AccountOverviewTools
                   connections={overviewConnections}
                   onConfigure={(target) => {
@@ -1615,6 +1636,8 @@ export default function OsirWorkbench() {
                   onOpenImage={connected ? openImageConfiguration : undefined}
                 />
               </>
+            ) : page === "anywhere" ? (
+              <OsirAnywhereProduct />
             ) : page === "claude-desktop" ? (
               <OsirClaudeDesktop
                 desktop={desktop}

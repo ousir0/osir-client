@@ -15,7 +15,7 @@ use crate::live::residue;
 /// 旧 Bedrock API Key 预设把 Key 写在顶层 `apiKey`，Claude Code 读的是这个变量。
 const BEDROCK_BEARER_ENV: &str = "AWS_BEARER_TOKEN_BEDROCK";
 const AUTO_COMPACT_WINDOW_ENV: &str = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
-const DEFAULT_AUTO_COMPACT_WINDOW: u64 = 100_000;
+const DEFAULT_AUTO_COMPACT_WINDOW: u64 = 200_000;
 
 /// 一个供应商在 `settings.json` 里拥有的键。
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -73,10 +73,22 @@ impl ClaudeProjection {
             .iter()
             .any(|key| projection.env.contains_key(*key));
         if api_configured {
+            let default_window = projection
+                .exclusive
+                .get("CLAUDE_CODE_MAX_CONTEXT_TOKENS")
+                .and_then(|value| match value {
+                    Value::Number(number) => number.as_u64(),
+                    Value::String(text) => text.trim().parse().ok(),
+                    _ => None,
+                })
+                .filter(|window| *window > 0)
+                .map_or(DEFAULT_AUTO_COMPACT_WINDOW, |window| {
+                    window.min(DEFAULT_AUTO_COMPACT_WINDOW)
+                });
             projection
                 .exclusive
                 .entry(AUTO_COMPACT_WINDOW_ENV.to_string())
-                .or_insert_with(|| Value::String(DEFAULT_AUTO_COMPACT_WINDOW.to_string()));
+                .or_insert_with(|| Value::String(default_window.to_string()));
         }
         projection
     }
@@ -562,7 +574,7 @@ mod tests {
             Value::Object(projection.exclusive),
             json!({
                 "ENABLE_TOOL_SEARCH": "true",
-                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"
             })
         );
     }
@@ -572,7 +584,15 @@ mod tests {
         let default = ClaudeProjection::of(&json!({
             "env": { "ANTHROPIC_BASE_URL": "https://gateway.example" }
         }));
-        assert_eq!(default.exclusive[AUTO_COMPACT_WINDOW_ENV], json!("100000"));
+        assert_eq!(default.exclusive[AUTO_COMPACT_WINDOW_ENV], json!("200000"));
+
+        let smaller = ClaudeProjection::of(&json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": "https://gateway.example",
+                "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "128000"
+            }
+        }));
+        assert_eq!(smaller.exclusive[AUTO_COMPACT_WINDOW_ENV], json!("128000"));
 
         let custom = ClaudeProjection::of(&json!({
             "env": {
@@ -631,7 +651,7 @@ mod tests {
                     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
                     "API_TIMEOUT_MS": "300000",
                     "CLAUDE_CODE_DISABLE_ARTIFACT": "1",
-                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"
                 },
                 "hooks": { "Stop": [] }
             }))
@@ -754,7 +774,7 @@ mod tests {
                     "ANTHROPIC_BASE_URL": "https://new.example",
                     "API_TIMEOUT_MS": "300000",
                     "ENABLE_TOOL_SEARCH": "true",
-                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"
                 }
             })
         );
@@ -763,7 +783,7 @@ mod tests {
             json!({
                 "ANTHROPIC_BASE_URL": "https://new.example",
                 "ENABLE_TOOL_SEARCH": "true",
-                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "100000"
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"
             })
         );
     }

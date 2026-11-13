@@ -373,6 +373,37 @@ mockIPC(
   async (command, payload) => {
     const args = (payload ?? {}) as Record<string, unknown>;
     switch (command) {
+      case "osir_anywhere_detect": {
+        const absent =
+          new URLSearchParams(location.search).get("anywhere") === "absent";
+        return {
+          status: absent ? "not_installed" : "installed",
+          installed: !absent,
+          version: absent ? null : "2.1.0",
+          path: absent ? null : "/synthetic/Applications/OSIR Anywhere.app",
+          runtimeStatus: "stopped",
+          error: null,
+        };
+      }
+      case "osir_anywhere_release":
+        return {
+          status: "ready",
+          version: "2.2.0",
+          platform: "darwin",
+          arch: "universal",
+          size: 170000000,
+          systemSignature: "unsigned",
+          error: null,
+        };
+      case "osir_anywhere_install_status":
+        return {
+          phase: "idle",
+          downloadedBytes: 0,
+          totalBytes: null,
+          error: null,
+        };
+      case "osir_anywhere_codex_status":
+        return { state: "unavailable", model: null, models: [], error: null };
       case "osir_account_session":
         return session;
       case "osir_client_telemetry_status":

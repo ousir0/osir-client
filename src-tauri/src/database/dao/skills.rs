@@ -121,11 +121,22 @@ impl Database {
     pub fn save_skill(&self, skill: &InstalledSkill) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         conn.execute(
-            "INSERT OR REPLACE INTO skills
+            "INSERT INTO skills
              (id, name, description, directory, repo_owner, repo_name, repo_branch,
               readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes,
               installed_at, content_hash, updated_at, enabled_mcode, enabled_agy, enabled_kimi, enabled_dsh)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+             ON CONFLICT(id) DO UPDATE SET
+             name=excluded.name, description=excluded.description, directory=excluded.directory,
+             repo_owner=excluded.repo_owner, repo_name=excluded.repo_name,
+             repo_branch=excluded.repo_branch, readme_url=excluded.readme_url,
+             enabled_claude=excluded.enabled_claude, enabled_codex=excluded.enabled_codex,
+             enabled_gemini=excluded.enabled_gemini, enabled_grokbuild=excluded.enabled_grokbuild,
+             enabled_opencode=excluded.enabled_opencode, enabled_hermes=excluded.enabled_hermes,
+             installed_at=excluded.installed_at, content_hash=excluded.content_hash,
+             updated_at=excluded.updated_at, enabled_mcode=excluded.enabled_mcode,
+             enabled_agy=excluded.enabled_agy, enabled_kimi=excluded.enabled_kimi,
+             enabled_dsh=excluded.enabled_dsh",
             params![
                 skill.id,
                 skill.name,
@@ -416,5 +427,30 @@ mod tests {
         assert_eq!(stored.name, reinstalled.name);
         assert_eq!(stored.installed_at, reinstalled.installed_at);
         assert_eq!(stored.apps, reinstalled.apps);
+    }
+
+    #[test]
+    fn saving_skill_preserves_newer_clients_columns() {
+        let db = Database::memory().expect("memory db");
+        let item = skill("fixture", "original", SkillApps::only(&AppType::Claude));
+        db.save_skill(&item).expect("insert skill");
+        db.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE skills SET enabled_copilot=1,enabled_workbuddy=1 WHERE id='fixture'",
+                [],
+            )
+            .expect("set newer-client flags");
+        db.save_skill(&item).expect("update skill");
+        let conn = db.conn.lock().unwrap();
+        let flags: (i64, i64) = conn
+            .query_row(
+                "SELECT enabled_copilot,enabled_workbuddy FROM skills WHERE id='fixture'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read flags");
+        assert_eq!(flags, (1, 1));
     }
 }

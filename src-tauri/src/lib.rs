@@ -1328,10 +1328,12 @@ pub fn run() {
             app.manage(osir_account_state);
             app.manage(client_telemetry::ClientTelemetryState::default());
             app.manage(commands::OsirInstallerState::new());
+            app.manage(commands::OsirAnywhereInstaller::default());
             app.manage(commands::osir_history::OsirHistoryState::default());
             app.manage(services::osir::legacy_connect::LegacyConnectState::default());
             commands::OsirAccountState::restore_in_background(app.handle().clone());
             app.manage(app_state);
+            mode::anywhere_binding::start_publisher(app.state::<AppState>().inner().clone());
             services::osir::legacy_connect::recover_in_background(app.handle().clone());
             commands::OsirAccountState::recover_credentials_in_background(app.handle().clone());
             app.manage(services::kimi_oauth::KimiOAuthManager::default());
@@ -1606,6 +1608,13 @@ pub fn run() {
             commands::osir_invoice_download_pdf,
             commands::osir_detect_tools,
             commands::osir_desktop_runtime,
+            commands::osir_anywhere_detect,
+            commands::osir_anywhere_codex_status,
+            commands::osir_anywhere_launch,
+            commands::osir_anywhere_release,
+            commands::osir_anywhere_install_status,
+            commands::osir_anywhere_install,
+            commands::osir_anywhere_cancel_install,
             commands::osir_close_tool,
             commands::osir_launch_tool,
             commands::osir_launch_workbuddy,

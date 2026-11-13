@@ -1558,7 +1558,10 @@ async fn handle_codex_xai_native_responses_rewrite(
 
         let body = axum::body::Body::from_stream(logged_stream);
         return builder.body(body).map_err(|e| {
-            log::error!("[{}] 构建 namespace 还原流式响应失败: operation_failed", ctx.tag);
+            log::error!(
+                "[{}] 构建 namespace 还原流式响应失败: operation_failed",
+                ctx.tag
+            );
             ProxyError::Internal(format!("Failed to build streaming response: {e}"))
         });
     }
@@ -1631,7 +1634,10 @@ async fn handle_codex_xai_native_responses_rewrite(
             match serde_json::to_vec(&value) {
                 Ok(bytes) => Bytes::from(bytes),
                 Err(_) => {
-                    log::error!("[{}] 序列化 namespace 还原响应失败: operation_failed", ctx.tag);
+                    log::error!(
+                        "[{}] 序列化 namespace 还原响应失败: operation_failed",
+                        ctx.tag
+                    );
                     body_bytes
                 }
             }
@@ -1653,7 +1659,10 @@ async fn handle_codex_xai_native_responses_rewrite(
     builder
         .body(axum::body::Body::from(restored_bytes))
         .map_err(|e| {
-            log::error!("[{}] 构建 namespace 还原响应失败: operation_failed", ctx.tag);
+            log::error!(
+                "[{}] 构建 namespace 还原响应失败: operation_failed",
+                ctx.tag
+            );
             ProxyError::Internal(format!("Failed to build response: {e}"))
         })
 }

@@ -52,6 +52,7 @@ fn desktop_identity(id: &str) -> Option<&'static str> {
         "claude-desktop" => Some(CLAUDE_BUNDLE_ID),
         "dsh" => Some(DSH_BUNDLE_ID),
         "workbuddy" => Some(WORKBUDDY_BUNDLE_ID),
+        "osir-anywhere" => Some(ANYWHERE_BUNDLE_ID),
         _ => None,
     }
 }
@@ -60,6 +61,7 @@ fn desktop_label(id: &str) -> &'static str {
         "codex" => "Codex Desktop",
         "claude-desktop" => "Claude Desktop",
         "dsh" => "DeepSeek Harness",
+        "osir-anywhere" => "OSIR Anywhere",
         _ => "WorkBuddy",
     }
 }

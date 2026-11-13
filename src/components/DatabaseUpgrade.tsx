@@ -7,16 +7,18 @@ import {
   Database,
   Download,
   RefreshCw,
-  ExternalLink,
   FolderOpen,
   Loader2,
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const RELEASES_URL = "https://github.com/farion1231/cc-switch/releases";
+const PRODUCT_URL = "https://osirclaw.com/";
+const COMMUNITY_RELEASES_URL =
+  "https://github.com/farion1231/cc-switch/releases/latest";
 
 interface DatabaseUpgradeProps {
+  osir?: boolean;
   payload: {
     path?: string;
     error?: string;
@@ -27,8 +29,8 @@ interface DatabaseUpgradeProps {
 }
 
 // checking: 启动时检查是否有可用更新
-// upgradable: 有可用更新，升级应用即可解决
-// incompatible: 已是最新版本但数据库仍过新（可能来自第三方客户端），升级无法解决
+// upgradable: 有可用更新或允许重新检查
+// incompatible: 当前未发现更新，数据库仍需要兼容处理
 // updating: 正在下载/安装更新
 // error: 升级过程出错
 type Phase = "checking" | "upgradable" | "incompatible" | "updating" | "error";
@@ -43,10 +45,12 @@ interface DownloadProgress {
  *
  * 启动时先检查是否有可用更新：
  * - 有 → 提供「升级应用」一键下载+安装+重启，并展示下载进度条。
- * - 无 → 说明当前已是最新版本但数据库仍不兼容（通常由第三方客户端或更高版本创建），
- *   升级无法解决，及时提醒用户备份后改用兼容客户端或等待官方支持。
+ * - 无 → 请用户保留数据库和备份，并联系 OSIR 支持。
  */
-export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
+export function DatabaseUpgrade({
+  payload,
+  osir = false,
+}: DatabaseUpgradeProps) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>("checking");
   const [availableVersion, setAvailableVersion] = useState<string | null>(null);
@@ -135,10 +139,10 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface p-6 text-fg-1">
-      <div className="w-full max-w-lg space-y-5 rounded-2xl border border-border/60 bg-surface p-7 shadow-xl">
+      <div className="w-full max-w-lg space-y-5 rounded-lg border border-border/60 bg-surface p-7">
         <div className="flex items-start gap-4">
           <div
-            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${accent.chip}`}
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg ${accent.chip}`}
           >
             <AccentIcon className="h-6 w-6" />
           </div>
@@ -149,7 +153,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
             <p className="text-sm text-fg-2">
               {t(
                 "dbUpgrade.description",
-                "当前数据库由更新版本的 CC Switch 创建，需要升级应用后才能继续使用。升级不会删除你的数据。",
+                "当前应用无法读取较新的数据库。请保留数据库和备份，检查是否有可用更新。",
               )}
             </p>
             {dbVersion != null && supportedVersion != null && (
@@ -187,7 +191,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
           <p className="text-sm text-fg-2">
             {t("dbUpgrade.updateAvailable", {
               version: availableVersion,
-              defaultValue: "发现新版本 v{{version}}，升级后即可继续使用。",
+              defaultValue: "发现新版本 v{{version}}，可尝试更新后重新打开。",
             })}
           </p>
         )}
@@ -195,14 +199,14 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
         {phase === "incompatible" && (
           <div className="space-y-2 rounded-lg border border-transparent bg-danger-soft p-3 text-sm text-danger-text">
             <p className="font-medium">
-              {t("dbUpgrade.incompatibleTitle", "升级也无法解决")}
+              {t("dbUpgrade.incompatibleTitle", "当前版本暂不兼容")}
             </p>
             <p className="leading-relaxed">
               {t("dbUpgrade.incompatibleDescription", {
                 db: dbVersion,
                 supported: supportedVersion,
                 defaultValue:
-                  "你已是最新版本，但数据库版本（v{{db}}）仍高于本应用支持的版本（v{{supported}}）。该数据库可能由第三方客户端或更高版本创建，升级当前官方应用也无法兼容。",
+                  "当前没有可用更新，数据库版本（v{{db}}）仍高于本应用支持的版本（v{{supported}}）。请保留数据库和备份，并联系支持人员；不要删除或重命名数据库。",
               })}
             </p>
           </div>
@@ -261,19 +265,21 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
             </Button>
           )}
 
-          {(phase === "incompatible" || phase === "error") && (
+          {phase === "incompatible" && (
             <Button
               variant="outline"
               className="gap-2"
               onClick={() =>
-                void invoke("open_external", { url: RELEASES_URL })
+                void invoke("open_external", {
+                  url: osir ? PRODUCT_URL : COMMUNITY_RELEASES_URL,
+                })
               }
             >
-              <ExternalLink className="h-4 w-4" />
-              {t("dbUpgrade.openReleases", "打开发布页")}
+              {osir
+                ? t("dbUpgrade.openSupportSite", "打开 OSIR 网站")
+                : t("dbUpgrade.openReleases", "打开发布页")}
             </Button>
           )}
-
           <Button
             variant="outline"
             className="gap-2"

@@ -24,6 +24,7 @@
 //! ```
 
 pub(crate) mod backup;
+mod compatibility;
 mod dao;
 mod migration;
 mod schema;
@@ -48,9 +49,9 @@ use std::sync::Mutex;
 
 // DAO 方法通过 impl Database 提供，无需额外导出
 
-/// 当前 Schema 版本号
-/// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-pub(crate) const SCHEMA_VERSION: i32 = 25;
+/// Reviewed shared schema ceiling. OSIR-specific revisions are tracked
+/// separately in compatibility.rs because the migration histories diverged.
+pub(crate) const SCHEMA_VERSION: i32 = 26;
 
 /// 安全地序列化 JSON，避免 unwrap panic
 pub(crate) fn to_json_string<T: Serialize>(value: &T) -> Result<String, AppError> {
@@ -101,7 +102,7 @@ impl Database {
         let db_path = crate::config::get_database_path();
         Self::prepare_database_file(&db_path)?;
 
-        let conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
+        let mut conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
 
         // Inspect and back up the original schema before any DDL or persistent
         // PRAGMA. In particular, v0 with user tables is a legacy DB, not a new DB.
@@ -109,25 +110,21 @@ impl Database {
             let guard = backup::lock_backup_file_operations()?;
             Self::backup_database_file_from_conn(&guard, &conn, &[])
         })?;
+        if Self::schema_needs_upgrade(&conn)? {
+            Self::upgrade_schema_from_snapshot(&mut conn)?;
+        } else {
+            Self::initialize_schema_on_conn(&conn)?;
+        }
 
         // 启用外键约束
         conn.execute("PRAGMA foreign_keys = ON;", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
-        if !Self::has_user_tables(&conn)? {
-            // For a brand-new database, configure incremental auto-vacuum
-            // before creating any tables so no rebuild is needed later.
-            conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
-                .map_err(|e| AppError::Database(e.to_string()))?;
-        }
         register_db_change_hook(&conn);
 
         let db = Self {
             conn: Mutex::new(conn),
             log_count_cache: Mutex::new(None),
         };
-        db.create_tables()?;
-
-        db.apply_schema_migrations()?;
         if let Err(e) = db.ensure_incremental_auto_vacuum() {
             log::warn!("Failed to ensure incremental auto-vacuum: {e}");
         }
@@ -229,18 +226,9 @@ impl Database {
     where
         F: FnOnce() -> Result<Option<std::path::PathBuf>, AppError>,
     {
+        Self::validate_schema_before_writes(conn)?;
         let version = Self::get_user_version(conn)?;
-        if version > SCHEMA_VERSION {
-            return Err(AppError::Database(format!(
-                "数据库版本过新（{version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后重试。"
-            )));
-        }
-        if version < 0 {
-            return Err(AppError::Database(
-                "数据库版本无效，请检查数据库或从备份恢复。".into(),
-            ));
-        }
-        if version < SCHEMA_VERSION && Self::has_user_tables(conn)? {
+        if Self::schema_needs_upgrade(conn)? && Self::has_user_tables(conn)? {
             log::info!("Creating pre-migration database backup (v{version} → v{SCHEMA_VERSION})");
             // Do not include raw backup errors: they may contain SQL or data.
             let fail = || {

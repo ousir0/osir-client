@@ -1242,6 +1242,48 @@ pub async fn connection_mode(
     connection_mode_locked(state, app)
 }
 
+/// Return only verified connection metadata; pending or unverified state is
+/// deliberately unknown, not proof of an unconfigured runtime.
+pub(crate) async fn anywhere_codex_connection(
+    state: &AppState,
+) -> Result<(Option<bool>, &'static str, Option<bool>), String> {
+    let app = AppType::Codex;
+    let _guard = state.proxy_service.lock_switch_for_app(app.as_str()).await;
+    let view = connection_mode_locked(state, &app)?;
+    if !matches!(view.mode, "native" | "api_key") {
+        // Only an unambiguously absent configuration is "not configured".
+        // Malformed/unreadable/pending state remains unknown, without repair.
+        let root = crate::codex_config::get_codex_config_dir();
+        let absent = [root.join("config.toml"), root.join("auth.json")]
+            .iter()
+            .all(|path| matches!(std::fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound));
+        let pending = super::state::identity_snapshot(&DeviceStore::for_device())
+            .map_err(|_| "连接方式状态读取失败".to_string())?
+            .apps
+            .get(app.as_str())
+            .is_some_and(|saved| saved.pending.is_some());
+        if absent && !pending {
+            return Ok((Some(false), "unavailable", None));
+        }
+        return Ok((None, "unavailable", None));
+    }
+    let snapshot = super::state::identity_snapshot(&DeviceStore::for_device())
+        .map_err(|_| "连接方式状态读取失败".to_string())?;
+    let proxy = snapshot.apps.get(app.as_str()).is_some_and(|saved| {
+        let mode = saved.mode_state();
+        mode.is_proxy() && mode.attached
+    });
+    Ok((
+        Some(true),
+        if proxy { "proxy" } else { "direct" },
+        if proxy {
+            Some(state.proxy_service.is_running().await)
+        } else {
+            None
+        },
+    ))
+}
+
 pub async fn set_connection_mode(
     state: &AppState,
     app: &AppType,
@@ -3515,7 +3557,7 @@ mod mode_tests {
     /// 回到直连后：值和用户的原文件相同；非关键字段的顺序不变（关键字段可能挪到末尾）。
     fn assert_back_to_user_settings() {
         let mut original: Value = serde_json::from_str(USER_SETTINGS).unwrap();
-        original["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = json!("100000");
+        original["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = json!("200000");
         let live = settings();
         assert_eq!(live, original);
         let keys = |value: &Value| -> Vec<String> {
@@ -4425,6 +4467,71 @@ mod mode_tests {
         );
         official.category = Some("official".to_string());
         official
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn anywhere_codex_metadata_is_read_only_and_pending_is_unknown() {
+        let _home = Home::new();
+        let relay = codex_row("anywhere-fixture", "https://fixture.invalid/v1", "");
+        seed_codex(
+            relay.settings_config["config"].as_str().unwrap(),
+            Some(&relay.settings_config["auth"]),
+        );
+        let state = state_with(AppType::Codex, &[relay], "anywhere-fixture").await;
+        let config_before = fs::read(codex_config_path()).unwrap();
+        let auth_path = crate::codex_config::get_codex_auth_path();
+        let auth_before = fs::read(&auth_path).unwrap();
+        assert_eq!(
+            anywhere_codex_connection(&state).await.unwrap(),
+            (Some(true), "direct", None)
+        );
+        let store = DeviceStore::for_device();
+        super::super::state::set_pending(
+            &store,
+            "codex",
+            Some(super::super::state::Pending {
+                op: "anywhere-fixture".into(),
+                files: vec![],
+                published: false,
+                target: PendingTarget::default(),
+            }),
+        )
+        .unwrap();
+        let journal = fs::read(store.state_path()).unwrap();
+        assert_eq!(
+            anywhere_codex_connection(&state).await.unwrap(),
+            (None, "unavailable", None)
+        );
+        assert_eq!(fs::read(store.state_path()).unwrap(), journal);
+        assert_eq!(fs::read(codex_config_path()).unwrap(), config_before);
+        assert_eq!(fs::read(&auth_path).unwrap(), auth_before);
+        fs::write(store.state_path(), "{broken").unwrap();
+        assert!(anywhere_codex_connection(&state).await.is_err());
+        assert_eq!(fs::read(store.state_path()).unwrap(), b"{broken");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn anywhere_codex_metadata_distinguishes_absence_from_malformed_config() {
+        let _home = Home::new();
+        let state = state_with(AppType::Codex, &[], "missing").await;
+        assert_eq!(
+            anywhere_codex_connection(&state).await.unwrap(),
+            (Some(false), "unavailable", None)
+        );
+        let root = crate::codex_config::get_codex_config_dir();
+        assert!(!root.exists(), "read must not create configuration");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("config.toml"), "not-valid-toml = [").unwrap();
+        assert_eq!(
+            anywhere_codex_connection(&state).await.unwrap(),
+            (None, "unavailable", None)
+        );
+        assert_eq!(
+            fs::read(root.join("config.toml")).unwrap(),
+            b"not-valid-toml = ["
+        );
     }
 
     #[tokio::test]
@@ -7037,7 +7144,7 @@ model_provider = "c"
         assert_eq!(options["label"], "claude-sonnet-4-6（A）");
         assert_eq!(options["description"], "claude-sonnet-4-6 · 200K");
         let env = settings()["env"].clone();
-        assert_eq!(env[CLAUDE_AUTO_COMPACT_ENV], "100000");
+        assert_eq!(env[CLAUDE_AUTO_COMPACT_ENV], "200000");
         assert!(env.get(DISCOVERY_ENV).is_none(), "{env}");
         for role in ["HAIKU", "SONNET", "OPUS", "FABLE"] {
             assert_eq!(

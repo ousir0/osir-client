@@ -10,6 +10,7 @@ use super::{
 };
 use crate::services::osir::codex_desktop::DesktopInstallation;
 use crate::services::osir::desktop_install::signature_verifier::BUNDLE_ID;
+use serde::Deserialize;
 use serde_json::Value;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
@@ -22,7 +23,10 @@ const WORKBUDDY_BUNDLE_ID: &str = "com.tencent.workbuddy.mac";
 // Read from the installed official Claude.app Info.plist, independently of CLI.
 const DSH_BUNDLE_ID: &str = "com.deepseek.dsh";
 const CLAUDE_BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
+const ANYWHERE_BUNDLE_ID: &str = "com.osir.anywhere.desktop";
 const METADATA_LIMIT: u64 = 64 * 1024;
+const ANYWHERE_DEV_MANIFEST: &str =
+    include_str!("../../resources/products/osir-anywhere/manifest.dev.json");
 const DESKTOP_BUDGET: Duration = Duration::from_secs(3);
 // All Codex launch entries, including the installer panel, share this gate.
 // Reject overlapping clicks instead of queuing multiple starts or restarts.
@@ -30,6 +34,7 @@ static CODEX_LAUNCH_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new
 static DSH_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static CLAUDE_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static WORKBUDDY_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static ANYWHERE_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn codex_launch_guard() -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
     CODEX_LAUNCH_GATE
@@ -52,6 +57,9 @@ fn desktop_action_guard(id: &str) -> Result<tokio::sync::MutexGuard<'static, ()>
         "workbuddy" => WORKBUDDY_DESKTOP_GATE
             .try_lock()
             .map_err(|_| "此桌面应用正在启动、重启或关闭，请稍后重试".into()),
+        "osir-anywhere" => ANYWHERE_DESKTOP_GATE
+            .try_lock()
+            .map_err(|_| "OSIR Anywhere 正在打开，请稍后重试".into()),
         _ => Err("此工具不支持从客户端关闭桌面应用".into()),
     }
 }
@@ -80,6 +88,13 @@ fn candidates(id: &str) -> Vec<PathBuf> {
 
 fn candidate_roots(id: &str, home: Option<&Path>) -> Vec<PathBuf> {
     let mut roots = Vec::new();
+    if id == "osir-anywhere" {
+        if let Some(home) = home {
+            roots.push(home.join("Applications"));
+        }
+        roots.push(PathBuf::from("/Applications"));
+        return roots;
+    }
     if id == "codex" {
         if let Some(home) = home {
             // Prefer the copy updated by OSIR over another system installation.
@@ -96,6 +111,7 @@ fn candidate_roots(id: &str, home: Option<&Path>) -> Vec<PathBuf> {
 
 fn candidate_paths(id: &str, roots: &[PathBuf]) -> Vec<PathBuf> {
     let names: &[&str] = match id {
+        "osir-anywhere" => &["OSIR Anywhere.app"],
         "codex" => &["Codex.app", "ChatGPT.app"],
         "claude-desktop" => &["Claude.app"],
         "dsh" => &["DeepSeek Harness.app"],
@@ -108,8 +124,54 @@ fn candidate_paths(id: &str, roots: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
+#[derive(Debug, Deserialize)]
+struct AnywhereManifest {
+    product_id: String,
+    display_name: String,
+    bundle_display_name: String,
+    distribution: String,
+    bundle_id: String,
+    bundle_name: String,
+    install_enabled: bool,
+    download_url: Option<String>,
+}
+
+fn anywhere_manifest() -> Result<AnywhereManifest, String> {
+    let manifest: AnywhereManifest = serde_json::from_str(ANYWHERE_DEV_MANIFEST)
+        .map_err(|_| "OSIR Anywhere 配置无效".to_string())?;
+    if manifest.product_id != "osir-anywhere"
+        || manifest.display_name != "OSIR Anywhere"
+        || manifest.bundle_display_name != "OSIR Anywhere"
+        || manifest.distribution != "osir_standalone"
+        || manifest.bundle_id != ANYWHERE_BUNDLE_ID
+        || manifest.bundle_name != "OSIR Anywhere.app"
+        || manifest.install_enabled
+        || manifest.download_url.is_some()
+    {
+        return Err("OSIR Anywhere 配置不符合本地检测要求".into());
+    }
+    Ok(manifest)
+}
+
 pub(super) async fn detect(id: &str) -> OsirToolDetection {
     detect_candidates(id, &candidates(id)).await
+}
+
+pub(super) async fn detect_anywhere(app: &tauri::AppHandle) -> OsirToolDetection {
+    let mut record = detect("osir-anywhere").await;
+    if record.status != ToolStatus::Installed {
+        return record;
+    }
+    match current_desktop_instance(app, "osir-anywhere").await {
+        Ok(Some(instance)) => {
+            record.version = instance.installation.version;
+            record.path = Some(instance.installation.path);
+            record.runtime_status = ToolRuntimeStatus::Running;
+        }
+        Ok(None) => record.runtime_status = ToolRuntimeStatus::Stopped,
+        Err(_) => record.runtime_status = ToolRuntimeStatus::Unavailable,
+    }
+    record
 }
 
 async fn detect_candidates(id: &str, paths: &[PathBuf]) -> OsirToolDetection {
@@ -208,7 +270,17 @@ fn installation_from_metadata(
     id: &str,
     metadata: &Value,
 ) -> Result<Option<DesktopInstallation>, InspectionError> {
-    let expected_id = desktop_identity(id).ok_or(())?;
+    let expected_id = if id == "osir-anywhere" {
+        let manifest = anywhere_manifest().map_err(|_| InspectionError { installed: true })?;
+        if manifest.bundle_display_name != "OSIR Anywhere"
+            || manifest.distribution != "osir_standalone"
+        {
+            return Err(InspectionError { installed: true });
+        }
+        ANYWHERE_BUNDLE_ID
+    } else {
+        desktop_identity(id).ok_or(())?
+    };
     let bundle_id = metadata
         .get("CFBundleIdentifier")
         .and_then(Value::as_str)
@@ -303,7 +375,7 @@ async fn system_output(
         .map_err(|_| ())
 }
 
-async fn checked_launch_path(id: &str) -> Result<PathBuf, String> {
+pub(super) async fn checked_launch_path(id: &str) -> Result<PathBuf, String> {
     let label = desktop_label(id);
     let discovered = detect(id).await;
     let path = discovered

@@ -223,8 +223,7 @@ impl Database {
         Self::validate_imported_schema(&temp_conn)?;
 
         // 补齐缺失表/索引并执行迁移
-        Self::create_tables_on_conn(&temp_conn)?;
-        Self::apply_schema_migrations_on_conn(&temp_conn)?;
+        Self::initialize_schema_on_conn(&temp_conn)?;
         // 导入和同步不经过保存时的校验：坏的自定义图标在这里清掉，不带进主库
         crate::services::provider::icon::strip_invalid_custom_icons(&temp_conn)?;
         on_staging_ready()?;
@@ -268,7 +267,7 @@ impl Database {
         Ok(snapshot)
     }
 
-    fn complete_backup(backup: &Backup<'_, '_>, context: &str) -> Result<(), AppError> {
+    pub(super) fn complete_backup(backup: &Backup<'_, '_>, context: &str) -> Result<(), AppError> {
         let result = backup
             .step(-1)
             .map_err(|e| AppError::Database(format!("{context}失败: {e}")))?;
@@ -668,7 +667,7 @@ impl Database {
         Ok(())
     }
 
-    fn validate_sqlite_integrity(conn: &Connection) -> Result<(), AppError> {
+    pub(super) fn validate_sqlite_integrity(conn: &Connection) -> Result<(), AppError> {
         let mut stmt = conn
             .prepare("PRAGMA quick_check;")
             .map_err(|e| AppError::Database(format!("检查数据库完整性失败: {e}")))?;
@@ -1087,9 +1086,9 @@ impl Database {
 
         Self::validate_sqlite_integrity(&staging_conn)?;
         Self::validate_imported_schema(&staging_conn)?;
+        Self::validate_schema_before_writes(&staging_conn)?;
         Self::ensure_incremental_auto_vacuum_on_conn(&staging_conn)?;
-        Self::create_tables_on_conn(&staging_conn)?;
-        Self::apply_schema_migrations_on_conn(&staging_conn)?;
+        Self::initialize_schema_on_conn(&staging_conn)?;
         Self::ensure_model_pricing_seeded_on_conn(&staging_conn)?;
         Self::validate_sqlite_integrity(&staging_conn)?;
 
@@ -1262,6 +1261,118 @@ mod tests {
 
     struct SettingsGuard {
         previous: AppSettings,
+    }
+
+    #[test]
+    #[serial]
+    fn schema26_startup_retains_original_backup_and_reopens_without_another_upgrade(
+    ) -> Result<(), AppError> {
+        let _home = TestHomeGuard::new();
+        let path = crate::config::get_database_path();
+        Database::create_database_directory(path.parent().unwrap())?;
+        {
+            let conn = Connection::open(&path)?;
+            conn.execute_batch(include_str!("upstream_v26_schema.sql"))?;
+            conn.execute(
+                "INSERT INTO providers(id,app_type,name,settings_config) VALUES('fixture','codex','Fixture','{}')",
+                [],
+            )?;
+        }
+        assert!(Database::stored_user_version_exceeds_supported(&path)?.is_none());
+        let db = Database::init()?;
+        {
+            let conn = super::super::lock_conn!(db.conn);
+            assert!(Database::table_exists(&conn, "osir_model_credentials")?);
+            let name: String =
+                conn.query_row("SELECT name FROM providers WHERE id='fixture'", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(name, "Fixture");
+        }
+        let backups = Database::list_backups()?;
+        assert_eq!(backups.len(), 1);
+        let saved = Connection::open(
+            path.parent()
+                .unwrap()
+                .join("backups")
+                .join(&backups[0].filename),
+        )?;
+        assert_eq!(Database::get_user_version(&saved)?, 26);
+        assert!(!Database::table_exists(&saved, "osir_model_credentials")?);
+        drop(saved);
+        drop(db);
+        let reopened = Database::init()?;
+        assert_eq!(Database::list_backups()?.len(), 1);
+        drop(reopened);
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn schema26_backup_failure_does_not_modify_original_schema() -> Result<(), AppError> {
+        let _home = TestHomeGuard::new();
+        let path = crate::config::get_database_path();
+        Database::create_database_directory(path.parent().unwrap())?;
+        {
+            let conn = Connection::open(&path)?;
+            conn.execute_batch(include_str!("upstream_v26_schema.sql"))?;
+        }
+        let obstruction = path.parent().unwrap().join("backups");
+        std::fs::write(&obstruction, b"synthetic obstruction")
+            .map_err(|e| AppError::io(&obstruction, e))?;
+        assert!(Database::init().is_err());
+        let original =
+            Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        assert_eq!(Database::get_user_version(&original)?, 26);
+        assert!(!Database::table_exists(
+            &original,
+            "osir_model_credentials"
+        )?);
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn schema26_import_and_sync_accept_known_schema_and_reject_future_without_replacement(
+    ) -> Result<(), AppError> {
+        let _home = TestHomeGuard::new();
+        let sql = format!(
+            "{}\n{}\nINSERT INTO providers(id,app_type,name,settings_config) VALUES('fixture','codex','Fixture','{{}}');\nINSERT INTO mcp_servers(id,name,server_config,enabled_copilot,enabled_workbuddy) VALUES('fixture','Fixture','{{}}',1,1);",
+            super::CC_SWITCH_SQL_EXPORT_HEADER,
+            include_str!("upstream_v26_schema.sql"),
+        );
+        for sync in [false, true] {
+            let target = Database::memory()?;
+            let import = |sql: &str| {
+                if sync {
+                    target.import_sql_string_for_sync(sql)
+                } else {
+                    target.import_sql_string(sql)
+                }
+            };
+            import(&sql)?;
+            {
+                let conn = super::super::lock_conn!(target.conn);
+                assert_eq!(Database::get_user_version(&conn)?, 26);
+                assert!(Database::table_exists(&conn, "osir_model_credentials")?);
+                let flags: (i64, i64) = conn.query_row(
+                    "SELECT enabled_copilot, enabled_workbuddy FROM mcp_servers WHERE id='fixture'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                assert_eq!(flags, (1, 1));
+            }
+            let future = format!("{sql}\nPRAGMA user_version=27;");
+            assert!(import(&future).is_err());
+            let conn = super::super::lock_conn!(target.conn);
+            assert_eq!(Database::get_user_version(&conn)?, 26);
+            let name: String =
+                conn.query_row("SELECT name FROM providers WHERE id='fixture'", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(name, "Fixture");
+        }
+        Ok(())
     }
 
     impl SettingsGuard {

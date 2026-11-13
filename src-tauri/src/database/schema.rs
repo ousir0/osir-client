@@ -73,6 +73,8 @@ impl Database {
             enabled_agy BOOLEAN NOT NULL DEFAULT 0,
             enabled_kimi BOOLEAN NOT NULL DEFAULT 0,
             enabled_dsh BOOLEAN NOT NULL DEFAULT 0,
+            enabled_copilot BOOLEAN NOT NULL DEFAULT 0,
+            enabled_workbuddy BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             enabled_pi BOOLEAN NOT NULL DEFAULT 0,
             enabled_omp BOOLEAN NOT NULL DEFAULT 0
@@ -108,6 +110,8 @@ impl Database {
             enabled_agy BOOLEAN NOT NULL DEFAULT 0,
             enabled_kimi BOOLEAN NOT NULL DEFAULT 0,
             enabled_dsh BOOLEAN NOT NULL DEFAULT 0,
+            enabled_copilot BOOLEAN NOT NULL DEFAULT 0,
+            enabled_workbuddy BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             installed_at INTEGER NOT NULL DEFAULT 0,
             content_hash TEXT,
@@ -322,7 +326,8 @@ impl Database {
                 last_line_offset INTEGER NOT NULL DEFAULT 0,
                 last_synced_at INTEGER NOT NULL,
                 last_byte_offset INTEGER,
-                last_tail_fingerprint INTEGER
+                last_tail_fingerprint INTEGER,
+                parser_state TEXT
             )",
             [],
         )
@@ -445,7 +450,7 @@ impl Database {
         Ok(())
     }
 
-    fn create_osir_model_credentials_table(conn: &Connection) -> Result<(), AppError> {
+    pub(super) fn create_osir_model_credentials_table(conn: &Connection) -> Result<(), AppError> {
         // Same local DB lifecycle as provider settings; NULL records prevent
         // deleted grants from returning through legacy keychain migration.
         conn.execute(
@@ -657,6 +662,10 @@ impl Database {
                         }
                         Self::set_user_version(conn, 25)?;
                     }
+                    25 => {
+                        Self::reconcile_local_schema(conn)?;
+                        Self::set_user_version(conn, 26)?;
+                    }
                     _ => {
                         return Err(AppError::Database(format!(
                             "未知的数据库版本 {version}，无法迁移到 {SCHEMA_VERSION}"
@@ -665,6 +674,7 @@ impl Database {
                 }
                 version = Self::get_user_version(conn)?;
             }
+            Self::reconcile_local_schema(conn)?;
             Ok(())
         })();
 
@@ -3902,7 +3912,7 @@ impl Database {
         Ok(false)
     }
 
-    fn add_column_if_missing(
+    pub(super) fn add_column_if_missing(
         conn: &Connection,
         table: &str,
         column: &str,

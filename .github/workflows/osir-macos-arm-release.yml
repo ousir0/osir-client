@@ -1,0 +1,174 @@
+name: OSIR native ARM Mac build (manual artifacts)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: OSIR channel; artifacts require local finalization before publication
+        required: true
+        default: prod
+        type: choice
+        options: [prod, beta]
+      source_sha256:
+        description: Exact sourceSha256 from the final reviewed source snapshot
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osir-arm-platform-builds-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos-arm64:
+    name: Native ARM Mac application for local finalization
+    runs-on: macos-15
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: "true"
+      OSIR_CHANNEL: ${{ inputs.channel }}
+      OSIR_SOURCE_SHA256: ${{ inputs.source_sha256 }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+      CARGO_BUILD_JOBS: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+
+    steps:
+      - name: Preserve LF source bytes
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout dispatched snapshot without credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pinned Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Verify exact source, native ARM runner and toolchain versions
+        id: versions
+        run: node scripts/osir-ci-artifact.mjs preflight "$OSIR_CHANNEL" aarch64-apple-darwin
+
+      - name: Setup pinned pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: package.json
+          run_install: false
+
+      - name: Install pinned Rust and ARM macOS target
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          rustup target add aarch64-apple-darwin --toolchain "$RUSTUP_TOOLCHAIN"
+          xcode-select -p
+          xcrun --show-sdk-path
+
+      - name: Restore pnpm download cache
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Restore Rust dependency compilation cache
+        id: rust-cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          prefix-key: osir-native-v1
+          key: macos-15-arm64-${{ inputs.channel }}
+          env-vars: CARGO CC CFLAGS CXX CMAKE RUST ImageOS ImageVersion
+          workspaces: src-tauri -> target
+          cache-bin: false
+          cache-workspace-crates: false
+          cache-on-failure: false
+
+      - name: Install frozen frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check ARM release runtime configuration
+        run: node scripts/osir-build-macos-ci.mjs "$OSIR_CHANNEL" --target aarch64-apple-darwin --check
+
+      - name: Verify native identity, startup and schema compatibility regressions
+        timeout-minutes: 90
+        run: |
+          set -euo pipefail
+          for filter in osir_identity::tests startup::tests database::compatibility::tests anywhere_; do
+            log="$RUNNER_TEMP/osir-native-${filter//:/_}.log"
+            cargo test --release --locked --target aarch64-apple-darwin --manifest-path src-tauri/Cargo.toml --lib "$filter" -- --test-threads=1 2>&1 | tee "$log"
+            if ! rg -q 'test result: ok\. [1-9][0-9]* passed;' "$log"; then
+              echo "::error::Native regression selected no passing tests: $filter"
+              exit 1
+            fi
+          done
+
+      - name: Build embedded ARM application without signing credentials
+        timeout-minutes: 90
+        run: node scripts/osir-build-macos-ci.mjs "$OSIR_CHANNEL" --target aarch64-apple-darwin
+
+      - name: Validate ARM artifacts and source provenance
+        id: packaged
+        run: node scripts/osir-ci-artifact.mjs mac-output "$OSIR_CHANNEL" aarch64-apple-darwin
+
+      - name: Launch and reopen native ARM application with isolated data
+        timeout-minutes: 5
+        env:
+          OSIR_ARTIFACT_DIRECTORY: ${{ steps.packaged.outputs.directory }}
+        run: node scripts/osir-macos-packaged-smoke.mjs "$OSIR_ARTIFACT_DIRECTORY"
+
+      - name: Accept native ARM lifecycle evidence bound to the exact executable
+        run: node scripts/osir-ci-artifact.mjs accept-mac "$OSIR_CHANNEL" aarch64-apple-darwin
+
+      # Preserve failed smoke reports for diagnosis as well. A downloadable
+      # archive is not acceptance: consumers must verify the manifest/report.
+      - name: Archive application preserving executable modes and symlinks
+        if: always() && steps.packaged.outputs.directory != ''
+        id: archive
+        env:
+          OSIR_ARTIFACT_DIRECTORY: ${{ steps.packaged.outputs.directory }}
+        run: |
+          set -euo pipefail
+          archive="osir-ci-$OSIR_CHANNEL-arm64-pending.tar.gz"
+          tar -czf "$RUNNER_TEMP/$archive" -C "$OSIR_ARTIFACT_DIRECTORY" .
+          (cd "$RUNNER_TEMP" && shasum -a 256 "$archive" > "$archive.sha256")
+          echo "path=$RUNNER_TEMP/$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Upload ARM application archive and native evidence for local finalization
+        if: always() && steps.archive.outputs.path != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: osir-ci-${{ steps.versions.outputs.version }}-${{ inputs.channel }}-macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.archive.outputs.path }}
+            ${{ steps.archive.outputs.path }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload Cargo compilation timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: osir-timings-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: src-tauri/target/cargo-timings/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Record the acceptance boundary
+        if: success()
+        run: |
+          {
+            echo '### Native ARM CI evidence'
+            echo 'Frozen source and executable verified; native window launch and reopen passed with isolated data.'
+            echo 'Renderer/native IPC, cross-version updater, final signing and publication are outside this job.'
+            echo 'Artifact remains ci-pending-local-finalization; local-only unsigned artifacts cannot substitute for it.'
+          } >> "$GITHUB_STEP_SUMMARY"

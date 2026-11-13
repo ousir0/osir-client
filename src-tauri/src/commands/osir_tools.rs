@@ -201,6 +201,127 @@ pub async fn osir_desktop_runtime(app: tauri::AppHandle) -> Result<Vec<OsirToolD
     Ok(records)
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OsirAnywhereLocalState {
+    pub status: &'static str,
+    pub installed: bool,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub error: Option<String>,
+    pub bundle_display_name: &'static str,
+    pub distribution: &'static str,
+    pub runtime_status: ToolRuntimeStatus,
+}
+
+/// Reports the locally detected OSIR Anywhere desktop app.
+#[tauri::command]
+pub async fn osir_anywhere_detect(app: tauri::AppHandle) -> OsirAnywhereLocalState {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        #[cfg(target_os = "macos")]
+        let detected = macos::detect_anywhere(&app).await;
+        #[cfg(target_os = "windows")]
+        let detected = {
+            let mut records = vec![windows::detect("osir-anywhere").await];
+            windows::refresh_runtime(&app, &mut records).await;
+            records.remove(0)
+        };
+        let status = match detected.status {
+            ToolStatus::Installed => "installed",
+            ToolStatus::NotInstalled => "not_installed",
+            ToolStatus::Error | ToolStatus::Unavailable => "error",
+        };
+        OsirAnywhereLocalState {
+            status,
+            installed: detected.installed,
+            version: detected.version,
+            path: detected.path,
+            error: detected.error,
+            bundle_display_name: "OSIR Anywhere",
+            distribution: "osir_standalone",
+            runtime_status: detected.runtime_status,
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = app;
+        OsirAnywhereLocalState {
+            status: "unsupported",
+            installed: false,
+            version: None,
+            path: None,
+            error: Some("此系统尚不支持 OSIR Anywhere 本地检测".into()),
+            bundle_display_name: "OSIR Anywhere",
+            distribution: "osir_standalone",
+            runtime_status: ToolRuntimeStatus::Unavailable,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OsirAnywhereCodexStatus {
+    pub configured: Option<bool>,
+    pub config_root: Option<String>,
+    pub connection_mode: &'static str,
+    pub proxy_running: Option<bool>,
+    pub cli_status: ToolStatus,
+    pub cli_version: Option<String>,
+}
+
+/// Advisory local metadata only. This does not authorize an Anywhere receiver
+/// or establish that a model request will succeed.
+#[tauri::command]
+pub async fn osir_anywhere_codex_status(
+    state: tauri::State<'_, crate::store::AppState>,
+) -> Result<OsirAnywhereCodexStatus, String> {
+    let (connection, cli) = tokio::join!(
+        crate::mode::controller::anywhere_codex_connection(state.inner()),
+        detect_cli("codex"),
+    );
+    let config_root = crate::codex_config::get_codex_config_dir()
+        .canonicalize()
+        .ok()
+        .filter(|path| path.is_absolute() && path.is_dir())
+        .and_then(|path| path.to_str().map(str::to_owned))
+        .filter(|path| !path.chars().any(char::is_control));
+    let (configured, connection_mode, proxy_running) =
+        connection.unwrap_or((None, "unavailable", None));
+    Ok(OsirAnywhereCodexStatus {
+        configured,
+        config_root,
+        connection_mode,
+        proxy_running,
+        cli_status: cli.status,
+        cli_version: cli.version,
+    })
+}
+
+/// Revalidates the fixed bundle path and bundle ID before asking Launch Services to open it.
+#[tauri::command]
+pub async fn osir_anywhere_launch(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::store::AppState>,
+) -> Result<OsirToolLaunch, String> {
+    crate::mode::anywhere_binding::publish(state.inner())
+        .await
+        .map_err(|_| "本机模型信息暂时无法更新，请重试".to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        macos::launch_desktop(&app, "osir-anywhere", false).await
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows::launch_desktop(&app, "osir-anywhere", false).await
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = app;
+        Err("此系统尚不支持 OSIR Anywhere 启动".into())
+    }
+}
+
 async fn detect_inventory() -> Vec<OsirToolDetection> {
     let probes: Vec<_> = CLI_TOOLS.into_iter().map(detect_cli).collect();
     let cli = stream::iter(probes)

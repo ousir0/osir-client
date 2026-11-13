@@ -1,0 +1,10 @@
+{
+  "product_id": "osir-anywhere",
+  "display_name": "OSIR Anywhere",
+  "bundle_display_name": "OSIR Anywhere",
+  "distribution": "osir_standalone",
+  "bundle_id": "com.osir.anywhere.desktop",
+  "bundle_name": "OSIR Anywhere.app",
+  "install_enabled": false,
+  "download_url": null
+}

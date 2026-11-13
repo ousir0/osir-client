@@ -260,7 +260,9 @@ fn migration_preflight_rejects_future_and_skips_empty_or_current() {
         SCHEMA_VERSION + 1
     );
     assert!(!Database::table_exists(&conn, "providers").unwrap());
-    Database::set_user_version(&conn, SCHEMA_VERSION).unwrap();
+    conn.execute_batch("DROP TABLE original; PRAGMA user_version=0")
+        .unwrap();
+    Database::initialize_schema_on_conn(&conn).unwrap();
     Database::prepare_schema_upgrade(&conn, || panic!("current version must not need a backup"))
         .unwrap();
 }

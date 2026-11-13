@@ -135,6 +135,7 @@ test("private source export rejects credential files and personal homes", () => 
     "config/.env.prod",
     "keys/signing.pem",
     "apple.p12",
+    "src-tauri/resources/products/osir-anywhere/release-private.key",
     ".git/config",
     "src/../.osir-dev-home/account.json",
     ".osir-dev-home/state",
@@ -146,6 +147,9 @@ test("private source export rejects credential files and personal homes", () => 
     "src-tauri/vendor/codex-mac-engine/src/lib.rs",
     "config/osir-updater-prod.json",
     ".github/workflows/osir-windows-release.yml",
+    ".github/workflows/osir-macos-arm-release.yml",
+    "src-tauri/src/database/upstream_v26_schema.sql",
+    "src-tauri/resources/products/osir-anywhere/release-public.pub",
   ])
     assert.equal(validateSnapshotPath(path), path);
 });
@@ -158,6 +162,11 @@ test("release source manifest includes all Rust compile-time fixtures", () => {
   for (const path of [
     "tests/config/claudeKeyFields.json",
     "tests/fixtures/copilot-endpoint-cases.json",
+    "src-tauri/src/database/upstream_v26_schema.sql",
+    "src-tauri/resources/products/osir-anywhere/release-public.pub",
+    "src-tauri/resources/products/osir-anywhere/manifest.dev.json",
+    ".github/workflows/osir-macos-arm-release.yml",
+    "scripts/osir-release-ci.test.mjs",
   ])
     assert.ok(snapshot.provenance.inputs.files.includes(path));
 });

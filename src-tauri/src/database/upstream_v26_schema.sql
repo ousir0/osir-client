@@ -1,0 +1,174 @@
+-- Synthetic empty schema; no user data or credentials.
+-- Extracted CREATE TABLE literals from CC Switch v4.0.31 schema.rs at commit
+-- 3c76d3bda670297dd8c27d7d9be9b18a4c9143f5; upstream source SHA-256:
+-- 1ba8f7ae2841a7ccf3306e8564b05a07d51e683d47f8561f11459d3b6bc64334
+CREATE TABLE IF NOT EXISTS providers (
+                id TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                settings_config TEXT NOT NULL,
+                website_url TEXT,
+                category TEXT,
+                created_at INTEGER,
+                sort_index INTEGER,
+                notes TEXT,
+                icon TEXT,
+                icon_color TEXT,
+                meta TEXT NOT NULL DEFAULT '{}',
+                is_current BOOLEAN NOT NULL DEFAULT 0,
+                in_failover_queue BOOLEAN NOT NULL DEFAULT 0,
+                PRIMARY KEY (id, app_type)
+            );
+CREATE TABLE IF NOT EXISTS provider_endpoints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_id TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                url TEXT NOT NULL,
+                added_at INTEGER,
+                FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
+            );
+CREATE TABLE IF NOT EXISTS mcp_servers (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, server_config TEXT NOT NULL,
+            description TEXT, homepage TEXT, docs TEXT, tags TEXT NOT NULL DEFAULT '[]',
+            enabled_claude BOOLEAN NOT NULL DEFAULT 0, enabled_codex BOOLEAN NOT NULL DEFAULT 0,
+            enabled_gemini BOOLEAN NOT NULL DEFAULT 0, enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
+            enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_agy BOOLEAN NOT NULL DEFAULT 0,
+            enabled_kimi BOOLEAN NOT NULL DEFAULT 0,
+            enabled_dsh BOOLEAN NOT NULL DEFAULT 0,
+            enabled_copilot BOOLEAN NOT NULL DEFAULT 0,
+            enabled_workbuddy BOOLEAN NOT NULL DEFAULT 0,
+            enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
+            enabled_pi BOOLEAN NOT NULL DEFAULT 0,
+            enabled_omp BOOLEAN NOT NULL DEFAULT 0
+        );
+CREATE TABLE IF NOT EXISTS prompts (
+            id TEXT NOT NULL, app_type TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL,
+            description TEXT, enabled BOOLEAN NOT NULL DEFAULT 1, created_at INTEGER, updated_at INTEGER,
+            PRIMARY KEY (id, app_type)
+        );
+CREATE TABLE IF NOT EXISTS skills (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            directory TEXT NOT NULL,
+            repo_owner TEXT,
+            repo_name TEXT,
+            repo_branch TEXT DEFAULT 'main',
+            readme_url TEXT,
+            enabled_claude BOOLEAN NOT NULL DEFAULT 0,
+            enabled_codex BOOLEAN NOT NULL DEFAULT 0,
+            enabled_gemini BOOLEAN NOT NULL DEFAULT 0,
+            enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
+            enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_agy BOOLEAN NOT NULL DEFAULT 0,
+            enabled_kimi BOOLEAN NOT NULL DEFAULT 0,
+            enabled_dsh BOOLEAN NOT NULL DEFAULT 0,
+            enabled_copilot BOOLEAN NOT NULL DEFAULT 0,
+            enabled_workbuddy BOOLEAN NOT NULL DEFAULT 0,
+            enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
+            installed_at INTEGER NOT NULL DEFAULT 0,
+            content_hash TEXT,
+            updated_at INTEGER NOT NULL DEFAULT 0
+        );
+CREATE TABLE IF NOT EXISTS skill_repos (
+            owner TEXT NOT NULL, name TEXT NOT NULL, branch TEXT NOT NULL DEFAULT 'main',
+            enabled BOOLEAN NOT NULL DEFAULT 1, PRIMARY KEY (owner, name)
+        );
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS proxy_config (
+            app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
+            proxy_enabled INTEGER NOT NULL DEFAULT 0, listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
+            listen_port INTEGER NOT NULL DEFAULT 15721, enable_logging INTEGER NOT NULL DEFAULT 1,
+            enabled INTEGER NOT NULL DEFAULT 0, auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
+            max_retries INTEGER NOT NULL DEFAULT 3, streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60,
+            streaming_idle_timeout INTEGER NOT NULL DEFAULT 120, non_streaming_timeout INTEGER NOT NULL DEFAULT 600,
+            circuit_failure_threshold INTEGER NOT NULL DEFAULT 4, circuit_success_threshold INTEGER NOT NULL DEFAULT 2,
+            circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60, circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
+            circuit_min_requests INTEGER NOT NULL DEFAULT 10,
+            default_cost_multiplier TEXT NOT NULL DEFAULT '1',
+            pricing_model_source TEXT NOT NULL DEFAULT 'response',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+CREATE TABLE IF NOT EXISTS provider_health (
+            provider_id TEXT NOT NULL, app_type TEXT NOT NULL, is_healthy INTEGER NOT NULL DEFAULT 1,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0, last_success_at TEXT, last_failure_at TEXT,
+            last_error TEXT, updated_at TEXT NOT NULL,
+            PRIMARY KEY (provider_id, app_type),
+            FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
+        );
+CREATE TABLE IF NOT EXISTS proxy_request_logs (
+            request_id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, app_type TEXT NOT NULL, model TEXT NOT NULL,
+            request_model TEXT,
+            pricing_model TEXT,
+            input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+            input_token_semantics INTEGER NOT NULL DEFAULT 0,
+            input_cost_usd TEXT NOT NULL DEFAULT '0', output_cost_usd TEXT NOT NULL DEFAULT '0',
+            cache_read_cost_usd TEXT NOT NULL DEFAULT '0', cache_creation_cost_usd TEXT NOT NULL DEFAULT '0',
+            total_cost_usd TEXT NOT NULL DEFAULT '0', latency_ms INTEGER NOT NULL, first_token_ms INTEGER,
+            duration_ms INTEGER, status_code INTEGER NOT NULL, error_message TEXT, session_id TEXT,
+            provider_type TEXT, is_streaming INTEGER NOT NULL DEFAULT 0,
+            cost_multiplier TEXT NOT NULL DEFAULT '1.0', created_at INTEGER NOT NULL,
+            data_source TEXT NOT NULL DEFAULT 'proxy'
+        );
+CREATE TABLE IF NOT EXISTS model_pricing (
+            model_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
+            input_cost_per_million TEXT NOT NULL, output_cost_per_million TEXT NOT NULL,
+            cache_read_cost_per_million TEXT NOT NULL DEFAULT '0',
+            cache_creation_cost_per_million TEXT NOT NULL DEFAULT '0'
+        );
+CREATE TABLE IF NOT EXISTS stream_check_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id TEXT NOT NULL, provider_name TEXT NOT NULL,
+            app_type TEXT NOT NULL, status TEXT NOT NULL, success INTEGER NOT NULL, message TEXT NOT NULL,
+            response_time_ms INTEGER, http_status INTEGER, model_used TEXT,
+            retry_count INTEGER DEFAULT 0, tested_at INTEGER NOT NULL
+        );
+CREATE TABLE IF NOT EXISTS proxy_live_backup (
+            app_type TEXT PRIMARY KEY, original_config TEXT NOT NULL, backed_up_at TEXT NOT NULL
+        );
+CREATE TABLE IF NOT EXISTS usage_daily_rollups (
+                date TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                model TEXT NOT NULL,
+                request_model TEXT NOT NULL DEFAULT '',
+                pricing_model TEXT NOT NULL DEFAULT '',
+                request_count INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                input_token_semantics INTEGER NOT NULL DEFAULT 0,
+                total_cost_usd TEXT NOT NULL DEFAULT '0',
+                avg_latency_ms INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (date, app_type, provider_id, model, request_model, pricing_model)
+            );
+CREATE TABLE IF NOT EXISTS session_log_sync (
+                file_path TEXT PRIMARY KEY,
+                last_modified INTEGER NOT NULL,
+                last_line_offset INTEGER NOT NULL DEFAULT 0,
+                last_synced_at INTEGER NOT NULL,
+                last_byte_offset INTEGER,
+                last_tail_fingerprint INTEGER,
+                parser_state TEXT
+            );
+CREATE TABLE IF NOT EXISTS session_usage_dedup (
+                data_source TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                semantic_id TEXT NOT NULL,
+                has_entry_id INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (data_source, request_id)
+            );
+CREATE TABLE IF NOT EXISTS profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                sort_order INTEGER,
+                created_at INTEGER,
+                updated_at INTEGER
+            );
+PRAGMA user_version=26;

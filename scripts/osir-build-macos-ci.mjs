@@ -29,6 +29,7 @@ import {
   verifyUpdaterConfigUnchanged,
 } from "./osir-release-updater.mjs";
 import { verifyReleaseDiagnostics } from "./osir-release-diagnostics.mjs";
+import { ciTarget, assertNativeCiHost } from "./osir-ci-artifact.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 function requireThat(condition, message) {
@@ -51,14 +52,30 @@ export function macosCiConfig(channel, updater) {
   return config;
 }
 
-async function main() {
-  const [channel, ...options] = process.argv.slice(2);
+export function parseMacosCiArguments(argv) {
+  const [channel, ...options] = argv;
+  let target = "x86_64-apple-darwin"; // Keep the existing Intel entry point.
+  let targetSpecified = false;
+  let check = false;
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === "--check" && !check) check = true;
+    else if (options[i] === "--target" && !targetSpecified) {
+      target = options[++i];
+      targetSpecified = true;
+    } else throw new Error("Unknown or duplicate macOS CI argument");
+  }
   requireThat(
     ["prod", "beta"].includes(channel) &&
-      options.every((arg) => arg === "--check"),
-    "Usage: node scripts/osir-build-macos-ci.mjs <prod|beta> [--check]",
+      ciTarget(target).platform === "darwin",
+    "Usage: node scripts/osir-build-macos-ci.mjs <prod|beta> [--target aarch64-apple-darwin|x86_64-apple-darwin] [--check]",
   );
-  const target = "x86_64-apple-darwin";
+  return { channel, target, check };
+}
+
+async function main() {
+  const { channel, target, check } = parseMacosCiArguments(
+    process.argv.slice(2),
+  );
   const version = checkProject();
   const configPath = join(root, `config/osir-updater-${channel}.json`);
   const publicInput = loadUpdaterReleaseConfig(configPath, {
@@ -74,7 +91,7 @@ async function main() {
       source.provenance.sourceSha256 === process.env.OSIR_SOURCE_SHA256,
     "Source differs from requested snapshot",
   );
-  if (options.includes("--check")) {
+  if (check) {
     console.log(
       JSON.stringify(
         {
@@ -94,12 +111,10 @@ async function main() {
     );
     return;
   }
+  assertNativeCiHost(target);
   requireThat(
-    process.platform === "darwin" &&
-      process.arch === "x64" &&
-      process.env.GITHUB_ACTIONS === "true" &&
-      process.env.CI === "true",
-    "Only native Intel macOS GitHub Actions runner is supported",
+    process.env.GITHUB_ACTIONS === "true" && process.env.CI === "true",
+    "Only native macOS GitHub Actions runners are supported",
   );
   const cache = resolve(
     process.env.CARGO_TARGET_DIR || join(root, "src-tauri/target"),
@@ -180,8 +195,9 @@ async function main() {
     ]);
     const architectures = verifyApp(app, config, target, false);
     requireThat(
-      JSON.stringify(architectures) === JSON.stringify(["x86_64"]),
-      "Only Intel architecture is permitted",
+      JSON.stringify(architectures) ===
+        JSON.stringify([ciTarget(target).binaryArch]),
+      "Application architecture differs from the native CI target",
     );
     const releaseDiagnostics = verifyReleaseDiagnostics(
       join(app, "Contents/MacOS/osir_client"),
@@ -221,7 +237,7 @@ async function main() {
       ) + "\n",
     );
     complete = true;
-    console.log("Intel application pending local final signing: " + output);
+    console.log(target + " application pending local final signing: " + output);
   } finally {
     if (!complete && output) rmSync(output, { recursive: true, force: true });
     if (staging) rmSync(staging, { recursive: true, force: true });
@@ -234,6 +250,6 @@ if (
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 )
   main().catch((error) => {
-    console.error("OSIR Intel CI packaging: " + error.message);
+    console.error("OSIR macOS CI packaging: " + error.message);
     process.exitCode = 1;
   });

@@ -49,7 +49,7 @@ const KEY_MAX_LEN: usize = 24;
 
 /// Claude Code 在没有 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 时按这个窗口算。
 pub const CLAUDE_DEFAULT_WINDOW: u64 = 200_000;
-pub const CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW: u64 = 100_000;
+pub const CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW: u64 = 200_000;
 
 /// 支持 Stack 模型的应用。
 pub fn supports_stack(app: &AppType) -> bool {
@@ -408,7 +408,7 @@ fn stack_models(key: &str, provider: &Provider, found: Vec<Found>) -> Vec<StackM
             _ => None,
         })
         .filter(|window| *window >= 100_000)
-        .unwrap_or(CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW);
+        .unwrap_or(CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW.min(window));
     found
         .into_iter()
         .map(|found| {
@@ -1374,7 +1374,7 @@ mod tests {
                     description: "glm-5.2 · 1M".to_string(),
                     one_m: true,
                     window: 128_000,
-                    auto_compact_window: CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW,
+                    auto_compact_window: 128_000,
                 },
                 StackModel {
                     id: "ccs-claude-zhipu--glm-4.7-air".to_string(),
@@ -1384,7 +1384,7 @@ mod tests {
                     description: "glm-4.7-air · 128K".to_string(),
                     one_m: false,
                     window: 128_000,
-                    auto_compact_window: CLAUDE_DEFAULT_AUTO_COMPACT_WINDOW,
+                    auto_compact_window: 128_000,
                 },
             ]
         );

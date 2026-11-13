@@ -39,7 +39,7 @@ const OPERATOR_FIELDS = [
   "liveRelease",
   "liveSha",
 ];
-const PYTHON = "/usr/bin/python3";
+const PYTHON = "python3";
 const BUILD_PREFIXES = [
   "Verified ad-hoc distribution (not Apple notarized): ",
   "Verified local certificate distribution (not Apple notarized): ",
@@ -244,8 +244,8 @@ export function parseCloudArguments(args) {
   return options;
 }
 
-// Only these OS facilities reach Python/SSH. Signing, API and arbitrary user
-// environment variables cannot cross this boundary, even with unexpected names.
+// Only OS facilities and the validated release dependency directory reach
+// Python/SSH. Signing, API and arbitrary environment values stay excluded.
 export function pythonEnvironment(environment = process.env) {
   const clean = {
     PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -262,6 +262,28 @@ export function pythonEnvironment(environment = process.env) {
     "SSH_AUTH_SOCK",
   ]) {
     if (typeof environment[key] === "string") clean[key] = environment[key];
+  }
+  if (typeof environment.OSIR_STORAGE_PYTHONPATH === "string") {
+    const dependencyPath = resolve(environment.OSIR_STORAGE_PYTHONPATH);
+    const dependencyRoot = resolve(
+      environment.HOME || process.env.HOME || "/",
+      ".config/osir-client-release/python",
+    );
+    const stat = lstatSync(dependencyPath);
+    const realDependencyPath = realpathSync(dependencyPath);
+    const realDependencyRoot = realpathSync(dependencyRoot);
+    requireThat(
+      isAbsolute(environment.OSIR_STORAGE_PYTHONPATH) &&
+        !stat.isSymbolicLink() &&
+        stat.isDirectory() &&
+        (stat.mode & 0o022) === 0 &&
+        (!process.getuid || stat.uid === process.getuid()) &&
+        relative(realDependencyRoot, realDependencyPath).split(sep)[0] !==
+          ".." &&
+        realDependencyPath !== realDependencyRoot,
+      "Storage Python dependencies must be an ordinary directory under the private release dependency root.",
+    );
+    clean.PYTHONPATH = realDependencyPath;
   }
   return clean;
 }
