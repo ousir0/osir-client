@@ -4,6 +4,47 @@ use crate::provider::Provider;
 use serde_json::json;
 use std::sync::Arc;
 
+// Pure descriptor fixtures must use an absolute path on the executing OS.
+fn fixture_root() -> &'static str {
+    if cfg!(windows) {
+        r"C:\fixture"
+    } else {
+        "/fixture"
+    }
+}
+fn fixture_codex_home() -> &'static str {
+    if cfg!(windows) {
+        r"C:\fixture\.codex"
+    } else {
+        "/fixture/.codex"
+    }
+}
+
+#[test]
+fn descriptor_fixtures_use_native_absolute_paths_and_reject_relative_home() {
+    assert!(std::path::Path::new(fixture_root()).is_absolute());
+    assert!(std::path::Path::new(fixture_codex_home()).is_absolute());
+    assert_eq!(
+        build(
+            "relative/.codex",
+            "direct",
+            b"model='a'",
+            None,
+            models(&["a"]),
+            1
+        )
+        .unwrap_err(),
+        UNAVAILABLE
+    );
+    #[cfg(windows)]
+    for path in ["/fixture/.codex", r"C:fixture\.codex"] {
+        assert_eq!(
+            build(path, "direct", b"model='a'", None, models(&["a"]), 1).unwrap_err(),
+            UNAVAILABLE
+        );
+    }
+}
+
 fn models(ids: &[&str]) -> Vec<BindingModel> {
     ids.iter()
         .map(|id| BindingModel {
@@ -75,7 +116,7 @@ fn descriptor_filters_catalog_sorts_and_uses_exact_bytes() {
     let config = config("ccs-a/gpt-a");
     let catalog = catalog();
     let doc = build(
-        "/fixture/.codex",
+        fixture_codex_home(),
         "proxy",
         config.as_bytes(),
         Some(&catalog),
@@ -102,7 +143,7 @@ fn descriptor_filters_catalog_sorts_and_uses_exact_bytes() {
         sha256_hex(&crate::config::sorted_json_bytes(&stable).unwrap())
     );
     let renewed = build(
-        "/fixture/.codex",
+        fixture_codex_home(),
         "proxy",
         config.as_bytes(),
         Some(&catalog),
@@ -118,7 +159,7 @@ fn descriptor_filters_catalog_sorts_and_uses_exact_bytes() {
 fn no_catalog_empty_hash_missing_effort_null_and_live_top_level_default() {
     let config = b"model = 'gpt-live'\n[profiles.other]\nmodel = 'not-default'\nmodel_reasoning_effort = 'low'\n";
     let doc = build(
-        "/fixture/.codex",
+        fixture_codex_home(),
         "direct",
         config,
         None,
@@ -210,7 +251,7 @@ fn provider_key_rotation_does_not_change_revision_or_leak_secrets() {
     let (state, saved) = state_with_stack();
     let secret_config = b"model = 'gpt-a'\n# CONFIG_SECRET_SENTINEL\n[model_providers.fixture]\nbase_url = 'https://ENDPOINT_SENTINEL.invalid'\nexperimental_bearer_token = 'BEARER_SECRET_SENTINEL'\n";
     let before = build(
-        "/fixture/.codex",
+        fixture_codex_home(),
         "proxy",
         secret_config,
         None,
@@ -222,7 +263,7 @@ fn provider_key_rotation_does_not_change_revision_or_leak_secrets() {
     changed.settings_config["auth"]["OPENAI_API_KEY"] = json!("ROTATED_SECRET_SENTINEL");
     state.db.save_provider("codex", &changed).unwrap();
     let after = build(
-        "/fixture/.codex",
+        fixture_codex_home(),
         "proxy",
         secret_config,
         None,
@@ -245,7 +286,7 @@ fn provider_key_rotation_does_not_change_revision_or_leak_secrets() {
         assert!(!serialized.contains(sentinel));
     }
     let filtered = build(
-        "/fixture/.codex",
+        fixture_codex_home(),
         "proxy",
         config("ccs-a/gpt-a").as_bytes(),
         Some(&catalog()),
@@ -260,7 +301,7 @@ fn provider_key_rotation_does_not_change_revision_or_leak_secrets() {
 
 fn fixture() -> BindingFixture {
     BindingFixture {
-        codex_home: "/fixture/.codex".into(),
+        codex_home: fixture_codex_home().into(),
         connection_mode: "proxy".into(),
         pending: false,
         verified: true,
@@ -322,9 +363,17 @@ fn malformed_input_returns_only_fixed_error() {
 
 #[test]
 fn byte_changes_alter_hash_and_revision_but_refresh_does_not() {
-    let first = build("/fixture", "direct", b"model='a'", None, models(&["a"]), 1).unwrap();
+    let first = build(
+        fixture_root(),
+        "direct",
+        b"model='a'",
+        None,
+        models(&["a"]),
+        1,
+    )
+    .unwrap();
     let changed = build(
-        "/fixture",
+        fixture_root(),
         "direct",
         b"model='a'\n",
         None,
@@ -338,7 +387,7 @@ fn byte_changes_alter_hash_and_revision_but_refresh_does_not() {
     let original = cat.clone();
     cat.push(b'\n');
     let a = build(
-        "/fixture",
+        fixture_root(),
         "proxy",
         config("ccs-a/gpt-a").as_bytes(),
         Some(&original),
@@ -347,7 +396,7 @@ fn byte_changes_alter_hash_and_revision_but_refresh_does_not() {
     )
     .unwrap();
     let b = build(
-        "/fixture",
+        fixture_root(),
         "proxy",
         config("ccs-a/gpt-a").as_bytes(),
         Some(&cat),
@@ -362,7 +411,7 @@ fn byte_changes_alter_hash_and_revision_but_refresh_does_not() {
 #[test]
 fn contract_limits_and_title_fallback() {
     let doc = build(
-        "/fixture",
+        fixture_root(),
         "proxy",
         config("ccs-a/gpt-a").as_bytes(),
         Some(br#"{"models":[{"slug":"ccs-a/gpt-a","display_name":""}]}"#),
@@ -373,7 +422,7 @@ fn contract_limits_and_title_fallback() {
     assert_eq!(doc["models"][0]["title"], "ccs-a/gpt-a");
     let long = "a".repeat(257);
     assert!(build(
-        "/fixture",
+        fixture_root(),
         "direct",
         format!("model={long:?}").as_bytes(),
         None,
@@ -388,7 +437,7 @@ fn contract_limits_and_title_fallback() {
         })
         .collect();
     assert_eq!(
-        build("/fixture", "direct", b"model='m0'", None, entries, 1).unwrap_err(),
+        build(fixture_root(), "direct", b"model='m0'", None, entries, 1).unwrap_err(),
         "models_invalid"
     );
 }
@@ -458,7 +507,7 @@ fn five_published_members_intersect_155_historical_catalog_rows() {
     }
     let catalog = serde_json::to_vec(&json!({"models":rows})).unwrap();
     let before = build(
-        "/fixture",
+        fixture_root(),
         "proxy",
         config("ccs-a/gpt-a").as_bytes(),
         Some(&catalog),
@@ -469,7 +518,7 @@ fn five_published_members_intersect_155_historical_catalog_rows() {
     assert_eq!(before["models"].as_array().unwrap().len(), 5);
     saved.stack.members.retain(|id| id != "b");
     let after = build(
-        "/fixture",
+        fixture_root(),
         "proxy",
         config("ccs-a/gpt-a").as_bytes(),
         Some(&catalog),

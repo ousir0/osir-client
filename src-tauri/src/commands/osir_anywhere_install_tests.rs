@@ -295,6 +295,51 @@ async fn anywhere_install_preserves_quarantine_and_verifies_bytes_after_marking(
 
 #[cfg(windows)]
 #[tokio::test]
+async fn anywhere_install_private_cache_protects_directory_and_inherited_file_acl() {
+    use super::super::osir_tools::windows_support::{powershell, ps_literal};
+    let cache = io::private_cache().await.unwrap();
+    let file = cache.path().join("acl-probe");
+    std::fs::write(&file, b"non-secret ACL fixture").unwrap();
+    // Use the same fixed Windows PowerShell host as production. The Windows
+    // CI pwsh -> cargo -> powershell chain retains the incompatible module path;
+    // neither cache protection nor this read-back may depend on module autoload.
+    let script = format!(
+        r#"
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$directory = [IO.Directory]::GetAccessControl({})
+$file = [IO.File]::GetAccessControl({})
+if (-not $directory.AreAccessRulesProtected -or $directory.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid) {{ throw 'directory protection' }}
+foreach ($entry in @($directory, $file)) {{
+  $rules = @($entry.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+  if ($rules.Count -ne 2) {{ throw 'unexpected grant count' }}
+  foreach ($rule in $rules) {{
+    if ($rule.IdentityReference.Value -notin @($sid, 'S-1-5-18') -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne 'FullControl') {{ throw 'unexpected grant' }}
+  }}
+  foreach ($who in @($sid, 'S-1-5-18')) {{
+    if (@($rules | Where-Object {{ $_.IdentityReference.Value -eq $who }}).Count -ne 1) {{ throw 'missing principal' }}
+  }}
+}}
+foreach ($rule in $directory.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {{
+  if ($rule.IsInherited -or $rule.InheritanceFlags -ne 'ContainerInherit,ObjectInherit' -or $rule.PropagationFlags -ne 'None') {{ throw 'directory inheritance' }}
+}}
+foreach ($rule in $file.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {{
+  if (-not $rule.IsInherited) {{ throw 'file inheritance' }}
+}}
+'true'
+"#,
+        ps_literal(&cache.path().to_string_lossy()),
+        ps_literal(&file.to_string_lossy()),
+    );
+    assert_eq!(
+        powershell(&script, std::time::Duration::from_secs(15))
+            .await
+            .unwrap(),
+        json!(true)
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
 async fn anywhere_install_preserves_windows_internet_zone_without_modifying_package_bytes() {
     let cache = io::private_cache().await.unwrap();
     let path = cache.path().join("origin.exe");

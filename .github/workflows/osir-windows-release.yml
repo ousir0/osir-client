@@ -144,7 +144,7 @@ jobs:
           workspaces: src-tauri -> target
           cache-bin: false
           cache-workspace-crates: false
-          cache-on-failure: false
+          cache-on-failure: true
 
       - name: Install frozen frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -396,7 +396,7 @@ jobs:
           workspaces: src-tauri -> target
           cache-bin: false
           cache-workspace-crates: false
-          cache-on-failure: false
+          cache-on-failure: true
 
       - name: Install frozen frontend dependencies
         run: pnpm install --frozen-lockfile

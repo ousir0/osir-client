@@ -90,7 +90,7 @@ jobs:
           workspaces: src-tauri -> target
           cache-bin: false
           cache-workspace-crates: false
-          cache-on-failure: false
+          cache-on-failure: true
 
       - name: Install frozen frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -105,7 +105,7 @@ jobs:
           for filter in osir_identity::tests startup::tests database::compatibility::tests anywhere_; do
             log="$RUNNER_TEMP/osir-native-${filter//:/_}.log"
             cargo test --release --locked --target aarch64-apple-darwin --manifest-path src-tauri/Cargo.toml --lib "$filter" -- --test-threads=1 2>&1 | tee "$log"
-            if ! rg -q 'test result: ok\. [1-9][0-9]* passed;' "$log"; then
+            if ! node -e 'const fs=require("node:fs"); if(!/test result: ok\. [1-9][0-9]* passed;/.test(fs.readFileSync(process.argv[1],"utf8"))) process.exit(1)' "$log"; then
               echo "::error::Native regression selected no passing tests: $filter"
               exit 1
             fi
