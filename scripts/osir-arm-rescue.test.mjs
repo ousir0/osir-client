@@ -5,6 +5,11 @@ import { childEnvironment, filters, reviewed, validateSourceIdentity, validateTe
 
 const identity = () => ({ commit: reviewed.sourceCommit, sourceSha256: reviewed.sourceSha256, inputsManifestSha256: reviewed.inputsManifestSha256, dirty: false });
 const log = (filter, count = 1) => Array.from({ length: count }, (_, i) => `test module::${filter}::case_${i} ... ok`).join('\n') + `\n\ntest result: ok. ${count} passed; 0 failed; 0 ignored; 0 measured; 4915 filtered out; finished in 0.20s\n`;
+test('r2 contract rejects the superseded r1 source explicitly', () => {
+  assert.equal(reviewed.sourceCommit, '8bebc7a884b51336590e0b54313f70f3f4364509');
+  assert.equal(reviewed.sourceSha256, 'a376ca7fc36ad9546b8095276cd736b282833513f22d7bc5dce1e44d75914017');
+  assert.throws(() => validateSourceIdentity({ ...identity(), commit: 'a5b49ece14c0abee1599fae8e9e5f47e3012d25b' }));
+});
 test('exact source must retain commit, file bytes, whitelist and clean checkout', () => {
   validateSourceIdentity(identity());
   for (const key of ['commit', 'sourceSha256', 'inputsManifestSha256']) {

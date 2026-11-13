@@ -8,8 +8,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const reviewed = Object.freeze({
   repository: 'ousir0/osir-client',
-  sourceCommit: 'a5b49ece14c0abee1599fae8e9e5f47e3012d25b',
-  sourceSha256: '39f35db8051071f37fc95d86f0c10234907573d3065dd90a7e5ede0f2eda4aad',
+  sourceCommit: '8bebc7a884b51336590e0b54313f70f3f4364509',
+  sourceSha256: 'a376ca7fc36ad9546b8095276cd736b282833513f22d7bc5dce1e44d75914017',
   inputsManifestSha256: 'fd4b85f2d2963d77245cdd27f2c55fd7270ebb82be7b2d3b07430786619c1fcd',
   target: 'aarch64-apple-darwin',
 });
