@@ -1,9 +1,9 @@
 {
   ".gitattributes": "425f0c8f30bb02eef6ead18cdfa66246dc0c5997dd395f3fad4bb7e703476fcd",
   "NEXT-ANYWHERE-CONTRACT.md": "471f5d5eff03c033fd18fce1498a24170550af10acbc7d5a6a1c5922e7a8aaa4",
-  "README.md": "163283f62c2b862fe063f022a28d191113734cec07bb72831317ad7ce90fafe9",
-  "contract.mjs": "03a3262540506f263fb609bf9c3fa4d69092ea5d5505ef276e506c95e72f9056",
-  "contract.test.mjs": "ab478d0fc749c8c81257345ac616e3d58c77ff49f2692591b3a58c44f3d30ada",
+  "README.md": "8782dc21bb351c49a985038a46a04e4d46a12fe83796a10b7d0023a1289017d1",
+  "contract.mjs": "2ce570e531a1c0c9f1061b6b2d7a9548867e472a124c2d0a9b3a1ab114251d30",
+  "contract.test.mjs": "f518298bb79edab571a257cf5d6a06b05d284c23d5e5617af5938f46bf6ea5ba",
   "helpers/check-ui.mjs": "ba75822f5bf818cd218cfb183519f6eb23b382ef03a7398bcf5dadbe6b5e6ff1",
   "helpers/click.swift": "baf2964d9593a3c4fccc1d4fbe2153b2a8a1a0a0be3f2d076c99e03caa246f83",
   "helpers/gui-preflight.swift": "907f096484b97522dc57b6a53d2a175420de98cc39869659cece4a037d0ad6d3",

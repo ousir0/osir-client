@@ -19,8 +19,8 @@ export const LOCKED_PATHS=[
  'reviewed/osir-live-updater-check.mjs','reviewed/osir-updater-click.swift',
  'reviewed/osir-macos-window-probe.swift',
 ];
-export const COMMIT='8bebc7a884b51336590e0b54313f70f3f4364509';
-export const SOURCE='a376ca7fc36ad9546b8095276cd736b282833513f22d7bc5dce1e44d75914017';
+export const COMMIT='ec2b05bab6224334e91922cd70c71faf8e9aee89';
+export const SOURCE='ca4c28e21069dda1cc948e55e5ef8e1438161d96a42a21c0971a8f8848a04e73';
 export const PLATFORMS={
  'darwin-aarch64':{runner:'macos-15',target:'aarch64-apple-darwin',arch:'arm64'},
  'darwin-x86_64':{runner:'macos-15-intel',target:'x86_64-apple-darwin',arch:'x86_64'},

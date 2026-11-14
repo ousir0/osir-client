@@ -22,7 +22,7 @@
   "embeddedUpdaterPublicConfigVerified": true,
   "releaseDiagnostics": {
     "schemaVersion": 1,
-    "executableSha256": "4d6ebe1c56a24a48b66a1e3ba13bab0163bafc244b0c1f307d11d8612a94ce2c",
+    "executableSha256": "b6aa72b9a1f358daa457cb14235fdb7eb60ba9b4ab1f2b8b4d8d2a214463c099",
     "reportSha256": "6cb7a4d6acaac0598694dbb4e0538a1efa88c27be767a20bb0aa8523d8b9198d",
     "report": {
       "schemaVersion": 1,
@@ -52,7 +52,7 @@
   "sourceProvenance": {
     "schemaVersion": 1,
     "algorithm": "sha256",
-    "sourceSha256": "a376ca7fc36ad9546b8095276cd736b282833513f22d7bc5dce1e44d75914017",
+    "sourceSha256": "ca4c28e21069dda1cc948e55e5ef8e1438161d96a42a21c0971a8f8848a04e73",
     "inputsManifestSha256": "fd4b85f2d2963d77245cdd27f2c55fd7270ebb82be7b2d3b07430786619c1fcd",
     "fileCount": 1449,
     "inputs": {
@@ -161,24 +161,24 @@
       "symlinks": "rejected-without-following"
     },
     "git": {
-      "head": "8bebc7a884b51336590e0b54313f70f3f4364509",
+      "head": "ec2b05bab6224334e91922cd70c71faf8e9aee89",
       "dirty": false,
       "dirtyAtStart": false
     },
     "verifiedAtEnd": true
   },
-  "builtAt": "2026-11-13T23:08:02.291Z",
+  "builtAt": "2026-11-14T04:38:07.608Z",
   "packagedMacAcceptance": {
     "name": "macos-packaged-smoke.json",
-    "sha256": "6cdc9df058bc36dd6f8e22d815056d417078c032a04213996c47679ad0fe2f91",
+    "sha256": "1b45e8c12a6827d6b21a50cad29d5a31975132532281c5d535874c286d451bd9",
     "bytes": 2746,
     "scope": "native-intel-window-launch-reopen-no-renderer-ipc"
   },
   "finalizerToolSha256": "b2348a6a0059bfc3eaa39ee41feefb0d99701b5f5524d060add99190f28e6592",
   "updaterUpgradeAcceptance": "not-run",
   "updaterArtifact": {
-    "bytes": 21302580,
-    "sha256": "b6edd0b105cc24fc87f91381fd88a2306fbc29094c03c34035ecbf9c11066d38",
+    "bytes": 21302587,
+    "sha256": "cd83b145d6870bc23a0d8c747a0e894060b1dd977dba23953f0b2165489fdb59",
     "signatureVerified": true
   },
   "localSigningIdentity": "B6B50912E57CC894EE7A3D527FCB34F88E6CCC0D",
@@ -186,25 +186,25 @@
   "packagedMacScreenshots": [
     {
       "name": "macos-launch-window.png",
-      "sha256": "e25dbcc4adc3174ae5a69f7367aad6129d033d792239704148764733f6fff76c",
-      "bytes": 137386
+      "sha256": "e7f5c37f22a683ef5d8a962dcc34845db5f53fca20cfb85dfd6d7e2126db730f",
+      "bytes": 138159
     },
     {
       "name": "macos-reopen-window.png",
-      "sha256": "ef3ec6cb2e57467d2768dd5bbd1d78108435614f31b38fb268d04e070f59234f",
-      "bytes": 137726
+      "sha256": "015b11a65f56c0dbac1dcfecf9b3010d4e2b93cdf85c25ad29ebd9cea6747287",
+      "bytes": 136948
     }
   ],
   "nativeAcceptance": {
     "path": "macos-packaged-smoke.json",
-    "sha256": "6cdc9df058bc36dd6f8e22d815056d417078c032a04213996c47679ad0fe2f91",
+    "sha256": "1b45e8c12a6827d6b21a50cad29d5a31975132532281c5d535874c286d451bd9",
     "bytes": 2746,
     "scope": "native-intel-ci-before-local-signing"
   },
   "installerArtifact": {
     "name": "OSIR-Client-prod-0.1.10-x86_64-apple-darwin.dmg",
-    "sha256": "86370ee98ffb6b81bf8cf2d349ed8b12b7160674846f543e362b776dd55436b2",
-    "bytes": 24061749
+    "sha256": "a70d5de0eb81562e6161375a27357e89399c5e59f40fe1e3aa9a9bc00cb50e33",
+    "bytes": 24061753
   },
   "dmgVerification": {
     "format": "UDZO",

@@ -1,6 +1,6 @@
 # Client 0.1.9 → 0.1.10 公开更新验收 harness
 
-状态：**prepared-not-dispatched**。这是可评审的外部工具，不是更新验收通过回执。未注册 workflow、push 或 dispatch，未下载发行包，未运行 Client。冻结产品源码未改；本机生产 PID 31517 / proxy 15721 不属于操作范围。
+状态：**prepared-not-dispatched**。这是可评审的外部工具，不是更新验收通过回执。workflow 已登记；r3 绑定在专用控制分支提交，尚未 dispatch 或运行 Client。冻结产品源码未改；本机生产 PID 31517 / proxy 15721 不属于操作范围。
 
 ## 验收范围
 
@@ -27,8 +27,8 @@ Windows 复用原 CDP 真实按钮点击及 native IPC，额外绑定 loopback �
 | spec 字段 | 精确要求 |
 | --- | --- |
 | schemaVersion / fromVersion / toVersion | 1 / 0.1.9 / 0.1.10 |
-| sourceCommit | `8bebc7a884b51336590e0b54313f70f3f4364509` |
-| sourceSha256 | `a376ca7fc36ad9546b8095276cd736b282833513f22d7bc5dce1e44d75914017` |
+| sourceCommit | `ec2b05bab6224334e91922cd70c71faf8e9aee89` |
+| sourceSha256 | `ca4c28e21069dda1cc948e55e5ef8e1438161d96a42a21c0971a8f8848a04e73` |
 | harnessCommit | 最终 reviewed harness 所在的真实 40hex dispatch commit；必须等于 GITHUB_SHA |
 | cutover | 仅 confirmed=true；已发生的 confirmedAt UTC ISO 时间；真实 receiptSha256 |
 | feed | 固定 url、最终公开原始 JSON 字节的 sha256、精确 size（≤128 KiB） |
@@ -42,7 +42,7 @@ Windows 复用原 CDP 真实按钮点击及 native IPC，额外绑定 loopback �
 - `final-manifests/darwin-x86_64.json`
 - `final-manifests/windows-x86_64.json`
 
-这些文件当前不存在。每份必须通过最终发行 manifest 校验：0.1.10/prod/com.osir.client、r2 commit/source hash、原生 target/arch、真实 executable hash、原始内置 updater 公钥/端点、verifiedAtEnd=true、非 pending release mode、updater 包大小/hash/signatureVerified=true。manifest 原始 hash 和大小必须与 spec 完全一致。
+这些文件已绑定真实 r3 三平台最终字节。每份必须通过最终发行 manifest 校验：0.1.10/prod/com.osir.client、r3 commit/source hash、原生 target/arch、真实 executable hash、原始内置 updater 公钥/端点、verifiedAtEnd=true、非 pending release mode、updater 包大小/hash/signatureVerified=true。manifest 原始 hash 和大小必须与 spec 完全一致。
 
 对象名称固定为 `OSIR-Client-prod-0.1.10-<target>.app.tar.gz`（Mac）或 `OSIR-Client-prod-0.1.10-x86_64-pc-windows-msvc-setup.exe`。objectUrl 必须在 `https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.10/` 下精确匹配文件名。feedUrl 仅允许同一对象 URL、精确 `https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.10/<filename>`，或精确 `https://osirclaw.com/api/v1/osir-client/download/prod-0.1.10/<platform>/updater`（platform 必须等于当前平台）。不接受其他 release、platform、kind、host、query、fragment 或路径变体。实际旧应用可走其既有生产下载链路；独立读回不跟随重定向。
 
@@ -50,7 +50,7 @@ Windows 复用原 CDP 真实按钮点击及 native IPC，额外绑定 loopback �
 
 评审后可将此目录的锁定文件（包含隐藏的 `.gitattributes`）和最终 manifests 登记到授权 repo `ousir0/osir-client` 的 `diagnostics/client-live-019-0110/`，将 `workflow.review.yml` 原样登记到独立 `.github/workflows/` 文件；只提交具体 harness 文件，不带产品工作树改动。`.gitattributes` 禁止 checkout 换行转换，public spec 以 UTF-8 原始字节写入，确保 Windows 下仍按同一原始 digest 校验。
 
-**目前不登记、不 push、不 dispatch。** 必须先由主控提供最终 public spec、三个最终 manifest 和明确公开切换指令。workflow 只允许手工 dispatch，输入为原始 public_spec、这些 UTF-8 字节的 public_spec_sha256、显式 cutover_confirmed=true。Ubuntu gate 校验完整合同和 focused tests 后，才启动三平台。不得用 JSON 占位内容进行“试跑”。
+**仅 r3 控制输入绑定提交；当前不 dispatch。** 必须先由主控提供真实最终 public feed 字节、切换收据和明确公开切换确认。workflow 只允许手工 dispatch，输入为原始 public_spec、这些 UTF-8 字节的 public_spec_sha256、显式 cutover_confirmed=true。Ubuntu gate 校验完整合同和 focused tests 后，才启动三平台。不得用 JSON 占位内容进行“试跑”。
 
 ## 隔离及证据
 

@@ -22,7 +22,7 @@ function fixture(){
  s.feed.sha256=sha(feed);s.feed.size=feed.length;return {s,manifests,feed};
 }
 function observation(p){return {platform:p.platform,fromVersion:'0.1.9',toVersion:'0.1.10',sourceCommit:COMMIT,sourceSha256:SOURCE,manifestSha256:p.manifestSha256,oldPid:100,newPid:200,oldExecutableSha256:inputs.baseline.find(b=>b.platform===p.platform).executableSha256,newExecutableSha256:p.executableSha256,oldPath:'/synthetic/owned/app',newPath:'/synthetic/owned/app',architecture:PLATFORMS[p.platform].arch,realUiClick:true,oldPidExited:true,automaticRestart:true,nativeWindow:true,syntheticDataPreserved:true,nativeVersionVerified:true,signatureVerified:true,harnessLaunchedAfterClick:false,accountAuthorizationCovered:false,oldSchema:25,newSchema:26,events:['old-ready','fixture-seeded','old-ready-with-fixture','update-clicked','old-exited','new-observed','new-window','data-retained'].map((phase,i)=>({phase,at:new Date(1794614400000+i*1000).toISOString()}))};}
-test('complete r2 identity and exact three platforms required; missing/null placeholders refused',()=>{
+test('complete r3 identity and exact three platforms required; missing/null placeholders refused',()=>{
  const {s}=fixture();validateSpec(s);
  for(const key of Object.keys(s)){const x=structuredClone(s);delete x[key];assert.throws(()=>validateSpec(x),key);}
  for(const change of [{sourceCommit:'a'.repeat(40)},{sourceSha256:'a'.repeat(64)},{harnessCommit:null},{fromVersion:'0.1.10'},{toVersion:'0.1.9'},{extra:'arbitrary endpoint'}])assert.throws(()=>validateSpec({...s,...change}));
