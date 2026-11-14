@@ -1,5 +1,12 @@
 # OSIR API · AI 工作台
 
+## 0.1.11 配套更新
+
+- 从 OSIR Client 启动 DeepSeek Harness 时，使用 OSIR Anywhere 2.2.1 自带的固定版本联络插件，连接 OSIR Anywhere 的独立本机目录。
+- 首次配置前关闭 DeepSeek Harness；已启用独立上游 Anywhere 插件时会提示处理冲突，不自动卸载用户插件。
+- Claude 使用对应工具已生效的原生 Claude 连接；所选密钥需要有效的 Claude 分组权限。Codex 大模型目录读取修复由配套 Anywhere 2.2.1 提供。
+
+
 本仓库基于 [CC Switch](https://github.com/farion1231/cc-switch)，当前分支用于构建 OSIR API 桌面客户端。上游 README、用户手册和发布说明描述的是 CC Switch 原产品，不能直接当作本客户端的能力说明。
 
 ## 开始开发

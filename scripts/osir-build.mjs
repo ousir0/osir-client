@@ -172,6 +172,8 @@ const inputFiles = [
   "scripts/osir-source-snapshot.mjs",
   "scripts/osir-platform-build.test.mjs",
   "scripts/osir-release-ci.test.mjs",
+  "scripts/osir-release-download.mjs",
+  "scripts/osir-release-download.test.mjs",
   "scripts/osir-release-diagnostics.mjs",
   "scripts/osir-release-diagnostics.test.mjs",
   ".github/workflows/osir-windows-release.yml",

@@ -660,6 +660,25 @@ pub async fn osir_launch_tool(
         return Err("命令行工具请在所选项目中新开终端".into());
     }
     #[cfg(target_os = "macos")]
+    if tool_id == "dsh" && target == "desktop" && crate::dsh_config::osir_bridge_enabled() {
+        let bundle = macos::checked_launch_path("osir-anywhere").await?;
+        let mut dsh = vec![macos::detect("dsh").await];
+        macos::refresh_runtime(&app, &mut dsh).await;
+        let running = match dsh[0].runtime_status {
+            ToolRuntimeStatus::Running => true,
+            ToolRuntimeStatus::Stopped => false,
+            ToolRuntimeStatus::Unavailable => {
+                return Err("无法确认 DeepSeek Harness 是否关闭，请重新检测".into())
+            }
+        };
+        let dsh_bundle = macos::checked_launch_path("dsh").await?;
+        let cli = crate::dsh_config::desktop_cli(&dsh_bundle)
+            .map_err(|error| error.to_string())?;
+        crate::dsh_config::prepare_desktop_bridge(&bundle.join("Contents/Resources"), &cli, running)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
     let result = if target == "desktop" {
         if tool_id == "workbuddy" {
             macos::launch_workbuddy(&app, restart).await
