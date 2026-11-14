@@ -1,0 +1,105 @@
+name: OSIR Windows descriptor contract (reviewed manual gate)
+
+on:
+  workflow_dispatch:
+
+env:
+  CLIENT_COMMIT: 8bebc7a884b51336590e0b54313f70f3f4364509
+  WRITER_SHA: 99b112d10675ea1ce2a00ed1446f4420eca2398b0e268c1d19f65f20928c90d2
+  READER_SHA: 99e3051afb222cc887069f483ba603a48ab67a620bc2d052bf6b92e8b824a572
+
+permissions:
+  contents: read
+
+jobs:
+  native-contract:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Preserve exact LF source bytes before checkout
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git config --global core.eol lf
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Checkout exact dispatched harness
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - name: Checkout exact same-repository frozen Client source (no overlay)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: 8bebc7a884b51336590e0b54313f70f3f4364509
+          path: frozen-client
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Portable contract and fixture regressions
+        shell: pwsh
+        run: |
+          python -m unittest discover -s harness/connector/tests -p test_osir_binding_windows.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python harness/scripts/osir-windows-descriptor-contract.test.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Bind source and prepare exact writer adapter
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, subprocess
+          base = pathlib.Path.cwd()
+          assert os.environ['GITHUB_REPOSITORY'] == 'ousir0/osir-client'
+          actual = subprocess.check_output(['git', '-C', 'frozen-client', 'rev-parse', 'HEAD'], text=True).strip()
+          assert actual == os.environ['CLIENT_COMMIT']
+          reader = base / 'harness/connector/connector/runtimes/codex/osir_binding_windows.py'
+          assert hashlib.sha256(reader.read_bytes()).hexdigest() == os.environ['READER_SHA']
+          subprocess.run(['python', 'harness/scripts/osir-windows-descriptor-producer.py',
+              '--client-source', 'frozen-client/src-tauri/src/mode/anywhere_binding.rs',
+              '--client-source-sha256', os.environ['WRITER_SHA'], '--output', 'writer-adapter'], check=True)
+          identity = {'schemaVersion': 1, 'harnessCommit': os.environ['GITHUB_SHA'],
+              'clientCommit': actual, 'clientWriterSha256': os.environ['WRITER_SHA'],
+              'readerSha256': os.environ['READER_SHA'], 'runId': os.environ['GITHUB_RUN_ID'],
+              'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'], 'repository': os.environ['GITHUB_REPOSITORY']}
+          pathlib.Path('workflow-identity.json').write_text(json.dumps(identity, indent=2), encoding='utf-8')
+      - name: Compile tiny writer fixture (no Client build)
+        shell: python
+        run: |
+          import os, subprocess
+          # Toolchain/build children get only runner/toolchain environment.
+          allowed = {'PATH','SYSTEMROOT','WINDIR','SYSTEMDRIVE','COMSPEC','TEMP','TMP','USERPROFILE','HOMEDRIVE','HOMEPATH',
+              'CARGO_HOME','RUSTUP_HOME','PROCESSOR_ARCHITECTURE','NUMBER_OF_PROCESSORS','PATHEXT'}
+          env = {k:v for k,v in os.environ.items() if k.upper() in allowed}
+          subprocess.run(['rustup', 'toolchain', 'install', '1.95.0', '--profile', 'minimal'], env=env, check=True)
+          subprocess.run(['cargo', '+1.95.0', 'generate-lockfile', '--manifest-path', 'writer-adapter/Cargo.toml'], env=env, check=True)
+          subprocess.run(['cargo', '+1.95.0', 'build', '--locked', '--manifest-path', 'writer-adapter/Cargo.toml'], env=env, check=True)
+      - name: Native default profile, real writer and adversarial fixtures
+        shell: python
+        run: |
+          import hashlib, os, pathlib, subprocess, sys
+          binary = pathlib.Path('writer-adapter/target/debug/osir-windows-real-writer-fixture.exe').resolve()
+          allowed = {'PATH','SYSTEMROOT','WINDIR','SYSTEMDRIVE','COMSPEC','TEMP','TMP','USERPROFILE','HOMEDRIVE','HOMEPATH','PATHEXT'}
+          env = {k:v for k,v in os.environ.items() if k.upper() in allowed}
+          command = [sys.executable, 'harness/scripts/osir-windows-descriptor-contract.py',
+              '--reader', 'harness/connector/connector/runtimes/codex/osir_binding_windows.py',
+              '--reader-sha256', os.environ['READER_SHA'], '--source-commit', os.environ['GITHUB_SHA'],
+              '--client-source-sha256', os.environ['WRITER_SHA'], '--producer', str(binary),
+              '--producer-sha256', hashlib.sha256(binary.read_bytes()).hexdigest(),
+              '--producer-receipt', 'writer-adapter/producer-source.json', '--output', 'native-evidence']
+          subprocess.run(command, env=env, check=True)
+      - name: Collect small raw evidence (always)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-descriptor-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            native-evidence/*.json
+            workflow-identity.json
+            writer-adapter/producer-source.json
+            writer-adapter/Cargo.lock
+            writer-adapter/Cargo.toml
+            writer-adapter/src/main.rs
