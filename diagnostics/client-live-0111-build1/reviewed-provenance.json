@@ -10,8 +10,8 @@
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-live-0111-build1-control/diagnostics/client-live-0110-0111/README.md",
     "sourceSha256": "49c1ff1a98577d7b6945f8ed8e096f34ab194b96e375df68841d0ebd6bd0386d",
     "path": "README.md",
-    "sha256": "e01efcdf1e7c9c324fa7e65251c1b5f52255995217011e9f6743d3cf453cef39",
-    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control"
+    "sha256": "e35e90a0e686f4272c23506243a367dccf0be15fb0c0f9f47fcc68904e905882",
+    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control; bound real finalized +1 inputs and documented signed-out AX boundary"
   },
   {
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-0111-build1-freeze-review/prod-current.json",
@@ -59,15 +59,15 @@
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-live-0111-build1-control/diagnostics/client-live-0110-0111/contract.mjs",
     "sourceSha256": "8934f56aabd9dbc59e17a73201b4d66a412b08826cadccaf39b01d2d482f04af",
     "path": "contract.mjs",
-    "sha256": "c4c0e14fc250f831df541a676c58e503d4c4db4d0ced1eab3e3653e99f76041c",
-    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control"
+    "sha256": "015f2ea9b0cadde7a1ea09343de0fd860dac1dda79b751c46c652287162e0482",
+    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control; bound real finalized +1 inputs and documented signed-out AX boundary"
   },
   {
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-live-0111-build1-control/diagnostics/client-live-0110-0111/contract.test.mjs",
     "sourceSha256": "f074b3590b8ad1de2667331572bc75c3aaa129cd23bc0fd125e79ec77a1406b7",
     "path": "contract.test.mjs",
-    "sha256": "cd8ab0e227926a0891c11f84a06e15919b14312178c892dbf46c4e168f8fa96b",
-    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control"
+    "sha256": "4bfc7e285bc82c378d870c9ad9b01ff2a5a96b0a71306116f2ff3ea34ab9a18d",
+    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control; bound real finalized +1 inputs and documented signed-out AX boundary"
   },
   {
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-live-0111-build1-control/diagnostics/client-live-0110-0111/helpers/check-ui.mjs",
@@ -129,8 +129,8 @@
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-live-0111-build1-control/diagnostics/client-live-0110-0111/prepare-next.mjs",
     "sourceSha256": "89f517aaf93a8125562a7e873fe9f0b9d807e021623c8b396c4cf5de03cddcef",
     "path": "prepare-next.mjs",
-    "sha256": "1bf056a99c517f1a346c3a613c068d8342cd0ca4e4bbb0e7c5e6065681f695f4",
-    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control"
+    "sha256": "9b031baeaab2d84b670fd0154d6866d2a2284609af92e1fb018309eacfcc0b77",
+    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control; bound real finalized +1 inputs and documented signed-out AX boundary"
   },
   {
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-live-0111-build1-control/diagnostics/client-live-0110-0111/reviewed/disposable.py",
@@ -215,5 +215,26 @@
     "path": "workflow.review.yml",
     "sha256": "09eee600e13a1ebb691252cd3e6f054149ea3c92c54906ba87ef1b612dfece3a",
     "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261115-client-0111-build1-finalized/mac-arm64/build-manifest.json",
+    "sourceSha256": "5c101b860fe4ae84003362e9ae7bcd850185bf2b4d9e8b95d6df0c277f5e88eb",
+    "path": "final-manifests/darwin-aarch64.json",
+    "sha256": "5c101b860fe4ae84003362e9ae7bcd850185bf2b4d9e8b95d6df0c277f5e88eb",
+    "transformation": "Byte-identical finalized manifest; no signing material, feed or cutover receipt added"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261115-client-0111-build1-finalized/mac-intel/build-manifest.json",
+    "sourceSha256": "86d1adbf70ca9d8d565d9a9d52226c14c563990aed84711453b3a973f41bc58f",
+    "path": "final-manifests/darwin-x86_64.json",
+    "sha256": "86d1adbf70ca9d8d565d9a9d52226c14c563990aed84711453b3a973f41bc58f",
+    "transformation": "Byte-identical finalized manifest; no signing material, feed or cutover receipt added"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261115-client-0111-build1-finalized/windows-x64/build-manifest.json",
+    "sourceSha256": "2f946095537f1c83db07c4ccba2ac19818770fbc479ed1a863d28c95612cb33e",
+    "path": "final-manifests/windows-x86_64.json",
+    "sha256": "2f946095537f1c83db07c4ccba2ac19818770fbc479ed1a863d28c95612cb33e",
+    "transformation": "Byte-identical finalized manifest; no signing material, feed or cutover receipt added"
   }
 ]

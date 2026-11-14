@@ -1,6 +1,6 @@
 # 0.1.11 → 0.1.11+1：发布后真实 updater harness
 
-状态：准备完成后供主控审阅；未 push、dispatch、下载包或执行原生升级。不能作为发布前升级通过收据。
+状态：三份真实 final manifests 已逐字节接入并纳入 seal；此控制分支获授权 push，尚未 dispatch 或执行原生升级。不能作为升级通过收据。
 
 ## 固定身份
 
@@ -21,16 +21,22 @@
 
 Windows 新增真实已安装应用的只读 `check_app_update_available`，要求成功返回 JSON null；异常/超时绝不能当作 null。再观察真实 renderer 启动检查窗口，拒绝再次出现安装按钮，重读同一真实 feed；保存 `native-no-reoffer.json` 并绑定新 PID/二进制 hash。只检查，不再次安装。
 
-**Mac 单一未补齐项：继承的 AX-only 驱动没有已安装 renderer 的可信只读 IPC 入口。** 没弹窗可能只是网络失败，因此不会伪称 no-reoffer 通过。Mac 驱动仍准备真实升级/窗口/原生版本/数据保留步骤，最后保存 pending no-reoffer 和 blocked 平台结果，绝不生成 passed。无需为此修改冻结产品、注入应用或重编译。Windows 可独立完整执行；三平台总体仍 pending，不能拿旧结果顶替。
+**Mac no-reoffer 保持 blocked。** AX 可以在已登录后的真实“关于与更新”页面点击“检查更新”，通过新出现的“已是最新”成功提示与“检查更新失败，请稍后重试。”错误提示区分结果；不能仅以没弹更新窗作为成功。但本 harness 的一次性 runner 不登录：冻结源 `src/features/osir/OsirRoot.tsx:72-79` 只在 connected 时挂载工作台；`OsirWorkbench.tsx:1685-1700` 内才有设置/关于；`AboutSection.tsx:162-171` 才拥有上述检查与成功/失败提示。欢迎页没有该控件，自动检查失败只写 context/console（`UpdateContext.tsx:108-111`）。因此当前完整 AX 路径缺少登录后的真实入口，不能用注入、调试口、伪造会话或“无弹窗”补齐。Mac 驱动保留升级/窗口/原生版本/数据保留观察，最后 pending no-reoffer + blocked，绝不生成 passed。Windows 可独立完整执行；三平台总体仍 pending。
 
 ## 当前 pending（不是占位发布凭据）
 
-1. 三平台候选 **final** manifests 与准确 CI artifact 来源：未收到。原始文件必须在 `final-manifests/{darwin-aarch64,darwin-x86_64,windows-x86_64}.json`；不创建假 manifest。待文件到齐后另立主控审阅 commit，再固定最终 harnessCommit。
-2. 精确 build attempts 成功状态：必须再次只读核验；准备时仅核实两个 run 均指向候选 source commit、attempt1，当时 in_progress。
-3. `0.1.11+1` 真正正式切换回执、真实 live feed 原始字节、实际 UTC 时间：未收到。不能预造。
-4. Mac 已安装 updater 无更新返回值：pending，见上。
+1. `0.1.11+1` 真正正式切换回执、真实 live feed 原始字节、实际 UTC 时间：未收到。不能预造；主控交付前禁止 dispatch。
+2. Mac 已安装 updater 无更新结果：blocked，见上。
 
-Helper seal 只锁准备文件/真实基线；最终 manifests 由严格 spec 的原始 SHA256/size、源码/二进制身份绑定，并且 CI 从 spec.harnessCommit 对应 checkout 读取。因此缺 final manifests 时 validate/assemble/native gate 均拒绝。
+两个 exact build runs 已完成且 success，attempt 均为 1；执行时仍重新核验。三份真实输入来自 `20261115-client-0111-build1-finalized/{mac-arm64,mac-intel,windows-x64}/build-manifest.json`，没有改写；公开 SHA-256 如下：
+
+| final-manifests 文件 | 原 CI artifact ID | 原 artifact archive SHA-256 | final manifest SHA-256 |
+| --- | --- | --- | --- |
+| darwin-aarch64.json | 14129973590 | 21a6aa5ba9ee12042dc0694e6ee777c22e66c012d7c9b8f68ddb898eee8be9d6 | 5c101b860fe4ae84003362e9ae7bcd850185bf2b4d9e8b95d6df0c277f5e88eb |
+| darwin-x86_64.json | 14129478520 | 5ab4ca759710753ff49206fb2726411d8af4a71cda078cf8e3ed534b24f66996 | 86d1adbf70ca9d8d565d9a9d52226c14c563990aed84711453b3a973f41bc58f |
+| windows-x86_64.json | 14129726888 | 7de152d57442f5b04cd213dec4187130dcc41755418dd9ca54b49ccb558d623c | 2f946095537f1c83db07c4ccba2ac19818770fbc479ed1a863d28c95612cb33e |
+
+Helper seal 同时锁准备文件、真实基线和三份 final manifests；最终 manifests 另由严格 spec 的原始 SHA256/size、源码/二进制身份绑定，CI 从 spec.harnessCommit 对应 checkout 读取。缺文件、内容改变或没有真实切换输入时门禁拒绝。
 
 ## 本地入口与主控执行顺序
 
@@ -43,7 +49,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v test_harness.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s reviewed -p test_disposable.py -k test_0111_build1 -v
 ```
 
-原生入口：`live-macos.py` / `live-windows.ps1`；实现 workflow `.github/workflows/osir-client-live-0111-build1.yml`。已登记的 dispatch 入口仍为 `.github/workflows/osir-client-live-019-0110.yml`，仅本独立控制分支将其转发到同 commit 新 workflow；不继承 secrets。主控审阅通过且明确授权后才可 push/dispatch。
+原生入口：`live-macos.py` / `live-windows.ps1`；实现 workflow `.github/workflows/osir-client-live-0111-build1.yml`。已登记的 dispatch 入口仍为 `.github/workflows/osir-client-live-019-0110.yml`，仅本独立控制分支将其转发到同 commit 新 workflow；不继承 secrets。已授权 push；dispatch 仍必须等真实 feed 切到 `prod-0.1.11.build.1` 且主控提供实际 cutover 回执。
 
 发布后才可建立显式外部 context JSON，字段精确为：
 

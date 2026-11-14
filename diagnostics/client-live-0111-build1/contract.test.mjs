@@ -85,6 +85,15 @@ test('production feed route still binds the actual public feed URL, signature an
  }
 });
 test('final manifest raw bytes, signed artifact, native architecture and source provenance all bound',()=>{
+ // Real finalized input checks are file-only: no fabricated cutover/feed or runtime receipt.
+ for(const [platform,policy] of Object.entries(PLATFORMS)){
+  const bytes=readFileSync(join(ROOT,`final-manifests/${platform}.json`)),m=JSON.parse(bytes);
+  const name=`OSIR-Client-prod-0.1.11.build.1-${policy.target}${platform.startsWith('darwin')?'.app.tar.gz':'-setup.exe'}`;
+  const p={platform,manifestSha256:sha(bytes),manifestSize:bytes.length,executableSha256:m.releaseDiagnostics.executableSha256,updater:{objectUrl:objectUrl('0.1.11+1',name),sha256:m.updaterArtifact.sha256,size:m.updaterArtifact.bytes}};
+  validateManifest({toVersion:'0.1.11+1'},p,bytes);
+  assert.equal(m.updaterUpgradeAcceptance,'not-run');
+  assert.throws(()=>validateManifest({toVersion:'0.1.11+1'},p,Buffer.concat([bytes,Buffer.from('\n')])));
+ }
  const {s,manifests}=fixture();for(const p of s.platforms)validateManifest(s,p,manifests[p.platform]);
  const p=s.platforms[0],original=JSON.parse(manifests[p.platform]);
  for(const change of [m=>m.sourceProvenance.git.head='c'.repeat(40),m=>m.architectures=['x86_64'],m=>m.releaseDiagnostics.executableSha256=sha('wrong'),m=>m.updaterArtifact.signatureVerified=false,m=>m.sourceProvenance.verifiedAtEnd=false]){
@@ -183,11 +192,11 @@ test('installed native null result is mandatory; pending/error/missing check can
  const o=observation(p);assert.throws(()=>validateObservation(s,p,{...o,noReofferCheckCompleted:false}));
 });
 
-test('local preparation reports absent final manifests and refuses actual baseline feed without output',()=>{
+test('local preparation binds final manifests and refuses actual baseline feed without output',()=>{
  const inspect=spawnSync(process.execPath,[join(ROOT,'prepare-next.mjs'),'inspect'],{encoding:'utf8'});assert.equal(inspect.status,0,inspect.stderr);
  const pending=JSON.parse(inspect.stdout);assert.equal(pending.nativeExecution,'not-run');
- // Preparation checkout intentionally contains no candidate final manifests.
- assert.deepEqual(pending.missingFinalManifests,Object.keys(PLATFORMS).filter(p=>!existsSync(join(ROOT,`final-manifests/${p}.json`))));
+ assert.deepEqual(pending.missingFinalManifests,[]);
+ for(const p of pending.finalManifests){const raw=readFileSync(join(ROOT,p.manifestPath));assert.equal(p.manifestSha256,sha(raw));assert.equal(p.manifestSize,raw.length);}
  const root=mkdtempSync(join(tmpdir(),'osir-build1-pending-unit-'));
  try{
   const context=join(root,'context.json'),output=join(root,'must-not-exist.json');
