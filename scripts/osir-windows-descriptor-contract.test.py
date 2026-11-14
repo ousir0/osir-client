@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,11 +58,51 @@ class FixtureTests(unittest.TestCase):
                 producer.prepare(source, digest, root / 'adapter')
 
     def test_required_native_checks_are_explicit_and_do_not_omit_real_producer(self):
-        self.assertEqual(len(gate.REQUIRED_CHECKS), 18)
-        self.assertEqual(len(set(gate.REQUIRED_CHECKS)), 18)
+        self.assertEqual(len(gate.REQUIRED_CHECKS), 20)
+        self.assertEqual(len(set(gate.REQUIRED_CHECKS)), 20)
         for name in ['defaultProfileRealClientProducerAccepted', 'profileAncestorSecurityUnchanged',
-                     'nonPrivateConfigRetainsOwnerPolicy', 'foreignOwnerRejected', 'heldLeafAndAncestorDenyReplacement']:
+                     'nonPrivateConfigRetainsOwnerPolicy', 'foreignOwnerRejected', 'heldLeafAndAncestorDenyReplacement',
+                     'effectiveTokenOwnerObserved', 'denyOnlyPrivilegedOwnerRejected']:
             self.assertIn(name, gate.REQUIRED_CHECKS)
+
+    def test_testonly_impersonation_reverts_and_closes_handles_even_on_read_error(self):
+        # Synthetic fixture lifecycle test; no Windows or account is modified.
+        reader = gate.load_reader(ROOT / 'connector/connector/runtimes/codex/osir_binding_windows.py')
+        for deny_admin in [False, True]:
+            state = {'impersonating': False, 'closed': [], 'defaultChanges': [], 'disableFlags': []}
+            fixture = gate.NativeFixtures.__new__(gate.NativeFixtures)
+            fixture.reader, fixture.user = reader, reader._well_known(5, 21, 1000)
+            def identity():
+                return reader._TokenIdentity(fixture.user, fixture.user, (), (), 'thread' if state['impersonating'] else 'process')
+            def set_handle(out, value):
+                out._obj.value = value
+                return True
+            def default_owner(_token, kind, _owner, _size):
+                state['defaultChanges'].append(kind)
+                return True
+            def disable(_token, flags, count, _sids, _privilege_count, _privileges, _restrict_count, _restrict, out):
+                state['disableFlags'].append((flags, count))
+                return set_handle(out, 303)
+            def impersonate(_thread, _token):
+                state['impersonating'] = True
+                return True
+            def revert():
+                state['impersonating'] = False
+                return True
+            fixture.api = SimpleNamespace(identity=identity, checked=lambda value, _reason: self.assertTrue(value),
+                close=lambda handle: state['closed'].append(handle.value))
+            fixture.kernel = SimpleNamespace(GetCurrentProcess=lambda: -1)
+            fixture.advapi = SimpleNamespace(OpenProcessToken=lambda _process, _access, out: set_handle(out, 101),
+                DuplicateTokenEx=lambda _token, _access, _attributes, _level, _type, out: set_handle(out, 202),
+                SetTokenInformation=default_owner, CreateRestrictedToken=disable, SetThreadToken=impersonate, RevertToSelf=revert)
+            with self.subTest(deny_admin=deny_admin), self.assertRaisesRegex(ValueError, 'synthetic-read-failure'):
+                with fixture.test_token(deny_admin=deny_admin) as actual:
+                    self.assertEqual(actual.source, 'thread')
+                    raise ValueError('synthetic-read-failure')
+            self.assertFalse(state['impersonating'])
+            self.assertEqual(state['closed'], [303, 202, 101] if deny_admin else [202, 101])
+            self.assertEqual(state['defaultChanges'], [4])
+            self.assertEqual(state['disableFlags'], [(0, 1)] if deny_admin else [])
 
     @unittest.skipIf(sys.platform == 'win32', 'This specifically checks non-Windows refusal')
     def test_non_windows_gate_is_failed_unsupported_never_native_passed(self):

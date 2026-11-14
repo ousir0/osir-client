@@ -18,11 +18,11 @@ import struct
 import subprocess
 import sys
 import tempfile
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 
-REQUIRED_CHECKS = ('defaultProfileRealClientProducerAccepted', 'trustedWritersAndForeignReadAccepted', 'safeInheritedDaclAccepted', 'foreignMutationRightsRejected', 'inheritedForeignWriterRejected', 'nullDaclRejected', 'foreignOwnerRejected', 'directoryRejected', 'multipleLinksRejected', 'leafReparseRejected', 'ancestorJunctionRejected', 'oversizeRejected', 'nonPrivateConfigRetainsOwnerPolicy', 'activeWriterRejected', 'heldLeafAndAncestorDenyReplacement', 'handlesClosed', 'profileAncestorSecurityUnchanged', 'syntheticSubtreeRemoved')
+REQUIRED_CHECKS = ('defaultProfileRealClientProducerAccepted', 'trustedWritersAndForeignReadAccepted', 'safeInheritedDaclAccepted', 'foreignMutationRightsRejected', 'inheritedForeignWriterRejected', 'nullDaclRejected', 'foreignOwnerRejected', 'directoryRejected', 'multipleLinksRejected', 'leafReparseRejected', 'ancestorJunctionRejected', 'oversizeRejected', 'nonPrivateConfigRetainsOwnerPolicy', 'activeWriterRejected', 'heldLeafAndAncestorDenyReplacement', 'handlesClosed', 'profileAncestorSecurityUnchanged', 'syntheticSubtreeRemoved', 'effectiveTokenOwnerObserved', 'denyOnlyPrivilegedOwnerRejected')
 
 
 def sha(path):
@@ -41,7 +41,8 @@ class NativeFixtures:
     def __init__(self, reader):
         self.reader = reader
         self.api = reader._api()
-        self.user = self.api.user()
+        self.identity = self.api.identity()
+        self.user = self.identity.user
         self.kernel, self.advapi = self.api.kernel, self.api.advapi
         bind = self.api._bind
         bind(self.advapi, 'ConvertStringSecurityDescriptorToSecurityDescriptorW',
@@ -51,10 +52,70 @@ class NativeFixtures:
         bind(self.kernel, 'CreateSymbolicLinkW', [C.c_wchar_p, C.c_wchar_p, reader._DWORD], C.c_ubyte)
         bind(self.kernel, 'DeviceIoControl', [reader._HANDLE, reader._DWORD, reader._HANDLE, reader._DWORD,
              reader._HANDLE, reader._DWORD, C.POINTER(reader._DWORD), reader._HANDLE], reader._BOOL)
+        bind(self.advapi, 'DuplicateTokenEx', [reader._HANDLE, reader._DWORD, reader._HANDLE,
+             reader._DWORD, reader._DWORD, C.POINTER(reader._HANDLE)], reader._BOOL)
+        bind(self.advapi, 'SetTokenInformation', [reader._HANDLE, reader._DWORD, reader._HANDLE, reader._DWORD], reader._BOOL)
+        bind(self.advapi, 'SetThreadToken', [C.POINTER(reader._HANDLE), reader._HANDLE], reader._BOOL)
+        bind(self.advapi, 'RevertToSelf', [], reader._BOOL)
+        bind(self.advapi, 'CreateRestrictedToken', [reader._HANDLE, reader._DWORD, reader._DWORD,
+             C.POINTER(reader._SidAndAttributes), reader._DWORD, reader._HANDLE, reader._DWORD,
+             C.POINTER(reader._SidAndAttributes), C.POINTER(reader._HANDLE)], reader._BOOL)
+
 
     @staticmethod
     def sid_text(raw):
         return 'S-1-' + str(int.from_bytes(raw[2:8], 'big')) + ''.join('-' + str(n) for n in struct.unpack('<' + 'I' * raw[1], raw[8:]))
+
+    def token_observation(self):
+        identity = self.api.identity()
+        return {'source': identity.source, 'userSid': self.sid_text(identity.user),
+                'defaultOwnerSid': self.sid_text(identity.default_owner),
+                'qualifiedOwnerSids': sorted(self.sid_text(sid) for sid in self.reader._qualified_owners(identity)),
+                'groups': [{'sid': self.sid_text(sid), 'attributes': hex(attributes),
+                            'enabled': bool(attributes & 4), 'ownerCapable': bool(attributes & 8),
+                            'denyOnly': bool(attributes & 0x10)} for sid, attributes in identity.groups],
+                'restrictingSids': [{'sid': self.sid_text(sid), 'attributes': hex(attributes)}
+                                    for sid, attributes in identity.restricting_sids]}
+
+    @contextmanager
+    def test_token(self, *, deny_admin=False):
+        # Duplicate only our existing token. Change default owner to its user;
+        # optionally REMOVE Administrators ability. No privilege is enabled and
+        # no new account/process/global token setting is introduced.
+        if self.api.identity().source != 'process':
+            raise ValueError('Native fixture requires initial process context')
+        with ExitStack() as stack:
+            original, duplicate = self.reader._HANDLE(), self.reader._HANDLE()
+            self.api.checked(self.advapi.OpenProcessToken(self.kernel.GetCurrentProcess(), 0x0A, C.byref(original)), 'fixture-open-token')
+            stack.callback(self.api.close, original)
+            self.api.checked(self.advapi.DuplicateTokenEx(original, 0x8E, None, 2, 2, C.byref(duplicate)), 'fixture-duplicate-token')
+            stack.callback(self.api.close, duplicate)
+            user_buffer = C.create_string_buffer(self.user)
+            owner = self.reader._HANDLE(C.addressof(user_buffer))
+            self.api.checked(self.advapi.SetTokenInformation(duplicate, 4, C.byref(owner), C.sizeof(owner)), 'fixture-default-owner')
+            effective = duplicate
+            if deny_admin:
+                admin_buffer = C.create_string_buffer(self.reader._ADMINISTRATORS)
+                disabled = self.reader._SidAndAttributes(C.addressof(admin_buffer), 0)
+                restricted = self.reader._HANDLE()
+                self.api.checked(self.advapi.CreateRestrictedToken(duplicate, 0, 1, C.byref(disabled), 0, None,
+                                 0, None, C.byref(restricted)), 'fixture-disable-administrators')
+                stack.callback(self.api.close, restricted)
+                effective = restricted
+            self.api.checked(self.advapi.SetThreadToken(None, effective), 'fixture-impersonate')
+            try:
+                yield self.api.identity()
+            finally:
+                self.api.checked(self.advapi.RevertToSelf(), 'fixture-revert-self')
+
+    def owner_current(self, path):
+        descriptor = self.reader._HANDLE()
+        self.api.checked(self.advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            'O:' + self.sid_text(self.user), 1, C.byref(descriptor), None), 'fixture-owner-sddl')
+        try:
+            self.api.checked(self.advapi.SetFileSecurityW(str(path), 1, descriptor), 'fixture-set-owner')
+        finally:
+            self.kernel.LocalFree(descriptor)
 
     def set_security(self, path, dacl, *, owner=None):
         value = ('O:' + owner if owner else '') + 'D:' + dacl
@@ -67,8 +128,11 @@ class NativeFixtures:
         finally:
             self.kernel.LocalFree(descriptor)
 
-    def trusted(self, path, extra=''):
-        self.set_security(path, 'P(A;;FA;;;' + self.sid_text(self.user) + ')(A;;FA;;;SY)(A;;FA;;;BA)' + extra)
+    def trusted(self, path, extra='', *, owner=None):
+        # DACL tests use explicit current-user owner so owner checks cannot
+        # mask the permission being tested. Never called on real producer output.
+        self.set_security(path, 'P(A;;FA;;;' + self.sid_text(self.user) + ')(A;;FA;;;SY)(A;;FA;;;BA)' + extra,
+                          owner=owner or self.sid_text(self.user))
 
     def ancestry(self, profile):
         values = []
@@ -104,10 +168,12 @@ class NativeFixtures:
                     offset = 8
                     for _ in range(struct.unpack_from('<H', raw, 4)[0]):
                         kind, flags, size = struct.unpack_from('<BBH', raw, offset)
-                        entries.append({'kind': kind, 'flags': flags, 'mask': hex(struct.unpack_from('<I', raw, offset + 4)[0]) if size >= 8 else None})
+                        entries.append({'kind': kind, 'flags': flags, 'mask': hex(struct.unpack_from('<I', raw, offset + 4)[0]) if size >= 8 else None,
+                                        'trusteeSid': self.sid_text(raw[offset + 8:offset + size]) if kind in (0, 1) and size >= 16 else None})
                         offset += size
                 return {'ownerSid': self.sid_text(self.api.sid(owner)), 'effectiveUserSid': self.sid_text(self.user),
-                        'daclSha256': hashlib.sha256(raw).hexdigest() if raw else None, 'aces': entries}
+                        'daclSha256': hashlib.sha256(raw).hexdigest() if raw else None, 'aces': entries,
+                        'effectiveToken': self.token_observation()}
             finally:
                 self.kernel.LocalFree(descriptor)
 
@@ -151,6 +217,7 @@ def run_native(args, report, observations):
     # Preserve drive / C:\Users / profile security exactly as supplied by runner.
     before_ancestors = fixtures.ancestry(profile)
     observations['profileAncestorsBefore'] = before_ancestors
+    observations['effectiveTokenBefore'] = fixtures.token_observation()
     report['nativeMachines'] = ['windows-' + platform.machine().lower()]
     observations['abiFileInfoBytes'] = C.sizeof(reader._FileInfo)
     if C.sizeof(reader._FileInfo) != 52:
@@ -184,6 +251,12 @@ def run_native(args, report, observations):
         return value
 
     try:
+        def effective_owner_observed():
+            identity = fixtures.api.identity()
+            assert identity.user == fixtures.user
+            assert identity.default_owner in reader._qualified_owners(identity), 'Runner default owner is unqualified'
+            return fixtures.token_observation()
+        case('effectiveTokenOwnerObserved', effective_owner_observed)
         def real_producer():
             receipt = validate_producer(args)
             environment = {key: value for key, value in os.environ.items() if key.upper() in {
@@ -215,6 +288,7 @@ def run_native(args, report, observations):
             fixtures.set_security(directory, 'P(A;OICI;FA;;;' + fixtures.sid_text(fixtures.user) + ')(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GR;;;WD)')
             target = directory / 'binding.json'
             target.write_bytes(b'synthetic-only')
+            fixtures.owner_current(target)
             assert reader.read_secure(target, private=True) == b'synthetic-only'
         case('safeInheritedDaclAccepted', inherited)
         def foreign_writers():
@@ -231,6 +305,7 @@ def run_native(args, report, observations):
             fixtures.set_security(directory, 'P(A;OICI;FA;;;' + fixtures.sid_text(fixtures.user) + ')(A;OICI;FA;;;WD)')
             target = directory / 'binding.json'
             target.write_bytes(b'synthetic-only')
+            fixtures.owner_current(target)
             return rejects(target, reason='untrusted-writer')
         case('inheritedForeignWriterRejected', unsafe_inherited)
         def null_acl():
@@ -240,9 +315,24 @@ def run_native(args, report, observations):
         case('nullDaclRejected', null_acl)
         def owner():
             target = file('owner.json')
-            fixtures.set_security(target, 'P(A;;FA;;;' + fixtures.sid_text(fixtures.user) + ')', owner='BA')
-            return rejects(target, reason='foreign-owner')
+            fixtures.trusted(target, owner='BA')
+            observations['nonDefaultOwnerLeaf'] = fixtures.security_observation(target)
+            with fixtures.test_token() as identity:
+                assert identity.source == 'thread' and identity.user == fixtures.user
+                assert identity.default_owner == identity.user
+                observations['nonDefaultOwnerToken'] = fixtures.token_observation()
+                return rejects(target, reason='foreign-owner')
         case('foreignOwnerRejected', owner)
+        def deny_only_owner():
+            target = file('deny-only-owner.json')
+            fixtures.trusted(target, owner='BA')
+            with fixtures.test_token(deny_admin=True) as identity:
+                matching = [attributes for sid, attributes in identity.groups if sid == reader._ADMINISTRATORS]
+                assert len(matching) == 1 and matching[0] & 0x10 and not matching[0] & 4
+                observations['denyOnlyOwnerToken'] = fixtures.token_observation()
+                assert reader._ADMINISTRATORS not in reader._qualified_owners(identity)
+                return rejects(target, reason='foreign-owner')
+        case('denyOnlyPrivilegedOwnerRejected', deny_only_owner)
         case('directoryRejected', lambda: rejects(root))
         def hardlink():
             target = file('hardlink-original.json')
@@ -317,6 +407,9 @@ def run_native(args, report, observations):
             return {'before': count, 'after': after, 'iterations': 50}
         case('handlesClosed', handle_leaks)
     finally:
+        observations['effectiveTokenAfter'] = fixtures.token_observation()
+        if fixtures.api.identity() != fixtures.identity:
+            raise ValueError('Effective fixture token was not restored')
         after = fixtures.ancestry(profile)
         observations['profileAncestorsAfter'] = after
         report['checks']['profileAncestorSecurityUnchanged'] = before_ancestors == after
