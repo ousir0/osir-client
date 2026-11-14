@@ -565,6 +565,14 @@ pub fn run() {
             startup::capture_launch();
             let _ = rustls::crypto::ring::default_provider().install_default();
 
+            // OSIR's shell does not mount the legacy app's WindowControls.
+            // Apply native caption buttons before database recovery can return.
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_decorations(crate::distribution::is_osir());
+                let _ = window.set_shadow(true);
+            }
+
             // 预先刷新 Store 覆盖配置，确保后续路径读取正确（日志/数据库等）
             app_store::refresh_app_config_dir_override(app.handle());
             crate::osir_identity::initialize_storage()?;
@@ -1549,12 +1557,6 @@ pub fn run() {
                 // Linux：由设置决定（解决 Wayland 下系统窗口按钮不可用的问题）
                 #[cfg(target_os = "linux")]
                 let _ = window.set_decorations(!settings.use_app_window_controls);
-                // Windows：一律去掉系统标题栏，用页头里的应用内窗口按钮；保留阴影和边缘缩放
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = window.set_decorations(false);
-                    let _ = window.set_shadow(true);
-                }
                 if startup::should_hide() {
                     // 静默启动模式：保持窗口隐藏
                     let _ = window.hide();

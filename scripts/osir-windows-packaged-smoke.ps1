@@ -44,6 +44,7 @@ $report = [ordered]@{
     isolation = 'ephemeral-runner-tool-home-and-appdata'
     unicodeAndSpacePaths = $true
     authenticode = 'unsigned'
+    captionChecks = @()
     stages = [ordered]@{}
 }
 
@@ -59,6 +60,11 @@ public class OsirRealWindow {
 public class OsirNativeControl {
     public long Handle; public int Id; public string ClassName; public string Text;
     public bool Visible; public bool Enabled;
+}
+public class OsirWindowCaption {
+    public long Handle; public int ProcessId; public uint Style;
+    public bool Caption; public bool SystemMenu; public bool MinimizeBox;
+    public bool MaximizeBox; public bool ThickFrame;
 }
 public static class OsirWindows {
     private delegate bool Callback(IntPtr h, IntPtr p);
@@ -77,6 +83,24 @@ public static class OsirWindows {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassNameW(IntPtr h, StringBuilder s, int count);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out Rect rect);
     [DllImport("user32.dll")] private static extern int GetWindowLongW(IntPtr h, int index);
+    public static OsirWindowCaption CaptionForProcess(long handle, int pid) {
+        var h = new IntPtr(handle);
+        uint owner;
+        if(handle == 0 || pid <= 0 || GetWindowThreadProcessId(h, out owner) == 0 || owner != (uint)pid || !IsWindowVisible(h))
+            throw new InvalidOperationException("Caption target is not the visible owned window.");
+        uint style = unchecked((uint)GetWindowLongW(h, -16)); // GWL_STYLE, including high signed bits.
+        // Reject ownership/visibility changes observed across the read.
+        if(GetWindowThreadProcessId(h, out owner) == 0 || owner != (uint)pid || !IsWindowVisible(h))
+            throw new InvalidOperationException("Caption target changed during style observation.");
+        return new OsirWindowCaption {
+            Handle=handle, ProcessId=pid, Style=style,
+            Caption=(style & 0x00C00000u)==0x00C00000u,
+            SystemMenu=(style & 0x00080000u)!=0,
+            MinimizeBox=(style & 0x00020000u)!=0,
+            MaximizeBox=(style & 0x00010000u)!=0,
+            ThickFrame=(style & 0x00040000u)!=0
+        };
+    }
     public static OsirNativeControl[] Controls(long parent) {
         var result = new List<OsirNativeControl>();
         EnumChildWindows(new IntPtr(parent), (h,p) => {
@@ -145,6 +169,44 @@ function Get-RealWindow([int]$ProcessId) {
 
 function Assert-Smoke([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "[$script:stage] $Message" }
+}
+
+function Assert-OwnedCaption([Diagnostics.Process]$Process, [OsirRealWindow]$Window, [string]$Observation) {
+    $Process.Refresh()
+    Assert-Smoke (-not $Process.HasExited) 'Caption target process has exited.'
+    Assert-Smoke ([string]::Equals($Process.Path, $mainExe, [StringComparison]::OrdinalIgnoreCase)) 'Caption target is not the exact installed executable.'
+    # Re-enumerate only this PID and require the exact HWND already selected by the lifecycle check.
+    $current = @([OsirWindows]::ForProcess($Process.Id) | Where-Object {
+        $_.Handle -eq $Window.Handle -and $_.Title -eq $expectedWindowTitle -and $_.ClassName -eq 'Tauri Window'
+    })
+    Assert-Smoke ($current.Count -eq 1) 'Caption target is not the exact visible owned product HWND.'
+    $caption = [OsirWindows]::CaptionForProcess($Window.Handle, $Process.Id)
+    $flags = [ordered]@{
+        WS_CAPTION = $caption.Caption
+        WS_SYSMENU = $caption.SystemMenu
+        WS_MINIMIZEBOX = $caption.MinimizeBox
+        WS_MAXIMIZEBOX = $caption.MaximizeBox
+        WS_THICKFRAME = $caption.ThickFrame
+    }
+    $missing = @($flags.Keys | Where-Object { -not $flags[$_] })
+    # Save the actual missing flags before throwing, so a failed gate remains useful evidence.
+    $script:report.captionChecks += [ordered]@{
+        observation = $Observation
+        observedAt = [DateTime]::UtcNow.ToString('o')
+        processId = $Process.Id
+        windowHandle = $caption.Handle.ToString()
+        windowTitle = $current[0].Title
+        windowClass = $current[0].ClassName
+        windowWidth = $current[0].Width
+        windowHeight = $current[0].Height
+        style = $caption.Style
+        styleHex = ('0x{0:X8}' -f $caption.Style)
+        flags = $flags
+        missing = $missing
+        passed = ($missing.Count -eq 0)
+        scope = 'owned-HWND-native-style-bits-only-not-button-interaction'
+    }
+    Assert-Smoke ($missing.Count -eq 0) ('Native caption style is missing: ' + ($missing -join ', '))
 }
 
 function Get-Hash([string]$Path) {
@@ -394,6 +456,7 @@ try {
     $ownedLaunch.Refresh()
     $realWindow = Get-RealWindow $ownedLaunch.Id
     Assert-Smoke (-not $ownedLaunch.HasExited -and $null -ne $realWindow) 'Application window closed immediately after launch.'
+    Assert-OwnedCaption $ownedLaunch $realWindow 'launch-before-renderer'
     # A visible native shell can still contain a blank or unusable WebView.
     & node (Join-Path $PSScriptRoot 'osir-packaged-renderer-check.mjs') $rendererPort $artifactDir 'launch' $realWindow.Handle
     Assert-Smoke ($LASTEXITCODE -eq 0) 'Installed renderer or native IPC failed.'
@@ -401,6 +464,7 @@ try {
     Assert-Smoke ($rendererReport.passed -eq $true) 'Installed renderer did not pass.'
     $realWindow = Get-RealWindow $ownedLaunch.Id
     Assert-Smoke ($null -ne $realWindow) 'Native product window disappeared during renderer acceptance.'
+    Assert-OwnedCaption $ownedLaunch $realWindow 'launch-after-renderer-sizes'
     Add-Type -AssemblyName System.Drawing
     $bitmap = [Drawing.Bitmap]::new($realWindow.Width, $realWindow.Height)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -434,8 +498,12 @@ try {
         Start-Sleep -Milliseconds 250
     }
     Assert-Smoke ($null -ne $realWindow) 'Installed application did not reopen its product window.'
+    Assert-OwnedCaption $ownedLaunch $realWindow 'reopen-before-renderer'
     & node (Join-Path $PSScriptRoot 'osir-packaged-renderer-check.mjs') $rendererPort $artifactDir 'reopen' $realWindow.Handle
     Assert-Smoke ($LASTEXITCODE -eq 0) 'Reopened renderer or native IPC failed.'
+    $realWindow = Get-RealWindow $ownedLaunch.Id
+    Assert-Smoke ($null -ne $realWindow) 'Native product window disappeared during reopen renderer acceptance.'
+    Assert-OwnedCaption $ownedLaunch $realWindow 'reopen-after-renderer-sizes'
     $report.stages.reopen = [ordered]@{ passed = $true; windowObserved = $true; rendererAndNativeIpcPassed = $true }
     Stop-OwnedApp
 
@@ -510,6 +578,7 @@ try {
     Invoke-Installer $uninstaller '/S'
     Wait-Uninstalled
     $report.stages.uninstall = [ordered]@{ passed = $true; mainExecutableRemoved = $true }
+    Assert-Smoke ($report.captionChecks.Count -eq 4 -and @($report.captionChecks | Where-Object { -not $_.passed }).Count -eq 0) 'Native caption observations are incomplete or failed.'
     $report.passed = $true
 } catch {
     $failure = $_

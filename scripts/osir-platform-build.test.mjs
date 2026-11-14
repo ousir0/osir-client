@@ -110,6 +110,7 @@ test("CI configurations contain real updater runtime but defer artifact signing"
     assert.ok(config.bundle.icon.every((path) => path.includes("icons/osir/")));
   }
   const windows = windowsConfig("prod", updater);
+  assert.equal(windows.app.windows[0].decorations, true);
   assert.equal(windows.bundle.windows.nsis.installMode, "currentUser");
   assert.equal(windows.bundle.windows.certificateThumbprint, null);
   assert.equal(windows.bundle.windows.signCommand, null);

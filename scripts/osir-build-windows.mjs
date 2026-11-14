@@ -95,6 +95,7 @@ export function windowsConfig(channel, updater) {
     {
       ...config.app.windows[0],
       title: config.productName,
+      decorations: true,
       width: 1100,
       height: 720,
       minWidth: 900,
