@@ -36,6 +36,26 @@ def load_reader(path):
     return module
 
 
+def failure_observation(error):
+    detail = {'reason': getattr(error, 'reason', type(error).__name__),
+              'winerror': getattr(error, 'winerror', None)}
+    if error.__cause__ is not None:
+        cause = error.__cause__
+        detail['causedBy'] = {'reason': getattr(cause, 'reason', type(cause).__name__),
+                              'winerror': getattr(cause, 'winerror', None)}
+    return detail
+
+
+def rejection(reader, callback, *, reason=None):
+    try:
+        callback()
+    except reader.WindowsFileReadError as error:
+        if reason and error.reason != reason:
+            raise AssertionError('Unexpected rejection category') from error
+        return {'reason': error.reason, 'winerror': getattr(error, 'winerror', None)}
+    raise AssertionError('Unsafe file was accepted')
+
+
 class NativeFixtures:
     """Fixture-only mutations. Production reader never calls these APIs."""
     def __init__(self, reader):
@@ -65,6 +85,18 @@ class NativeFixtures:
     @staticmethod
     def sid_text(raw):
         return 'S-1-' + str(int.from_bytes(raw[2:8], 'big')) + ''.join('-' + str(n) for n in struct.unpack('<' + 'I' * raw[1], raw[8:]))
+
+    def acl_observation(self, raw):
+        entries = []
+        if raw:
+            offset = 8
+            for _ in range(struct.unpack_from('<H', raw, 4)[0]):
+                kind, flags, size = struct.unpack_from('<BBH', raw, offset)
+                entries.append({'kind': kind, 'flags': flags,
+                                'mask': hex(struct.unpack_from('<I', raw, offset + 4)[0]) if size >= 8 else None,
+                                'trusteeSid': self.sid_text(raw[offset + 8:offset + size]) if kind in (0, 1) and size >= 16 else None})
+                offset += size
+        return entries
 
     def token_observation(self):
         identity = self.api.identity()
@@ -149,7 +181,8 @@ class NativeFixtures:
                 try:
                     raw = None if not dacl.value else C.string_at(dacl, struct.unpack('<H', C.string_at(dacl.value + 2, 2))[0])
                     values.append({'path': str(path), 'ownerSid': self.sid_text(self.api.sid(owner)),
-                                   'daclSha256': hashlib.sha256(raw).hexdigest() if raw else None})
+                                   'daclSha256': hashlib.sha256(raw).hexdigest() if raw else None,
+                                   'aces': self.acl_observation(raw)})
                 finally:
                     self.kernel.LocalFree(descriptor)
         return values
@@ -163,16 +196,8 @@ class NativeFixtures:
                 raise self.reader.WindowsFileReadError('fixture-leaf-security', code)
             try:
                 raw = None if not dacl.value else C.string_at(dacl, struct.unpack('<H', C.string_at(dacl.value + 2, 2))[0])
-                entries = []
-                if raw:
-                    offset = 8
-                    for _ in range(struct.unpack_from('<H', raw, 4)[0]):
-                        kind, flags, size = struct.unpack_from('<BBH', raw, offset)
-                        entries.append({'kind': kind, 'flags': flags, 'mask': hex(struct.unpack_from('<I', raw, offset + 4)[0]) if size >= 8 else None,
-                                        'trusteeSid': self.sid_text(raw[offset + 8:offset + size]) if kind in (0, 1) and size >= 16 else None})
-                        offset += size
                 return {'ownerSid': self.sid_text(self.api.sid(owner)), 'effectiveUserSid': self.sid_text(self.user),
-                        'daclSha256': hashlib.sha256(raw).hexdigest() if raw else None, 'aces': entries,
+                        'daclSha256': hashlib.sha256(raw).hexdigest() if raw else None, 'aces': self.acl_observation(raw),
                         'effectiveToken': self.token_observation()}
             finally:
                 self.kernel.LocalFree(descriptor)
@@ -232,17 +257,10 @@ def run_native(args, report, observations):
             results.append({'check': name, 'result': 'passed', 'detail': detail})
         except Exception as error:
             report['checks'][name] = False
-            results.append({'check': name, 'result': 'failed', 'reason': getattr(error, 'reason', type(error).__name__),
-                            'winerror': getattr(error, 'winerror', None)})
+            results.append({'check': name, 'result': 'failed', **failure_observation(error)})
 
     def rejects(path, *, private=True, maximum=2097152, reason=None):
-        try:
-            reader.read_secure(path, private=private, maximum=maximum)
-        except reader.WindowsFileReadError as error:
-            if reason and error.reason != reason:
-                raise AssertionError('Unexpected rejection category') from error
-            return {'reason': error.reason, 'winerror': getattr(error, 'winerror', None)}
-        raise AssertionError('Unsafe file was accepted')
+        return rejection(reader, lambda: reader.read_secure(path, private=private, maximum=maximum), reason=reason)
 
     def file(name):
         value = root / name
@@ -281,6 +299,9 @@ def run_native(args, report, observations):
             target = file('trusted.json')
             fixtures.trusted(target, '(A;;GR;;;WD)')
             assert reader.read_secure(target, private=True) == b'synthetic-only'
+            fixtures.trusted(target, '(A;;FA;;;OW)(A;;GR;;;WD)')
+            assert reader.read_secure(target, private=True) == b'synthetic-only'
+            return {'ownerRightsOnQualifiedOwnerAccepted': True}
         case('trustedWritersAndForeignReadAccepted', trusted)
         def inherited():
             directory = root / 'inherited'
@@ -295,7 +316,7 @@ def run_native(args, report, observations):
             observed = []
             for index, mask in enumerate([2, 4, 0x10, 0x100, 0x10000, 0x40000, 0x80000, 0x10000000, 0x40000000]):
                 target = file(f'foreign-{index}.json')
-                fixtures.trusted(target, f'(A;;0x{mask:x};;;WD)')
+                fixtures.trusted(target, f'(A;;FA;;;OW)(A;;0x{mask:x};;;WD)')
                 observed.append(rejects(target, reason='untrusted-writer'))
             return observed
         case('foreignMutationRightsRejected', foreign_writers)
@@ -315,7 +336,7 @@ def run_native(args, report, observations):
         case('nullDaclRejected', null_acl)
         def owner():
             target = file('owner.json')
-            fixtures.trusted(target, owner='BA')
+            fixtures.trusted(target, '(A;;FA;;;OW)', owner='BA')
             observations['nonDefaultOwnerLeaf'] = fixtures.security_observation(target)
             with fixtures.test_token() as identity:
                 assert identity.source == 'thread' and identity.user == fixtures.user
@@ -326,12 +347,25 @@ def run_native(args, report, observations):
         def deny_only_owner():
             target = file('deny-only-owner.json')
             fixtures.trusted(target, owner='BA')
-            with fixtures.test_token(deny_admin=True) as identity:
-                matching = [attributes for sid, attributes in identity.groups if sid == reader._ADMINISTRATORS]
-                assert len(matching) == 1 and matching[0] & 0x10 and not matching[0] & 4
-                observations['denyOnlyOwnerToken'] = fixtures.token_observation()
-                assert reader._ADMINISTRATORS not in reader._qualified_owners(identity)
-                return rejects(target, reason='foreign-owner')
+            observations['denyOnlyOwnerLeaf'] = fixtures.security_observation(target)
+            observations['denyOnlyPathAncestors'] = fixtures.ancestry(target.parent)
+            # Preserve the default profile ACL. A deny-only BA token may not
+            # traverse it. Preopen this synthetic leaf and independently test
+            # the production owner boundary, without mistaking an earlier
+            # path-access rejection for proof of owner validation.
+            with ExitStack() as stack:
+                handle = fixtures.api.open(str(target), directory=False, stack=stack)
+                fixtures.api.info(handle, str(target), directory=False)
+                with fixtures.test_token(deny_admin=True) as identity:
+                    matching = [attributes for sid, attributes in identity.groups if sid == reader._ADMINISTRATORS]
+                    assert len(matching) == 1 and matching[0] & 0x10 and not matching[0] & 4
+                    observations['denyOnlyOwnerToken'] = fixtures.token_observation()
+                    assert reader._ADMINISTRATORS not in reader._qualified_owners(identity)
+                    path_result = rejects(target)
+                    observations['denyOnlyWholePathRejection'] = path_result
+                    boundary = rejection(reader, lambda: fixtures.api.security(handle, identity, True), reason='foreign-owner')
+                    return {'scope': 'production-owner-check-on-preopened-handle',
+                            'wholePathRejection': path_result, 'ownerBoundaryRejection': boundary}
         case('denyOnlyPrivilegedOwnerRejected', deny_only_owner)
         case('directoryRejected', lambda: rejects(root))
         def hardlink():

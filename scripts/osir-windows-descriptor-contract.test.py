@@ -104,6 +104,19 @@ class FixtureTests(unittest.TestCase):
             self.assertEqual(state['defaultChanges'], [4])
             self.assertEqual(state['disableFlags'], [(0, 1)] if deny_admin else [])
 
+    def test_rejection_mismatch_preserves_native_cause_and_never_turns_acceptance_into_pass(self):
+        reader = gate.load_reader(ROOT / 'connector/connector/runtimes/codex/osir_binding_windows.py')
+        def path_access_denied():
+            raise reader.WindowsFileReadError('open-file', 5)
+        self.assertEqual(gate.rejection(reader, path_access_denied), {'reason': 'open-file', 'winerror': 5})
+        with self.assertRaises(AssertionError) as error:
+            gate.rejection(reader, path_access_denied, reason='foreign-owner')
+        self.assertEqual(gate.failure_observation(error.exception), {
+            'reason': 'AssertionError', 'winerror': None,
+            'causedBy': {'reason': 'open-file', 'winerror': 5}})
+        with self.assertRaises(AssertionError):
+            gate.rejection(reader, lambda: b'accepted-unsafe-file', reason='foreign-owner')
+
     @unittest.skipIf(sys.platform == 'win32', 'This specifically checks non-Windows refusal')
     def test_non_windows_gate_is_failed_unsupported_never_native_passed(self):
         reader = ROOT / 'connector/connector/runtimes/codex/osir_binding_windows.py'

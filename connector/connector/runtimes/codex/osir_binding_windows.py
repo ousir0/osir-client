@@ -53,6 +53,7 @@ def _well_known(authority, *subauthorities):
 
 _SYSTEM = _well_known(5, 18)
 _ADMINISTRATORS = _well_known(5, 32, 544)
+_OWNER_RIGHTS = _well_known(3, 4)
 
 
 class _TokenIdentity(NamedTuple):
@@ -83,7 +84,7 @@ def _qualified_owners(identity: _TokenIdentity) -> frozenset[bytes]:
     return frozenset(owners)
 
 
-def _validate_dacl(raw: bytes | None, user: bytes) -> None:
+def _validate_dacl(raw: bytes | None, user: bytes, *, qualified_owner: bytes | None = None) -> None:
     """Conservative ALLOW-ACE check; never cancel a broad grant with a DENY."""
     if raw is None:
         _deny('null-dacl')
@@ -108,6 +109,11 @@ def _validate_dacl(raw: bytes | None, user: bytes) -> None:
             mask = struct.unpack_from('<I', raw, offset + 4)[0]
             sid = raw[offset + 8:offset + length]
             _sid_length(sid)
+            # Resolve OWNER RIGHTS only to this object's validated owner.
+            # security() establishes qualification from the effective token
+            # before supplying it; without that context the SID is untrusted.
+            if sid == _OWNER_RIGHTS and qualified_owner in allowed:
+                sid = qualified_owner
             if kind == 0 and mask & _MUTATING and sid not in allowed:
                 _deny('untrusted-writer')
         offset += length
@@ -303,7 +309,7 @@ class _Win32:
                 if size < 8:
                     _deny('invalid-dacl')
                 raw = C.string_at(dacl, size)
-                _validate_dacl(raw, identity.user)
+                _validate_dacl(raw, identity.user, qualified_owner=actual_owner)
             return actual_owner, raw
         finally:
             if descriptor.value and self.kernel.LocalFree(descriptor):

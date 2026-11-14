@@ -108,6 +108,72 @@ class OwnerQualificationTests(unittest.TestCase):
             self.assertEqual(error.exception.reason, 'untrusted-writer')
 
 
+class OwnerRightsTests(unittest.TestCase):
+    def test_owner_rights_needs_explicit_qualified_object_owner_context(self):
+        raw = acl(ace(0x10000000, reader._OWNER_RIGHTS))
+        for owner in [None, OTHER, reader._OWNER_RIGHTS]:
+            with self.subTest(owner=owner), self.assertRaises(reader.WindowsFileReadError) as error:
+                reader._validate_dacl(raw, USER, qualified_owner=owner)
+            self.assertEqual(error.exception.reason, 'untrusted-writer')
+        for owner in [USER, reader._SYSTEM, reader._ADMINISTRATORS]:
+            reader._validate_dacl(raw, USER, qualified_owner=owner)
+
+    def test_owner_rights_never_cancels_ordinary_foreign_mutation_grants(self):
+        for mask in [2, 4, 0x10, 0x100, 0x10000, 0x40000, 0x80000, 0x10000000, 0x40000000]:
+            for flags in [0, 0x10]:
+                raw = acl(ace(0x10000000, reader._OWNER_RIGHTS), ace(mask, flags=flags))
+                with self.subTest(mask=mask, flags=flags), self.assertRaises(reader.WindowsFileReadError) as error:
+                    reader._validate_dacl(raw, USER, qualified_owner=USER)
+                self.assertEqual(error.exception.reason, 'untrusted-writer')
+
+    def security_api(self, owner, raw):
+        api = reader._Win32.__new__(reader._Win32)
+        buffer = ctypes.create_string_buffer(raw)
+        def get_security(_handle, _kind, _flags, owner_out, _group, _dacl, _sacl, descriptor_out):
+            owner_out._obj.value = 1
+            descriptor_out._obj.value = 2
+            return 0
+        def get_dacl(_descriptor, present, dacl, _defaulted):
+            present._obj.value = 1
+            dacl._obj.value = ctypes.addressof(buffer)
+            return True
+        api.advapi = SimpleNamespace(GetSecurityInfo=get_security, GetSecurityDescriptorDacl=get_dacl,
+                                    IsValidAcl=lambda _dacl: True)
+        api.kernel = SimpleNamespace(LocalFree=lambda _descriptor: None)
+        api.sid = lambda _pointer: owner
+        api.checked = lambda result, reason: result or reader._deny(reason)
+        return api
+
+    def test_production_security_checks_actual_owner_before_owner_rights_dacl(self):
+        raw = acl(ace(0x10000000, reader._OWNER_RIGHTS))
+        admin = reader._ADMINISTRATORS
+        for owner, identity, accepted in [
+            (USER, reader._TokenIdentity(USER, USER, (), (), 'process'), True),
+            (admin, reader._TokenIdentity(USER, admin, ((admin, 0x0F),), (), 'process'), True),
+            (OTHER, reader._TokenIdentity(USER, USER, (), (), 'process'), False),
+            (admin, reader._TokenIdentity(USER, USER, ((admin, 0x0F),), (), 'thread'), False),
+            (admin, reader._TokenIdentity(USER, USER, ((admin, 0x10),), (), 'thread'), False),
+        ]:
+            api = self.security_api(owner, raw)
+            with self.subTest(owner=owner, identity=identity), patch.object(reader, '_validate_dacl', wraps=reader._validate_dacl) as validate:
+                if accepted:
+                    self.assertEqual(api.security(123, identity, True), (owner, raw))
+                    validate.assert_called_once_with(raw, USER, qualified_owner=owner)
+                else:
+                    with self.assertRaises(reader.WindowsFileReadError) as error:
+                        api.security(123, identity, True)
+                    self.assertEqual(error.exception.reason, 'foreign-owner')
+                    validate.assert_not_called()
+
+    def test_current_owned_file_with_owner_rights_and_unsafe_dacl_still_fails_production_security(self):
+        raw = acl(ace(0x10000000, reader._OWNER_RIGHTS), ace(0x40000, OTHER, flags=0x10))
+        api = self.security_api(USER, raw)
+        identity = reader._TokenIdentity(USER, USER, (), (), 'process')
+        with self.assertRaises(reader.WindowsFileReadError) as error:
+            api.security(123, identity, True)
+        self.assertEqual(error.exception.reason, 'untrusted-writer')
+
+
 class TokenBufferTests(unittest.TestCase):
     """Synthetic ABI/bounds checks, never Windows native evidence."""
     def make_api_and_buffer(self):
