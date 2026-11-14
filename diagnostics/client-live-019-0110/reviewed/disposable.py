@@ -62,10 +62,25 @@ def runner_root(path, *, existing=True):
 
 
 def owned(root, relative):
-    target = root / relative
-    require(target.resolve().is_relative_to(root), "Fixture path escaped workspace")
+    anchor = root
+    binding = root / "private/windows-profile.json"
+    if os.name == "nt" and relative.startswith("home/") and binding.exists():
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(32768)
+        require(ctypes.windll.shell32.SHGetFolderPathW(None, 40, None, 0, buffer) == 0,
+                "Cannot identify native Windows profile")
+        profile = Path(buffer.value).resolve(strict=True)
+        proof = json.loads(binding.read_text(encoding="utf-8"))
+        require(proof == {"runId": os.environ["GITHUB_RUN_ID"], "purpose": FIXTURE,
+                          "profile": str(profile)}, "Windows profile binding differs")
+        require(not profile.is_symlink() and profile == Path(os.environ["USERPROFILE"]).resolve(strict=True),
+                "Native Windows profile differs")
+        anchor = profile
+        relative = relative[5:]
+    target = anchor / relative
+    require(target.resolve().is_relative_to(anchor), "Fixture path escaped owned location")
     current = target
-    while current != root:
+    while current != anchor:
         require(not current.is_symlink(), "Symlink fixture refused")
         current = current.parent
     return target

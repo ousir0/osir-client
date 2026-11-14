@@ -63,7 +63,15 @@ try{
  if(-not [Environment]::UserInteractive){throw 'BLOCKED: interactive Windows desktop unavailable'}
  Add-Type -Path "$PSScriptRoot/helpers/windows-window.cs"
  if(Get-Process osir_client -ErrorAction SilentlyContinue){throw 'Preexisting OSIR process refused'}
- if(Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.osir_client')){throw 'Preexisting default app data refused'}
+ $nativeHome=[Environment]::GetFolderPath('UserProfile')
+ if($nativeHome -ne $env:USERPROFILE -or (Get-Item -LiteralPath $nativeHome).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)){throw 'Native runner profile identity differs'}
+ foreach($name in @('.osir_client','.cc-switch','.codex','.claude')){
+  if(Test-Path -LiteralPath (Join-Path $nativeHome $name)){throw 'Preexisting default app/tool data refused'}
+ }
+ # NSIS RunAsUser relaunch does not promise process-only environment overrides.
+ # A clean hosted profile keeps old/new data paths identical without such overrides.
+ Save (Join-Path $root 'private/windows-profile.json') @{runId=$env:GITHUB_RUN_ID;purpose='019-to-0110-synthetic-only';profile=$nativeHome}
+ Save (Join-Path $out 'windows-profile-binding.json') @{nativeProfile=$nativeHome;initiallyAbsent=@('.osir_client','.cc-switch','.codex','.claude');syntheticOnly=$true}
  foreach($hive in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')){
   if(Test-Path $hive){foreach($entry in Get-ChildItem $hive){$v=Get-ItemProperty $entry.PSPath;if($v.PSObject.Properties['DisplayName'] -and $v.DisplayName -eq 'OSIR Client'){throw 'Preexisting registered Client refused'}}}
  }
@@ -77,13 +85,13 @@ try{
  & python "$PSScriptRoot/helpers/pe-arch.py" $exe
  if($LASTEXITCODE -ne 0){throw 'Actual baseline architecture differs'}
  if(Get-Process osir_client -ErrorAction SilentlyContinue){throw 'Unexpected runtime after silent baseline install'}
- $settings=Join-Path $root 'home/.osir_client/settings.json'
+ $settings=Join-Path $nativeHome '.osir_client/settings.json'
  New-Item -ItemType Directory -Path (Split-Path $settings) | Out-Null
  Save $settings @{language='zh';sessionAutoSyncEnabled=$false;unifyCodexSessionHistory=$false;checkToolUpdatesOnStartup=$false;launchOnStartup=$false;enableLocalProxy=$false;enableStackMode=$false;minimizeToTrayOnClose=$false;showProfileSwitcher=$true}
- $env:CC_SWITCH_TEST_HOME=Join-Path $root 'home'
- $env:CODEX_HOME=Join-Path $root 'home/.codex'
- $env:CLAUDE_CONFIG_DIR=Join-Path $root 'home/.claude'
- $env:OPENCODE_CONFIG_DIR=Join-Path $root 'home/.config/opencode'
+ Remove-Item Env:CC_SWITCH_TEST_HOME -ErrorAction SilentlyContinue
+ $env:CODEX_HOME=Join-Path $nativeHome '.codex'
+ $env:CLAUDE_CONFIG_DIR=Join-Path $nativeHome '.claude'
+ $env:OPENCODE_CONFIG_DIR=Join-Path $nativeHome '.config/opencode'
  $env:WEBVIEW2_USER_DATA_FOLDER=Join-Path $root 'webview-data'
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
  $key=[Microsoft.Win32.Registry]::LocalMachine.CreateSubKey('SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments')

@@ -11,9 +11,9 @@
   "helpers/wait-schema.py": "257ddae55d735a2d96bb9c162871e4fdc72a66130dd2cd0031aa26a1c5199a12",
   "helpers/windows-window.cs": "e0ae2405b29665d44d1bb3ab37da5093fffd157c082d9f14bca6133f9b9405e1",
   "live-macos.py": "bcf817326019493e616ee6ca7ddb1cf22a4dff9e948297384c16fe58a43317eb",
-  "live-windows.ps1": "acb101d2b5823d9fa2467bedef86d70b7af2d50a97c43c6c972a70c7f2ef42a8",
-  "reviewed-provenance.json": "ea4c884916e13b745ea35704c3123b6e0167fbe27ce616259621dbd30c77df8b",
-  "reviewed/disposable.py": "723ce7d1bfe96e7a076f15b46eb1d1d690485e1bf60e24432f80c47d6e78be8c",
+  "live-windows.ps1": "f8e5bcb66e5d1aeedfea93ef025ac5cdd395299ecbcbbfbbf04526e9cc07c1d8",
+  "reviewed-provenance.json": "de2bb1e2e28988a5ad329647c50a3410f85b57992e2d487513495dbb1bf34517",
+  "reviewed/disposable.py": "8d86e41d62273db0452f502aa5caea29a662c5be1ff7f042735815306eaf7c06",
   "reviewed/inputs.json": "4e08939eabfce1c65677cf40177278b88711aa41e8a097cad0e1237dd001fcd9",
   "reviewed/osir-live-updater-check.mjs": "822f10f3eaa465dcde0a0f61cea12346109b7b4c21f6c6ebcc6e689e4b135c2f",
   "reviewed/osir-macos-window-probe.swift": "f9b3ab9b39ea5974ea2e0587357bace6844da60225b53fd962873f15d724567f",
@@ -24,5 +24,5 @@
   "reviewed/test_disposable.py": "c41a8d515a106d30a5b14864a5c5fd94c9b6759e6aaee6dd35246bb44bbcf9a0",
   "seal.mjs": "d8a3974645166b21f34b9f208123a740e43b7b24b7ff7e0d5884c643a7a4f0a0",
   "test_harness.py": "ab9aee2b2862430cd0061fc074bee0d9d96df2c024cb46f350cab3e17ba28ceb",
-  "workflow.review.yml": "3ae051243c658b5e690fff614c86fd837dda927e97911c01c655dd13b1dbfd17"
+  "workflow.review.yml": "b45ec3f62a8e0e8c27343387c08eefbaed644fd1272189f4e06ba2496b0152b5"
 }

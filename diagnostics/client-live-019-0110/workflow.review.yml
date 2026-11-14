@@ -15,6 +15,11 @@ on:
         required: true
         type: boolean
         default: false
+      windows_only:
+        description: Reuse accepted Mac results and run only Windows native acceptance
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -66,13 +71,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: windows-x86_64
-            runner: windows-2022
-          - platform: darwin-aarch64
-            runner: macos-15
-          - platform: darwin-x86_64
-            runner: macos-15-intel
+        include: ${{ fromJSON(inputs.windows_only && '[{"platform":"windows-x86_64","runner":"windows-2022"}]' || '[{"platform":"windows-x86_64","runner":"windows-2022"},{"platform":"darwin-aarch64","runner":"macos-15"},{"platform":"darwin-x86_64","runner":"macos-15-intel"}]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
