@@ -1,0 +1,299 @@
+{
+  "schemaVersion": 1,
+  "channel": "prod",
+  "version": "0.1.11",
+  "target": "x86_64-pc-windows-msvc",
+  "architectures": [
+    "x86_64"
+  ],
+  "mode": "release-windows-distribution",
+  "identifier": "com.osir.client",
+  "scheme": "osir-client",
+  "renderer": "embedded",
+  "signing": "windows-unsigned-updater-signed",
+  "authenticode": "unsigned",
+  "distributionSignatureVerified": false,
+  "codeSignatureVerified": false,
+  "notarization": "not-applicable",
+  "peArchitectureVerified": true,
+  "mainPe": {
+    "architecture": "x86_64",
+    "machine": "0x8664",
+    "bytes": 53305344,
+    "authenticodeCertificatePresent": false
+  },
+  "installerPe": {
+    "architecture": "x86",
+    "machine": "0x14c",
+    "bytes": 16064345,
+    "authenticodeCertificatePresent": false
+  },
+  "updaterConfigured": true,
+  "updaterRuntimeConfigured": true,
+  "updaterEnabled": true,
+  "updaterSignature": "pending-local",
+  "updaterConfigSha256": "5f440ed73744d1695e279967932e295cafe54cfe8a53cf3cdce72b8b1b326d82",
+  "embeddedUpdaterPublicConfigVerified": true,
+  "compiledReleaseDiagnostics": {
+    "schemaVersion": 1,
+    "executableSha256": "216f03586d6a8a0fd6294a2d3379c9b4328dfdfc7f955d30f21de160d06187d5",
+    "reportSha256": "6a68b0cdc92a6f4bb4ef6a8cc0aa9e5c12cf80c09948f05d4e60b7a01e222e15",
+    "report": {
+      "schemaVersion": 1,
+      "identifier": "com.osir.client",
+      "version": "0.1.11",
+      "packageVersion": "0.1.11",
+      "releaseBuild": true,
+      "bundleType": null,
+      "updater": {
+        "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
+        "endpoints": [
+          "https://osirclaw.com/api/v1/osir-client/updater/prod.json"
+        ]
+      },
+      "releaseMarker": {
+        "schemaVersion": 1,
+        "channel": "prod",
+        "bundleArtifacts": true
+      },
+      "updateDistribution": {
+        "kind": "osir",
+        "updatesEnabled": true,
+        "reason": null
+      }
+    }
+  },
+  "releaseDiagnostics": {
+    "schemaVersion": 1,
+    "executableSha256": "b8e85d1fb948780123b8e6db687361339ce4bd7f005581fe4993a9dedc8c3620",
+    "reportSha256": "af6cadf5e33c540b5d17a4f7a17456c3d43a87d857ea5d491571144620733ca9",
+    "report": {
+      "schemaVersion": 1,
+      "identifier": "com.osir.client",
+      "version": "0.1.11",
+      "packageVersion": "0.1.11",
+      "releaseBuild": true,
+      "bundleType": "nsis",
+      "updater": {
+        "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
+        "endpoints": [
+          "https://osirclaw.com/api/v1/osir-client/updater/prod.json"
+        ]
+      },
+      "releaseMarker": {
+        "schemaVersion": 1,
+        "channel": "prod",
+        "bundleArtifacts": true
+      },
+      "updateDistribution": {
+        "kind": "osir",
+        "updatesEnabled": true,
+        "reason": null
+      }
+    }
+  },
+  "installerArtifact": {
+    "name": "OSIR-Client-prod-0.1.11-x86_64-pc-windows-msvc-setup.exe",
+    "sha256": "7c090348fdda971f8058c7da0305d193839b3fbb884e1cef2a27be229e029e15",
+    "bytes": 16064345
+  },
+  "updaterPayload": {
+    "name": "OSIR-Client-prod-0.1.11-x86_64-pc-windows-msvc-setup.exe",
+    "bytes": 16064345,
+    "sha256": "7c090348fdda971f8058c7da0305d193839b3fbb884e1cef2a27be229e029e15"
+  },
+  "mainExecutableArtifact": {
+    "name": "osir_client.exe",
+    "bytes": 53305344,
+    "sha256": "b8e85d1fb948780123b8e6db687361339ce4bd7f005581fe4993a9dedc8c3620"
+  },
+  "compiledExecutableArtifact": {
+    "name": "compiled-unbundled.exe",
+    "bytes": 53305344,
+    "sha256": "216f03586d6a8a0fd6294a2d3379c9b4328dfdfc7f955d30f21de160d06187d5"
+  },
+  "nsisPayloadDerivation": {
+    "schemaVersion": 1,
+    "algorithm": "Tauri-2.10-unique-UNK-to-NSS",
+    "changedBytes": 3,
+    "changedOffsets": [
+      41898992,
+      41898993,
+      41898994
+    ],
+    "compiledSha256": "216f03586d6a8a0fd6294a2d3379c9b4328dfdfc7f955d30f21de160d06187d5",
+    "nsisSha256": "b8e85d1fb948780123b8e6db687361339ce4bd7f005581fe4993a9dedc8c3620",
+    "bytes": 53305344
+  },
+  "sourceProvenance": {
+    "schemaVersion": 1,
+    "algorithm": "sha256",
+    "sourceSha256": "a9a7c27e85c1fcf4b1f2805e8fbe8913e43c069688ffcb6abd494a33e7ee52ae",
+    "inputsManifestSha256": "26f41e03f9c98cea828e708229ab92e5f9405a72e6edfa483afa4866c1ff1f10",
+    "fileCount": 1453,
+    "inputs": {
+      "directories": [
+        "assets/brand/osir-client",
+        "src",
+        "public",
+        "icons",
+        "vendor",
+        "src-tauri/src",
+        "tests/fixtures/sessions",
+        "src-tauri/capabilities",
+        "src-tauri/icons",
+        "src-tauri/vendor"
+      ],
+      "files": [
+        ".cargo/config",
+        ".cargo/config.toml",
+        ".gitattributes",
+        ".github/workflows/osir-macos-arm-release.yml",
+        ".github/workflows/osir-windows-release.yml",
+        ".gitignore",
+        ".node-version",
+        "components.json",
+        "config/osir-updater-beta.json",
+        "config/osir-updater-prod.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "postcss.config.cjs",
+        "rust-toolchain.toml",
+        "scripts/osir-build-macos-ci.mjs",
+        "scripts/osir-build-windows.mjs",
+        "scripts/osir-build.mjs",
+        "scripts/osir-ci-artifact.mjs",
+        "scripts/osir-dev-signing.mjs",
+        "scripts/osir-dmg.mjs",
+        "scripts/osir-icons.py",
+        "scripts/osir-macos-packaged-smoke.mjs",
+        "scripts/osir-macos-window-probe.swift",
+        "scripts/osir-nsis-payload.mjs",
+        "scripts/osir-packaged-renderer-check.mjs",
+        "scripts/osir-packaged-renderer-check.test.mjs",
+        "scripts/osir-pe-verify.mjs",
+        "scripts/osir-platform-build.test.mjs",
+        "scripts/osir-release-backup.mjs",
+        "scripts/osir-release-backup.test.mjs",
+        "scripts/osir-release-ci.test.mjs",
+        "scripts/osir-release-cloud.mjs",
+        "scripts/osir-release-combine.mjs",
+        "scripts/osir-release-diagnostics.mjs",
+        "scripts/osir-release-diagnostics.test.mjs",
+        "scripts/osir-release-download.mjs",
+        "scripts/osir-release-download.test.mjs",
+        "scripts/osir-release-finalize.mjs",
+        "scripts/osir-release-local.mjs",
+        "scripts/osir-release-publisher.mjs",
+        "scripts/osir-release-publisher.test.mjs",
+        "scripts/osir-release-tool.mjs",
+        "scripts/osir-release-tool.test.mjs",
+        "scripts/osir-release-updater.mjs",
+        "scripts/osir-source-snapshot.mjs",
+        "scripts/osir-windows-packaged-smoke.ps1",
+        "scripts/requirements-icons.txt",
+        "src-tauri/.cargo/config",
+        "src-tauri/.cargo/config.toml",
+        "src-tauri/.gitignore",
+        "src-tauri/Cargo.lock",
+        "src-tauri/Cargo.toml",
+        "src-tauri/Entitlements.plist",
+        "src-tauri/Info.plist",
+        "src-tauri/build.rs",
+        "src-tauri/common-controls.manifest",
+        "src-tauri/resources/products/osir-anywhere/manifest.dev.json",
+        "src-tauri/resources/products/osir-anywhere/release-public.pub",
+        "src-tauri/src/database/upstream_v26_schema.sql",
+        "src-tauri/tauri.conf.json",
+        "src-tauri/tauri.osir-beta.conf.json",
+        "src-tauri/tauri.osir-dev.conf.json",
+        "src-tauri/tauri.osir.conf.json",
+        "src-tauri/tauri.windows.conf.json",
+        "tailwind.config.cjs",
+        "tests/config/claudeKeyFields.json",
+        "tests/fixtures/copilot-endpoint-cases.json",
+        "tests/native-windows-backup/Cargo.lock",
+        "tests/native-windows-backup/Cargo.toml",
+        "tests/native-windows-backup/src/lib.rs",
+        "tsconfig.json",
+        "tsconfig.node.json",
+        "vite.config.ts"
+      ],
+      "patterns": {
+        ".": "^(?:vite\\.config\\.(?:ts|js|mts|mjs)|tsconfig(?:\\.[\\w-]+)*\\.json|(?:tailwind|postcss)\\.config\\.(?:js|cjs|mjs|ts))$",
+        "src-tauri": "^(?:tauri(?:\\.[\\w-]+)*\\.conf\\.json5?|.*\\.entitlements(?:\\.plist)?)$"
+      },
+      "excludedDirectoryNames": [
+        ".cc-switch",
+        ".claude",
+        ".codex",
+        ".gemini",
+        ".git",
+        ".osir-dev-home",
+        "dist",
+        "node_modules",
+        "release",
+        "target"
+      ],
+      "symlinks": "rejected-without-following"
+    },
+    "git": {
+      "head": "902ac8bc50bda2fa25ac54f8f24b12a15797ae32",
+      "dirty": false,
+      "dirtyAtStart": false
+    },
+    "verifiedAtEnd": true
+  },
+  "packagedLifecycleAcceptance": "passed-CI-smoke",
+  "builtAt": "2026-11-14T15:01:47.944Z",
+  "packagedLifecycleReport": {
+    "name": "windows-packaged-smoke.json",
+    "bytes": 5314,
+    "sha256": "4fc0bac8150e7ef336470fa591ad71194abd537de6724c5bcac9093a552bf7d1"
+  },
+  "packagedRendererReport": {
+    "name": "windows-renderer-smoke.json",
+    "sha256": "dcfef23cdf16789e01461f768d36d0dadcb35fc4b1b9da632b0a6dd865212628",
+    "bytes": 3486
+  },
+  "packagedRendererScreenshots": [
+    {
+      "name": "windows-renderer-launch-1100x720.png",
+      "sha256": "23be2e6ed7fb09ba5ec652890f4dad2fda9e3ba5447f43461297bea48ca5357d",
+      "bytes": 24474
+    },
+    {
+      "name": "windows-renderer-launch-900x600.png",
+      "sha256": "dbbc5ef649ed4dc60a9e61b9c4b5074d1ccd9d99a363fbfcac685304acabf646",
+      "bytes": 22976
+    },
+    {
+      "name": "windows-renderer-1100x720.png",
+      "sha256": "43dfc28348b63008c1a0a434eb10102045054fd9b79bf9a9e6ec92d1ad347240",
+      "bytes": 24476
+    },
+    {
+      "name": "windows-renderer-900x600.png",
+      "sha256": "dbbc5ef649ed4dc60a9e61b9c4b5074d1ccd9d99a363fbfcac685304acabf646",
+      "bytes": 22976
+    }
+  ],
+  "packagedInstallerScreenshot": {
+    "name": "windows-installer-window.png",
+    "sha256": "748268409a6960e971a6eb7d355b17e96670dab1efffeefcdc162989947c48a1",
+    "bytes": 17254
+  },
+  "finalizerToolSha256": "b2348a6a0059bfc3eaa39ee41feefb0d99701b5f5524d060add99190f28e6592",
+  "updaterUpgradeAcceptance": "not-run",
+  "updaterArtifact": {
+    "bytes": 16064345,
+    "sha256": "7c090348fdda971f8058c7da0305d193839b3fbb884e1cef2a27be229e029e15",
+    "signatureVerified": true
+  },
+  "packagedWindowScreenshot": {
+    "name": "windows-app-window.png",
+    "sha256": "5c54125a544d59d5b1be409fa4d80d41f8ae389f96eb8230ce9a810c2b419201",
+    "bytes": 30933
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "status": "preparation-only-not-updater-acceptance",
+  "fromVersion": "0.1.11",
+  "toVersion": "0.1.11+1",
+  "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
+  "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
+  "baselineSourceSha256": "a9a7c27e85c1fcf4b1f2805e8fbe8913e43c069688ffcb6abd494a33e7ee52ae",
+  "baselineGitHead": "902ac8bc50bda2fa25ac54f8f24b12a15797ae32",
+  "baselineReceiptSha256": "397bd4e29127b60c50a6cd0b955c1492c04a3d5a69fd17c242d0ecbe04258245",
+  "signatureVerifierSha256": "b3516186f7273868b5746319ca915329defc94137bae885e107460682988bdfd",
+  "baseline": [
+    {
+      "platform": "darwin-aarch64",
+      "kind": "updater",
+      "file_name": "OSIR-Client-prod-0.1.11-aarch64-apple-darwin.app.tar.gz",
+      "url": "https://osirclaw.com/api/v1/osir-client/download/prod-0.1.11/darwin-aarch64/updater",
+      "sha256": "c853a790e1057539e5ba62e3a865c962686890ccf961ac435aba67f6c9cb3f17",
+      "size_bytes": 20234498,
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSDdReHcraW81ajI0VTFOZ2Z6NzV2aUhTdFlkdlQzMG5zTmtxOXpxUno4THhZV0tWa1RGcytLV3JyT0ZqOHBKNEllWHhVK2NjdTI3aDRtOHVoTmIvbDZvcWE0QUFXMEFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjcxMjUyCWZpbGU6T1NJUi1DbGllbnQtcHJvZC0wLjEuMTEtYWFyY2g2NC1hcHBsZS1kYXJ3aW4uYXBwLnRhci5negpJdVJYM0ExWi95V0pZQ2JWK09PWGhLVEhadkViUStvUk55WjNSTHpYNjB2T2VIbzVBZGNmTW95NDJqWWdMZVEzMFRVMlBPM3c2R09MWDJYVi9RZ2pCdz09Cg==",
+      "objectUrl": "https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.11/OSIR-Client-prod-0.1.11-aarch64-apple-darwin.app.tar.gz",
+      "executableSha256": "57e82227797767ff02f7df630b7671c62ba5d21201cdb151efd922dcdf1f14b5",
+      "target": "aarch64-apple-darwin",
+      "architectures": [
+        "arm64"
+      ],
+      "manifestSha256": "a479ee6ee1e88f0675a08f1b6d813a4729374f20ed68499fdab4ecbfd9611d63"
+    },
+    {
+      "platform": "darwin-x86_64",
+      "kind": "updater",
+      "file_name": "OSIR-Client-prod-0.1.11-x86_64-apple-darwin.app.tar.gz",
+      "url": "https://osirclaw.com/api/v1/osir-client/download/prod-0.1.11/darwin-x86_64/updater",
+      "sha256": "077b567bf2b1ec7799300200ab0ccd6d478f54c6ce0cb60425104963704e4ae7",
+      "size_bytes": 21309618,
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSDdReHcraW81ajFlVCtoVzkxVkhUeFlJOUV0Wjc4UytJRmw5QVhQYWlRR0V4Q0tkYXFONkJwRS9kdTZzaGVYSnRNenpLZk5DTnlMS3BPR2pLdmlqV2d0enQ3eFRGNlFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjY3MDAwCWZpbGU6T1NJUi1DbGllbnQtcHJvZC0wLjEuMTEteDg2XzY0LWFwcGxlLWRhcndpbi5hcHAudGFyLmd6ClQzU2c0emdlbnd4OHJaNkJ1NU5vWG5leWs4R3IyT29PZ28wWTFuZ0tZRGdqRGswSDlrTmE1OGJoakdwTEEwYTBQZTNySDZtaXNKeGRXSlNIZjZEUUFBPT0K",
+      "objectUrl": "https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.11/OSIR-Client-prod-0.1.11-x86_64-apple-darwin.app.tar.gz",
+      "executableSha256": "6c915f5f30ea5baf6a5284271c8cbd2e2298adf68b2ed687c246fee1c45af664",
+      "target": "x86_64-apple-darwin",
+      "architectures": [
+        "x86_64"
+      ],
+      "manifestSha256": "994200db02105fb3e7841bd78bfc83181f9b1faa7310c1b9536b172da0f6c5e1"
+    },
+    {
+      "platform": "windows-x86_64",
+      "kind": "updater",
+      "file_name": "OSIR-Client-prod-0.1.11-x86_64-pc-windows-msvc-setup.exe",
+      "url": "https://osirclaw.com/api/v1/osir-client/download/prod-0.1.11/windows-x86_64/updater",
+      "sha256": "7c090348fdda971f8058c7da0305d193839b3fbb884e1cef2a27be229e029e15",
+      "size_bytes": 16064345,
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSDdReHcraW81angzVE1YUm5DMjZ1Z2VPcEhtT0VBQ1F1R0pFeSszZU9YQzZIRXczNEw1SlZYTE1ieHJuTytKNVA5MForbWs5Mk9IWUhPRzg3RjJNeXU4TjVpNXRKRUF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjcxMjYxCWZpbGU6T1NJUi1DbGllbnQtcHJvZC0wLjEuMTEteDg2XzY0LXBjLXdpbmRvd3MtbXN2Yy1zZXR1cC5leGUKZFMvcmRqeldQN25XN0xGb1VRQ0o2bC9GNW1VM05Gd0NCNC8rSE1TSWpYb01laVdEMms3d3plMnVMUmdiUmdyYUVPT2xnM2xIck1GN2NodThwUmc2Q0E9PQo=",
+      "objectUrl": "https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.11/OSIR-Client-prod-0.1.11-x86_64-pc-windows-msvc-setup.exe",
+      "executableSha256": "b8e85d1fb948780123b8e6db687361339ce4bd7f005581fe4993a9dedc8c3620",
+      "target": "x86_64-pc-windows-msvc",
+      "architectures": [
+        "x86_64"
+      ],
+      "manifestSha256": "c8a9f7ce14614383e6365d802f0d1303e51dc825a38f529d0c368514970c6b85"
+    }
+  ],
+  "references": {
+    "/Users/ouwei/.codex/release-evidence/20261114-client-0111-runtime-source/scripts/osir-release-updater.mjs": {
+      "sha256": "b3516186f7273868b5746319ca915329defc94137bae885e107460682988bdfd",
+      "bytes": 12691
+    }
+  }
+}

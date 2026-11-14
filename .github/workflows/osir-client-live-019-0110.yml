@@ -1,4 +1,4 @@
-name: OSIR Client 0.1.10 to 0.1.11 updater bridge
+name: OSIR Client 0.1.11 to 0.1.11+1 updater bridge
 on:
   workflow_dispatch:
     inputs:
@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       cutover_confirmed:
-        description: Main coordinator explicitly confirmed public 0.1.11 cutover
+        description: Main coordinator explicitly confirmed public 0.1.11+1 cutover
         required: true
         type: boolean
         default: false
@@ -24,7 +24,7 @@ permissions:
   contents: read
 jobs:
   acceptance:
-    uses: ./.github/workflows/osir-client-live-0110-0111.yml
+    uses: ./.github/workflows/osir-client-live-0111-build1.yml
     with:
       public_spec: ${{ inputs.public_spec }}
       public_spec_sha256: ${{ inputs.public_spec_sha256 }}
