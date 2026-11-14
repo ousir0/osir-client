@@ -44,7 +44,7 @@ Windows 复用原 CDP 真实按钮点击及 native IPC，额外绑定 loopback �
 
 这些文件当前不存在。每份必须通过最终发行 manifest 校验：0.1.10/prod/com.osir.client、r2 commit/source hash、原生 target/arch、真实 executable hash、原始内置 updater 公钥/端点、verifiedAtEnd=true、非 pending release mode、updater 包大小/hash/signatureVerified=true。manifest 原始 hash 和大小必须与 spec 完全一致。
 
-对象名称固定为 `OSIR-Client-prod-0.1.10-<target>.app.tar.gz`（Mac）或 `OSIR-Client-prod-0.1.10-x86_64-pc-windows-msvc-setup.exe`。objectUrl 必须在 `https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.10/` 下精确匹配文件名。feedUrl 仅允许同一对象 URL，或精确 `https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.10/<filename>`。实际旧应用可走其既有生产下载链路；独立读回不跟随重定向。
+对象名称固定为 `OSIR-Client-prod-0.1.10-<target>.app.tar.gz`（Mac）或 `OSIR-Client-prod-0.1.10-x86_64-pc-windows-msvc-setup.exe`。objectUrl 必须在 `https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.10/` 下精确匹配文件名。feedUrl 仅允许同一对象 URL、精确 `https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.10/<filename>`，或精确 `https://osirclaw.com/api/v1/osir-client/download/prod-0.1.10/<platform>/updater`（platform 必须等于当前平台）。不接受其他 release、platform、kind、host、query、fragment 或路径变体。实际旧应用可走其既有生产下载链路；独立读回不跟随重定向。
 
 ## 登记与 dispatch 边界
 

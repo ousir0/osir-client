@@ -44,7 +44,7 @@ export function validateSpec(s){
   keys(p.updater,['objectUrl','feedUrl','sha256','size','signature']);const u=p.updater;
   const target=PLATFORMS[p.platform].target;const name=`OSIR-Client-prod-0.1.10-${target}${p.platform.startsWith('darwin')?'.app.tar.gz':'-setup.exe'}`;
   assert.equal(u.objectUrl,objectUrl('0.1.10',name));
-  assert.ok([u.objectUrl,`https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.10/${name}`].includes(u.feedUrl),'Exact approved feed artifact path required');
+  assert.ok([u.objectUrl,`https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.10/${name}`,`https://osirclaw.com/api/v1/osir-client/download/prod-0.1.10/${p.platform}/updater`].includes(u.feedUrl),'Exact approved feed artifact path required');
   hex(u.sha256,64);size(u.size);assert.equal(typeof u.signature,'string');assert.match(u.signature,/^[A-Za-z0-9+/]+={0,2}$/);assert.ok(u.signature.length>=128&&u.signature.length<=16384);assert.equal(Buffer.from(u.signature,'base64').toString('base64'),u.signature);
  }
  return s;

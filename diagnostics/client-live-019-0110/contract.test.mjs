@@ -34,6 +34,55 @@ test('cutover, feed and immutable artifact paths cannot redirect to arbitrary so
  for(const key of ['feedUrl','objectUrl'])for(const url of ['https://example.com/a.exe',s.platforms[0].updater.objectUrl+'?token=x','https://osirclaw.com/client-release/x.exe']){x=structuredClone(s);x.platforms[0].updater[key]=url;assert.throws(()=>validateSpec(x));}
  x=structuredClone(s);x.platforms[0].manifestPath='../data.json';assert.throws(()=>validateSpec(x));
 });
+test('each native platform accepts only its three exact feed URL forms with unchanged feed binding',()=>{
+ const {s}=fixture();
+ for(const [index,p] of s.platforms.entries()){
+  const name=p.updater.objectUrl.split('/').at(-1);
+  for(const url of [p.updater.objectUrl,`https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.10/${name}`,`https://osirclaw.com/api/v1/osir-client/download/prod-0.1.10/${p.platform}/updater`]){
+   const x=structuredClone(s);x.platforms[index].updater.feedUrl=url;
+   const feed=Buffer.from(JSON.stringify({version:'0.1.10',platforms:Object.fromEntries(x.platforms.map(p=>[p.platform,{url:p.updater.feedUrl,signature:p.updater.signature}]))}));
+   x.feed={...x.feed,size:feed.length,sha256:sha(feed)};validateSpec(x);validateFeed(x,feed);
+  }
+ }
+});
+test('production feed routes reject other releases, platforms, kinds, authorities and URL aliases',()=>{
+ const {s}=fixture();
+ for(const [index,p] of s.platforms.entries()){
+  const url=`https://osirclaw.com/api/v1/osir-client/download/prod-0.1.10/${p.platform}/updater`;
+  const other=s.platforms[(index+1)%s.platforms.length].platform;
+  const invalid=[
+   url.replace('prod-0.1.10','prod-0.1.9'),url.replace('prod-0.1.10','prod-0.1.11'),url.replace('prod-0.1.10','beta-0.1.10'),
+   url.replace(p.platform,other),url.replace(p.platform,'linux-x86_64'),url.replace(p.platform,p.platform.toUpperCase()),
+   url.replace('/updater','/installer'),url.replace('/updater','/UPDATER'),url.replace('/updater','/updater.exe'),
+   url+'?x=1',url+'?',url+'#fragment',url+'#',url+'/',url+'/extra',
+   url.replace('https:','http:'),url.replace('https:','HTTPS:'),url.replace('osirclaw.com','OSIRCLAW.COM'),
+   url.replace('osirclaw.com','osirclaw.com.evil.example'),url.replace('osirclaw.com','evil.example'),
+   url.replace('osirclaw.com','osirclaw.com:443'),url.replace('osirclaw.com','user@osirclaw.com'),url.replace('osirclaw.com','osirclaw.com@evil.example'),
+   url.replace('/download/','//download/'),url.replace('/download/','/artifacts/'),url.replace('/download/','/download/./'),
+   url.replace(p.platform,`other/../${p.platform}`),url.replace(p.platform,p.platform.replace('-','%2D')),url.replace('/updater','/%75pdater'),
+   url.replace('/updater','\\updater'),url+'\n',
+  ];
+  for(const bad of invalid){
+   const x=structuredClone(s);x.platforms[index].updater.feedUrl=bad;
+   assert.throws(()=>validateSpec(x),`${p.platform}: ${JSON.stringify(bad)}`);
+  }
+  const x=structuredClone(s);x.platforms[index].updater.feedUrl=url;x.platforms[index].updater.objectUrl=url;
+  assert.throws(()=>validateSpec(x),'Production feed route cannot replace immutable object URL');
+ }
+});
+test('production feed route still binds the actual public feed URL, signature and exact bytes',()=>{
+ const {s}=fixture();
+ for(const p of s.platforms)p.updater.feedUrl=`https://osirclaw.com/api/v1/osir-client/download/prod-0.1.10/${p.platform}/updater`;
+ const f={version:'0.1.10',platforms:Object.fromEntries(s.platforms.map(p=>[p.platform,{url:p.updater.feedUrl,signature:p.updater.signature}]))};
+ const raw=Buffer.from(JSON.stringify(f));s.feed={...s.feed,size:raw.length,sha256:sha(raw)};validateSpec(s);validateFeed(s,raw);
+ assert.throws(()=>validateFeed(s,Buffer.concat([raw,Buffer.from('\n')])));
+ for(const [index,p] of s.platforms.entries()){
+  for(const change of [entry=>entry.url=s.platforms[(index+1)%s.platforms.length].updater.feedUrl,entry=>entry.url=p.updater.objectUrl,entry=>entry.signature=inputs.baseline[1].signature]){
+   const changed=structuredClone(f);change(changed.platforms[p.platform]);const bytes=Buffer.from(JSON.stringify(changed));
+   assert.throws(()=>validateFeed({...s,feed:{...s.feed,size:bytes.length,sha256:sha(bytes)}},bytes));
+  }
+ }
+});
 test('final manifest raw bytes, signed artifact, native architecture and source provenance all bound',()=>{
  const {s,manifests}=fixture();for(const p of s.platforms)validateManifest(s,p,manifests[p.platform]);
  const p=s.platforms[0],original=JSON.parse(manifests[p.platform]);
