@@ -76,6 +76,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
+      PYTHONUTF8: '1'
       CI: 'true'
       CUTOVER_CONFIRMED: ${{ inputs.cutover_confirmed }}
       PUBLIC_SPEC: ${{ inputs.public_spec }}

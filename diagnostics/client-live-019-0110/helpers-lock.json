@@ -6,7 +6,7 @@
   "contract.test.mjs": "f518298bb79edab571a257cf5d6a06b05d284c23d5e5617af5938f46bf6ea5ba",
   "helpers/check-ui.mjs": "ba75822f5bf818cd218cfb183519f6eb23b382ef03a7398bcf5dadbe6b5e6ff1",
   "helpers/click.swift": "baf2964d9593a3c4fccc1d4fbe2153b2a8a1a0a0be3f2d076c99e03caa246f83",
-  "helpers/gui-preflight.swift": "907f096484b97522dc57b6a53d2a175420de98cc39869659cece4a037d0ad6d3",
+  "helpers/gui-preflight.swift": "82614584b5c8ce39a5322b49a6e2170e9b3a89f4fff8db2c711d00e6cdd42d3c",
   "helpers/pe-arch.py": "8e61412b26615f47133512ce396abf85aba321afd3874fbceca282740ea14135",
   "helpers/wait-schema.py": "257ddae55d735a2d96bb9c162871e4fdc72a66130dd2cd0031aa26a1c5199a12",
   "helpers/windows-window.cs": "e0ae2405b29665d44d1bb3ab37da5093fffd157c082d9f14bca6133f9b9405e1",
@@ -24,5 +24,5 @@
   "reviewed/test_disposable.py": "c41a8d515a106d30a5b14864a5c5fd94c9b6759e6aaee6dd35246bb44bbcf9a0",
   "seal.mjs": "d8a3974645166b21f34b9f208123a740e43b7b24b7ff7e0d5884c643a7a4f0a0",
   "test_harness.py": "ab9aee2b2862430cd0061fc074bee0d9d96df2c024cb46f350cab3e17ba28ceb",
-  "workflow.review.yml": "3857016ed60dcf49ee57f047acf33ed1eb806da439fd324158170e7128292bf8"
+  "workflow.review.yml": "3ae051243c658b5e690fff614c86fd837dda927e97911c01c655dd13b1dbfd17"
 }

@@ -4,5 +4,5 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 let session = CGSessionCopyCurrentDictionary() as? [String: Any]
-let result: [String: Any] = ["accessibilityTrusted": AXIsProcessTrusted(), "consoleSession": session?["kCGSessionOnConsoleKey"] as? Bool ?? false]
+let result: [String: Any] = ["accessibilityTrusted": AXIsProcessTrusted(), "consoleSession": session?[kCGSessionOnConsoleKey as String] as? Bool ?? false]
 FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
