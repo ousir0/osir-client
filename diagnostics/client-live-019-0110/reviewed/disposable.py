@@ -136,10 +136,21 @@ def verify(path):
     before_path = owned(root, "evidence/before.json")
     before = json.loads(before_path.read_text())
     after = fixture_state(root)
-    # SQLite layout/hash may legitimately change during migration; compare actual logical records.
-    require(after["schemaVersion"] == 26, "Expected 0.1.10 schema v26; review this contract if candidate changes")
     before_state = json.loads(json.dumps(before["state"]))
     after_state = json.loads(json.dumps(after["state"]))
+    changed = {}
+    for key in sorted(set(before_state) | set(after_state)):
+        if before_state.get(key) != after_state.get(key):
+            old = json.dumps(before_state.get(key), ensure_ascii=False, sort_keys=True).encode()
+            new = json.dumps(after_state.get(key), ensure_ascii=False, sort_keys=True).encode()
+            changed[key] = {"beforeSha256": hashlib.sha256(old).hexdigest(),
+                            "afterSha256": hashlib.sha256(new).hexdigest()}
+    if after["schemaVersion"] != 26 or changed:
+        diagnostic = {"status": "retention-diagnostic", "beforeSchemaVersion": before["schemaVersion"],
+                      "afterSchemaVersion": after["schemaVersion"], "changedStateSections": changed}
+        save(owned(root, "evidence/data-retention-diagnostic.json"), diagnostic)
+    # SQLite layout/hash may legitimately change during migration; compare actual logical records.
+    require(after["schemaVersion"] == 26, "Expected 0.1.10 schema v26; review this contract if candidate changes")
     require(before_state == after_state, "Synthetic profile/provider/settings/user config changed")
     result = {"status": "data-retention-check-only", "scope": "Does not prove updater, version, restart, window or release acceptance",
               "beforeSha256": digest(before_path), "before": before, "after": after}
