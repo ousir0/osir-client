@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "status": "preparation-only-not-updater-acceptance",
+  "fromVersion": "0.1.9",
+  "toVersion": "0.1.10",
+  "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
+  "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
+  "baselineSourceSha256": "cd07d1481d2af89ad1f85a97cddca7796b02aedd57784ecaeb9609abdd1aafd0",
+  "baselineGitHead": "ace58704b8e0542152be48f3f319d5a02c06467e",
+  "baselineReceiptSha256": "c9cb38a36179c49a6c2b1e0af9d4481fd4b47c500e03ee477edfd80690ed9309",
+  "baseline": [
+    {
+      "platform": "darwin-aarch64",
+      "kind": "updater",
+      "file_name": "OSIR-Client-prod-0.1.9-aarch64-apple-darwin.app.tar.gz",
+      "url": "https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.9/OSIR-Client-prod-0.1.9-aarch64-apple-darwin.app.tar.gz",
+      "sha256": "b2bb7fe4d5f4590f513c2144bbd26e7e0eb61b6e30acb2e90e8ec388445ea232",
+      "size_bytes": 20682372,
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSDdReHcraW81ai9UMlBYZy9VRjlCbm9nalVhK0tvRzhBc21FK083VTk0L0l4eE01QTRIREdyblFIaFpZV0pKNDFnY0FpOGJVZ0h0QlBmMzh3bGduaU11NHV3QVJQOGc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDI0OTI3CWZpbGU6T1NJUi1DbGllbnQtcHJvZC0wLjEuOS1hYXJjaDY0LWFwcGxlLWRhcndpbi5hcHAudGFyLmd6CnB1SzYySDB1Y1B6SkttQ1JYcVkvQ05EUDI3ODY3Q2tBb2RNWDdwSlRwRXNZUmRtUnAzckY1SS9hTHcwakN2RXVpSGxBMEIwVVo5OUZ1MTFZY2RTbERRPT0K",
+      "objectUrl": "https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.9/OSIR-Client-prod-0.1.9-aarch64-apple-darwin.app.tar.gz",
+      "executableSha256": "ec2e33d54c52cfd4ab7ce8aa5fad0caaba9d526b20144cae98cc4795124aac76",
+      "target": "aarch64-apple-darwin",
+      "architectures": [
+        "arm64"
+      ],
+      "manifestSha256": "3ab6b5292c3931df2f0a94562f70c7dec84b989f2ef418e39e23d4dc556c9a90"
+    },
+    {
+      "platform": "darwin-x86_64",
+      "kind": "updater",
+      "file_name": "OSIR-Client-prod-0.1.9-x86_64-apple-darwin.app.tar.gz",
+      "url": "https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.9/OSIR-Client-prod-0.1.9-x86_64-apple-darwin.app.tar.gz",
+      "sha256": "37a089c39fa163cde41a24aa705b1a5be68eb8ab42fbad8c1cffc514f52dbff0",
+      "size_bytes": 21051248,
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSDdReHcraW81anl6azU0cEZTWURTbDhPV1BRZVlVdFNDTHZobE9Ocm5kRnJnRTZScEV4OHRTQU5xbmpXK2tmaS9VRy9QYkhYVWdiTmE0dmk0c2w4V1B2bGx0Z2NJeWdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDI2NzEwCWZpbGU6T1NJUi1DbGllbnQtcHJvZC0wLjEuOS14ODZfNjQtYXBwbGUtZGFyd2luLmFwcC50YXIuZ3oKa1R1THZPNnR6ZFZweG0vVE9mblpwamFqNlhSVUs4ZDlpTGo2Q3MweE5VOHRwZ0RxbUgrK2FPSUF5Z0NCSkZ6VFpCOFdySHFyeDBMdEIxZHNPUGQxQUE9PQo=",
+      "objectUrl": "https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.9/OSIR-Client-prod-0.1.9-x86_64-apple-darwin.app.tar.gz",
+      "executableSha256": "0ddb25fe8b5f6f43bb26516d718059633071f81aacb6a59b062bffa03971a977",
+      "target": "x86_64-apple-darwin",
+      "architectures": [
+        "x86_64"
+      ],
+      "manifestSha256": "c7c97d7ec840065666ec73fca6c87a7886bfc5d0f7346f1ca713523f18a10d6d"
+    },
+    {
+      "platform": "windows-x86_64",
+      "kind": "updater",
+      "file_name": "OSIR-Client-prod-0.1.9-x86_64-pc-windows-msvc-setup.exe",
+      "url": "https://osirclaw.com/api/v1/osir-client/artifacts/prod-0.1.9/OSIR-Client-prod-0.1.9-x86_64-pc-windows-msvc-setup.exe",
+      "sha256": "39392441db162488c40042e01e11c5780796162278d09ee9b0ad745f8c833ba2",
+      "size_bytes": 15926084,
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSDdReHcraW81ajZ2Y0ZVUnl1eHZJb2RjOGhyZXBiNUFMZmE1T3B3RzM3ei84aEhjR3pkcTdOT1E5MkN6dmNadWZZdS8raThpVE1PNlRZNm1RcVRqTDl3WWp2bkNxTEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDI3Mjk5CWZpbGU6T1NJUi1DbGllbnQtcHJvZC0wLjEuOS14ODZfNjQtcGMtd2luZG93cy1tc3ZjLXNldHVwLmV4ZQpzUkk1SzB5NnhjMlFwT1NoV256RWtJZXY2KzRUVlNBZUs4NFA5c2tnNEVrRW5kekNsSDI0YnhadTNhbFBTQlNLbkxiWElJcm0rTUZTc21zck9aVEFDZz09Cg==",
+      "objectUrl": "https://osirvedio.cn-nb1.rains3.com/osir-client/releases/prod-0.1.9/OSIR-Client-prod-0.1.9-x86_64-pc-windows-msvc-setup.exe",
+      "executableSha256": "1e61b00b9ecb0f93a4efc3e99ecaf199fa65fda10f7e08fc290516f1bb455c7f",
+      "target": "x86_64-pc-windows-msvc",
+      "architectures": [
+        "x86_64"
+      ],
+      "manifestSha256": "a7a995e5975866781f67f6f0e1baadaf574c4f3ceb475bb7a5aa7d45c5e5ae71"
+    }
+  ],
+  "references": {
+    "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-source/src-tauri/src/commands/settings.rs": {
+      "sha256": "7ad3c45f833e00d31adebe1ed34f5f49c5a894947ebbdb2169ffe9bbbc28b64c",
+      "bytes": 35598
+    },
+    "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-source/src-tauri/src/update_distribution.rs": {
+      "sha256": "bcb5ed13ea3e39413a4d3287d33611c873764d51a8917ac619691c074cf58646",
+      "bytes": 12834
+    },
+    "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-source/src-tauri/Cargo.lock": {
+      "sha256": "c07f29c1fe5f3b90fe7e6d6fe3cf37de38b4f332bd7fb5dcaf5d531e032357fe",
+      "bytes": 205308
+    },
+    "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-source/scripts/osir-release-updater.mjs": {
+      "sha256": "b3516186f7273868b5746319ca915329defc94137bae885e107460682988bdfd",
+      "bytes": 12691
+    },
+    "/Users/ouwei/cc-switch-osir-client/scripts/osir-packaged-renderer-check.mjs": {
+      "sha256": "307494b262844d8677d96ce90676284be12658792507c99888f30406053e2832",
+      "bytes": 15743
+    },
+    "/Users/ouwei/cc-switch-osir-client/scripts/osir-macos-packaged-smoke.mjs": {
+      "sha256": "4ad8ffd6138ff19c9ec021c7c4809c809d67822413cd46aac4239323ca189df0",
+      "bytes": 7940
+    },
+    "/Users/ouwei/cc-switch-osir-client/scripts/osir-windows-packaged-smoke.ps1": {
+      "sha256": "680897d2ceb4172c2b3651d256983a9786828251fd11cef63946d579544ba7e0",
+      "bytes": 30642
+    },
+    "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-acceptance-harness/scripts/osir-live-updater-check.mjs": {
+      "sha256": "822f10f3eaa465dcde0a0f61cea12346109b7b4c21f6c6ebcc6e689e4b135c2f",
+      "bytes": 4049
+    },
+    "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-acceptance-harness/scripts/osir-live-updater-macos.py": {
+      "sha256": "6ec7d71570a5f8557de0f6c730428f837942fe1ad5bd029242a1662de5fd0b28",
+      "bytes": 5269
+    },
+    "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-acceptance-harness/scripts/osir-live-updater-windows.ps1": {
+      "sha256": "a393a8f6eaae8d344eef43279b8b97bae8741dd8ecc59cad550f47d1846596fe",
+      "bytes": 5887
+    },
+    "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-acceptance-harness/scripts/osir-updater-click.swift": {
+      "sha256": "94c86dd2b20633f7b6980db44cbe24c4eca9b714aac38de6b1018f39ab5b0a44",
+      "bytes": 2021
+    }
+  }
+}

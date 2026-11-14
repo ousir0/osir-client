@@ -1,0 +1,57 @@
+[
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-019-to-0110-updater-prep/inputs.json",
+    "path": "reviewed/inputs.json",
+    "sha256": "4e08939eabfce1c65677cf40177278b88711aa41e8a097cad0e1237dd001fcd9"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-019-to-0110-updater-prep/prepare.mjs",
+    "path": "reviewed/prepare.mjs",
+    "sha256": "cc80b744873c76589059abccf2449de9837be646fe427499e53ba64129ede26a"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-019-to-0110-updater-prep/prepare.test.mjs",
+    "path": "reviewed/prepare.test.mjs",
+    "sha256": "7ae40a0564348dc827467b6035fafa14d90404e783a2fb6bf9136d9e7bb284b5"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-019-to-0110-updater-prep/disposable.py",
+    "path": "reviewed/disposable.py",
+    "sha256": "043cab48f6452246e6ef9a95d0a4d468100b524ee337c4dbed8f8f981521ac0b"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-019-to-0110-updater-prep/test_disposable.py",
+    "path": "reviewed/test_disposable.py",
+    "sha256": "c41a8d515a106d30a5b14864a5c5fd94c9b6759e6aaee6dd35246bb44bbcf9a0"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-source/scripts/osir-release-updater.mjs",
+    "path": "reviewed/osir-release-updater.mjs",
+    "sha256": "b3516186f7273868b5746319ca915329defc94137bae885e107460682988bdfd",
+    "bytes": 12691
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-acceptance-harness/scripts/osir-live-updater-check.mjs",
+    "path": "reviewed/osir-live-updater-check.mjs",
+    "sha256": "822f10f3eaa465dcde0a0f61cea12346109b7b4c21f6c6ebcc6e689e4b135c2f",
+    "bytes": 4049
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261112-osir-client-019-acceptance-harness/scripts/osir-updater-click.swift",
+    "path": "reviewed/osir-updater-click.swift",
+    "sha256": "94c86dd2b20633f7b6980db44cbe24c4eca9b714aac38de6b1018f39ab5b0a44",
+    "bytes": 2021
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-osir-client-0110-r2-source/scripts/osir-macos-window-probe.swift",
+    "path": "reviewed/osir-macos-window-probe.swift",
+    "sha256": "f9b3ab9b39ea5974ea2e0587357bace6844da60225b53fd962873f15d724567f"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-osir-client-0110-r2-source/scripts/osir-windows-packaged-smoke.ps1",
+    "sourceSha256": "680897d2ceb4172c2b3651d256983a9786828251fd11cef63946d579544ba7e0",
+    "path": "helpers/windows-window.cs",
+    "sha256": "e0ae2405b29665d44d1bb3ab37da5093fffd157c082d9f14bca6133f9b9405e1",
+    "transformation": "Read-only imports, OsirRealWindow and ForProcess copied exactly; activation/input/control methods omitted."
+  }
+]
