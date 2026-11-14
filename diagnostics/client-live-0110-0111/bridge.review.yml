@@ -1,0 +1,32 @@
+name: OSIR Client 0.1.10 to 0.1.11 updater bridge
+on:
+  workflow_dispatch:
+    inputs:
+      public_spec:
+        description: Complete reviewed JSON; exact final manifests must be in the harness commit
+        required: true
+        type: string
+      public_spec_sha256:
+        description: SHA-256 of the exact UTF-8 public_spec bytes
+        required: true
+        type: string
+      cutover_confirmed:
+        description: Main coordinator explicitly confirmed public 0.1.11 cutover
+        required: true
+        type: boolean
+        default: false
+      windows_only:
+        description: Run only Windows; this does not accept older Mac evidence for this transition
+        required: false
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    uses: ./.github/workflows/osir-client-live-0110-0111.yml
+    with:
+      public_spec: ${{ inputs.public_spec }}
+      public_spec_sha256: ${{ inputs.public_spec_sha256 }}
+      cutover_confirmed: ${{ inputs.cutover_confirmed }}
+      windows_only: ${{ inputs.windows_only }}

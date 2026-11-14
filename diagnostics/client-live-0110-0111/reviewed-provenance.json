@@ -1,0 +1,107 @@
+[
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/helpers/check-ui.mjs",
+    "sourceSha256": "ba75822f5bf818cd218cfb183519f6eb23b382ef03a7398bcf5dadbe6b5e6ff1",
+    "path": "helpers/check-ui.mjs",
+    "sha256": "8ee2266d49675b0e4b2bec185c123fb3ab1c52478a5a69191508e1f2acced200",
+    "transformation": "Derived transition/version/schema26 and signature-verifier input binding; exact changes in external adaptation diff"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/helpers/click.swift",
+    "sourceSha256": "baf2964d9593a3c4fccc1d4fbe2153b2a8a1a0a0be3f2d076c99e03caa246f83",
+    "path": "helpers/click.swift",
+    "sha256": "03efd861e83a4599864d51175af84907659582b83847ae3ebc849c493f9a5391",
+    "transformation": "Derived transition/version/schema26 and signature-verifier input binding; exact changes in external adaptation diff"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/helpers/gui-preflight.swift",
+    "sourceSha256": "82614584b5c8ce39a5322b49a6e2170e9b3a89f4fff8db2c711d00e6cdd42d3c",
+    "path": "helpers/gui-preflight.swift",
+    "sha256": "82614584b5c8ce39a5322b49a6e2170e9b3a89f4fff8db2c711d00e6cdd42d3c",
+    "transformation": "Byte-identical copy"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/helpers/pe-arch.py",
+    "sourceSha256": "8e61412b26615f47133512ce396abf85aba321afd3874fbceca282740ea14135",
+    "path": "helpers/pe-arch.py",
+    "sha256": "8e61412b26615f47133512ce396abf85aba321afd3874fbceca282740ea14135",
+    "transformation": "Byte-identical copy"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/helpers/wait-schema.py",
+    "sourceSha256": "257ddae55d735a2d96bb9c162871e4fdc72a66130dd2cd0031aa26a1c5199a12",
+    "path": "helpers/wait-schema.py",
+    "sha256": "6ffe8c7b95ab963d80c4f7873a6b2ce1a5ff4b52e1b8232204a7b7d9cb663b64",
+    "transformation": "Derived transition/version/schema26 and signature-verifier input binding; exact changes in external adaptation diff"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/helpers/windows-window.cs",
+    "sourceSha256": "e0ae2405b29665d44d1bb3ab37da5093fffd157c082d9f14bca6133f9b9405e1",
+    "path": "helpers/windows-window.cs",
+    "sha256": "e0ae2405b29665d44d1bb3ab37da5093fffd157c082d9f14bca6133f9b9405e1",
+    "transformation": "Byte-identical copy"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/disposable.py",
+    "sourceSha256": "8d86e41d62273db0452f502aa5caea29a662c5be1ff7f042735815306eaf7c06",
+    "path": "reviewed/disposable.py",
+    "sha256": "060636c4cb20eb84238b68699526dec9479ee2253a5ce63cfc2ccffad487da07",
+    "transformation": "Derived transition/version/schema26 and signature-verifier input binding; exact changes in external adaptation diff"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/inputs.json",
+    "sourceSha256": "4e08939eabfce1c65677cf40177278b88711aa41e8a097cad0e1237dd001fcd9",
+    "path": "reviewed/inputs.json",
+    "sha256": "2d1d60749a4994beac944de4a3a19055462a31d70d85d09a15eed73c2b9eac3c",
+    "transformation": "Derived transition/version/schema26 and signature-verifier input binding; exact changes in external adaptation diff"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/osir-live-updater-check.mjs",
+    "sourceSha256": "822f10f3eaa465dcde0a0f61cea12346109b7b4c21f6c6ebcc6e689e4b135c2f",
+    "path": "reviewed/osir-live-updater-check.mjs",
+    "sha256": "822f10f3eaa465dcde0a0f61cea12346109b7b4c21f6c6ebcc6e689e4b135c2f",
+    "transformation": "Byte-identical copy"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/osir-macos-window-probe.swift",
+    "sourceSha256": "f9b3ab9b39ea5974ea2e0587357bace6844da60225b53fd962873f15d724567f",
+    "path": "reviewed/osir-macos-window-probe.swift",
+    "sha256": "f9b3ab9b39ea5974ea2e0587357bace6844da60225b53fd962873f15d724567f",
+    "transformation": "Byte-identical copy"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/osir-release-updater.mjs",
+    "sourceSha256": "b3516186f7273868b5746319ca915329defc94137bae885e107460682988bdfd",
+    "path": "reviewed/osir-release-updater.mjs",
+    "sha256": "b3516186f7273868b5746319ca915329defc94137bae885e107460682988bdfd",
+    "transformation": "Byte-identical copy"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/osir-updater-click.swift",
+    "sourceSha256": "94c86dd2b20633f7b6980db44cbe24c4eca9b714aac38de6b1018f39ab5b0a44",
+    "path": "reviewed/osir-updater-click.swift",
+    "sha256": "94c86dd2b20633f7b6980db44cbe24c4eca9b714aac38de6b1018f39ab5b0a44",
+    "transformation": "Byte-identical copy"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/prepare.mjs",
+    "sourceSha256": "cc80b744873c76589059abccf2449de9837be646fe427499e53ba64129ede26a",
+    "path": "reviewed/prepare.mjs",
+    "sha256": "f2e93f6d4d16e095d4ec653bca9ce94d79961a8583bc2484fb38a5548a7942d5",
+    "transformation": "Derived transition/version/schema26 and signature-verifier input binding; exact changes in external adaptation diff"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/prepare.test.mjs",
+    "sourceSha256": "7ae40a0564348dc827467b6035fafa14d90404e783a2fb6bf9136d9e7bb284b5",
+    "path": "reviewed/prepare.test.mjs",
+    "sha256": "b8126b4983b6282a45a3c817a65cd2dd9b6b3304a46718ee36a75fdcd28703e5",
+    "transformation": "Derived transition/version/schema26 and signature-verifier input binding; exact changes in external adaptation diff"
+  },
+  {
+    "source": "/Users/ouwei/.codex/release-evidence/20261114-client-live-019-0110-r3-control/diagnostics/client-live-019-0110/reviewed/test_disposable.py",
+    "sourceSha256": "c41a8d515a106d30a5b14864a5c5fd94c9b6759e6aaee6dd35246bb44bbcf9a0",
+    "path": "reviewed/test_disposable.py",
+    "sha256": "a26848ebe237d920e472a5a2b108fbf0b8f9d57d11f13ff2f56a64369281f0d3",
+    "transformation": "Derived transition/version/schema26 and signature-verifier input binding; exact changes in external adaptation diff"
+  }
+]

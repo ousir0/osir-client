@@ -1,4 +1,4 @@
-name: OSIR live 0.1.9 to 0.1.10 updater acceptance
+name: OSIR Client 0.1.10 to 0.1.11 updater bridge
 on:
   workflow_dispatch:
     inputs:
@@ -11,145 +11,22 @@ on:
         required: true
         type: string
       cutover_confirmed:
-        description: Main coordinator explicitly confirmed public 0.1.10 cutover
+        description: Main coordinator explicitly confirmed public 0.1.11 cutover
         required: true
         type: boolean
         default: false
       windows_only:
-        description: Reuse accepted Mac results and run only Windows native acceptance
+        description: Run only Windows; this does not accept older Mac evidence for this transition
         required: false
         type: boolean
         default: false
 permissions:
   contents: read
-concurrency:
-  group: client-live-019-0110-${{ github.ref }}
-  cancel-in-progress: false
 jobs:
-  gate:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    defaults:
-      run:
-        working-directory: diagnostics/client-live-019-0110
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          sparse-checkout: diagnostics/client-live-019-0110
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version: '22'
-          package-manager-cache: false
-      - name: Refuse incomplete input and unconfirmed cutover before native jobs
-        env:
-          PUBLIC_SPEC: ${{ inputs.public_spec }}
-          PUBLIC_SPEC_SHA256: ${{ inputs.public_spec_sha256 }}
-          CUTOVER_CONFIRMED: ${{ inputs.cutover_confirmed }}
-        run: |
-          python3 - <<'PY'
-          import hashlib,json,os
-          from pathlib import Path
-          raw=os.environ['PUBLIC_SPEC']
-          assert os.environ['CUTOVER_CONFIRMED']=='true', 'Explicit public cutover is required'
-          assert len(raw.encode())<60000
-          assert hashlib.sha256(raw.encode()).hexdigest()==os.environ['PUBLIC_SPEC_SHA256']
-          value=json.loads(raw)
-          assert value['harnessCommit']==os.environ['GITHUB_SHA'], 'Harness commit must match dispatch ref'
-          assert value['cutover']['confirmed'] is True
-          Path(os.environ['RUNNER_TEMP'],'live-spec.json').write_bytes(raw.encode('utf-8'))
-          PY
-          node contract.mjs validate "$RUNNER_TEMP/live-spec.json"
-      - name: Focused helper contract tests; no product builds
-        run: |
-          node --test reviewed/prepare.test.mjs contract.test.mjs
-          python3 -m unittest discover -s reviewed -p test_disposable.py -v
-          python3 -m unittest -v test_harness.py
-  native:
-    needs: gate
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(inputs.windows_only && '[{"platform":"windows-x86_64","runner":"windows-2022"}]' || '[{"platform":"windows-x86_64","runner":"windows-2022"},{"platform":"darwin-aarch64","runner":"macos-15"},{"platform":"darwin-x86_64","runner":"macos-15-intel"}]') }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    env:
-      PYTHONUTF8: '1'
-      CI: 'true'
-      CUTOVER_CONFIRMED: ${{ inputs.cutover_confirmed }}
-      PUBLIC_SPEC: ${{ inputs.public_spec }}
-      PUBLIC_SPEC_SHA256: ${{ inputs.public_spec_sha256 }}
-      ACCEPTANCE_PLATFORM: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          sparse-checkout: diagnostics/client-live-019-0110
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
-        with:
-          node-version: '22'
-          package-manager-cache: false
-      - name: Parse native Windows driver before downloading packages
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $tokens=$null;$errors=$null
-          $file=Join-Path $env:GITHUB_WORKSPACE 'diagnostics/client-live-019-0110/live-windows.ps1'
-          [void][System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
-          if($errors.Count -ne 0){$errors | ForEach-Object {Write-Error $_.Message};throw 'Native PowerShell syntax gate failed'}
-      - name: New runner-owned directory and exact reviewed inputs
-        id: workspace
-        shell: bash
-        working-directory: diagnostics/client-live-019-0110
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then HARNESS_PYTHON=python; else HARNESS_PYTHON=python3; fi
-          "$HARNESS_PYTHON" - <<'PY'
-          import hashlib,json,os,subprocess,sys
-          from pathlib import Path
-          raw=os.environ['PUBLIC_SPEC']
-          assert hashlib.sha256(raw.encode()).hexdigest()==os.environ['PUBLIC_SPEC_SHA256']
-          root=Path(os.environ['RUNNER_TEMP'])/('osir-updater-019-to-0110-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']+'-'+os.environ['ACCEPTANCE_PLATFORM'])
-          subprocess.run([sys.executable,'reviewed/disposable.py','init',str(root)],check=True)
-          spec=root/'evidence/public-spec.json';spec.write_bytes(raw.encode('utf-8'))
-          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as out:out.write('path='+str(root)+'\n')
-          subprocess.run(['node','contract.mjs','prepare',str(spec),str(root),os.environ['ACCEPTANCE_PLATFORM']],check=True)
-          PY
-      - name: Actual shipped native Windows updater UI and automatic restart
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          OWNED_WORKSPACE: ${{ steps.workspace.outputs.path }}
-        run: |
-          $harness=Join-Path $env:GITHUB_WORKSPACE 'diagnostics/client-live-019-0110'
-          $spec=Join-Path $env:OWNED_WORKSPACE 'evidence/public-spec.json'
-          & "$harness/live-windows.ps1" -Spec $spec -Workspace $env:OWNED_WORKSPACE -Platform $env:ACCEPTANCE_PLATFORM
-      - name: Actual shipped native Mac updater UI and automatic restart
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          OWNED_WORKSPACE: ${{ steps.workspace.outputs.path }}
-        working-directory: diagnostics/client-live-019-0110
-        run: python3 live-macos.py "$OWNED_WORKSPACE/evidence/public-spec.json" "$OWNED_WORKSPACE" "$ACCEPTANCE_PLATFORM"
-      - name: Preserve explicit failure boundary
-        if: always() && steps.workspace.outputs.path != ''
-        shell: bash
-        env:
-          OWNED_WORKSPACE: ${{ steps.workspace.outputs.path }}
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then HARNESS_PYTHON=python; else HARNESS_PYTHON=python3; fi
-          "$HARNESS_PYTHON" - <<'PY'
-          import json,os
-          from pathlib import Path
-          root=Path(os.environ['OWNED_WORKSPACE']);out=root/'evidence'
-          if not (out/'result.json').exists() and not (out/'platform-failure.json').exists():
-              (out/'platform-failure.json').write_text(json.dumps({'status':'failed','passed':False,'reason':'Workflow did not reach completed native evidence; inspect failed step','platform':os.environ['ACCEPTANCE_PLATFORM']}),encoding='utf-8')
-          PY
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always() && steps.workspace.outputs.path != ''
-        with:
-          name: live-019-0110-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.workspace.outputs.path }}/evidence
-          if-no-files-found: error
-          retention-days: 14
+  acceptance:
+    uses: ./.github/workflows/osir-client-live-0110-0111.yml
+    with:
+      public_spec: ${{ inputs.public_spec }}
+      public_spec_sha256: ${{ inputs.public_spec_sha256 }}
+      cutover_confirmed: ${{ inputs.cutover_confirmed }}
+      windows_only: ${{ inputs.windows_only }}
