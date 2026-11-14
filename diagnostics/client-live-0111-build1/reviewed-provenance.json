@@ -213,8 +213,8 @@
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-live-0111-build1-control/diagnostics/client-live-0110-0111/workflow.review.yml",
     "sourceSha256": "c48a4a7e7f5a0ea1f3331089e2bf15e1a20596b05161b40d67058f8e94458a83",
     "path": "workflow.review.yml",
-    "sha256": "09eee600e13a1ebb691252cd3e6f054149ea3c92c54906ba87ef1b612dfece3a",
-    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control"
+    "sha256": "9d38174f2efdd9ea7292fd71b9ea921fb95a9290f628a9742f92ba915ad995c3",
+    "transformation": "Derived exact 0.1.11 -> 0.1.11+1 transition, safe token, truthful no-reoffer boundary; review Git diff against inherited control; gate and native sparse checkout include .github/workflows for exact workflow-copy verification"
   },
   {
     "source": "/Users/ouwei/.codex/release-evidence/20261115-client-0111-build1-finalized/mac-arm64/build-manifest.json",

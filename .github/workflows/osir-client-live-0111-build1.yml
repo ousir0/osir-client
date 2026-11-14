@@ -57,7 +57,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: diagnostics/client-live-0111-build1
+          sparse-checkout: |
+            diagnostics/client-live-0111-build1
+            .github/workflows
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '22'
@@ -107,7 +109,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: diagnostics/client-live-0111-build1
+          sparse-checkout: |
+            diagnostics/client-live-0111-build1
+            .github/workflows
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '22'
