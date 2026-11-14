@@ -4,6 +4,11 @@
 //! Never treat the one-time Codex configuration exchange as account login.
 
 pub mod account;
+pub(crate) mod anywhere_handoff;
+#[cfg(target_os = "macos")]
+pub(crate) mod anywhere_handoff_trust;
+#[cfg(target_os = "macos")]
+pub(crate) mod anywhere_handoff_transport;
 pub mod auth;
 pub mod authorization;
 pub mod client;

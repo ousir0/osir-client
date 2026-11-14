@@ -5,6 +5,8 @@ export type UpdateChannel = "stable" | "beta";
 export interface UpdateInfo {
   currentVersion: string;
   availableVersion: string;
+  // Full native version identifies a release independently of its display text.
+  availableVersionId?: string;
   notes?: string;
   pubDate?: string;
 }
@@ -14,9 +16,13 @@ export interface CheckOptions {
   channel?: UpdateChannel;
 }
 
+export function displayClientVersion(version: string): string {
+  return version.split("+", 1)[0];
+}
+
 export async function getCurrentVersion(): Promise<string> {
   try {
-    return await getVersion();
+    return displayClientVersion(await getVersion());
   } catch {
     return "";
   }
@@ -37,10 +43,17 @@ export async function checkForUpdate(
     return { status: "up-to-date" };
   }
 
+  const availableVersion = displayClientVersion(update.version ?? "");
+  const notes = update.body ?? (update as { notes?: string }).notes;
   const info: UpdateInfo = {
     currentVersion,
-    availableVersion: update.version ?? "",
-    notes: update.body ?? (update as { notes?: string }).notes,
+    availableVersion,
+    ...(update.version?.includes("+")
+      ? { availableVersionId: update.version }
+      : {}),
+    notes: update.version?.includes("+")
+      ? [`${availableVersion} 修订更新`, notes].filter(Boolean).join("\n")
+      : notes,
     pubDate: update.date,
   };
 

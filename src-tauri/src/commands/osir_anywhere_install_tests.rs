@@ -115,6 +115,7 @@ fn anywhere_release_system_signature_policy_is_authenticated_and_platform_specif
     let result = AnywhereReleaseStatus {
         status: "ready",
         version: Some(release.version),
+        revision: release.revision,
         platform: Some("darwin".into()),
         arch: Some("universal".into()),
         size: Some(1024),
@@ -463,6 +464,7 @@ fn anywhere_install_contract_and_cancellation_boundary() {
     let result = AnywhereReleaseStatus {
         status: "not_configured",
         version: None,
+        revision: 0,
         platform: Some("darwin".into()),
         arch: Some("arm64".into()),
         size: None,
@@ -471,7 +473,7 @@ fn anywhere_install_contract_and_cancellation_boundary() {
     };
     assert_eq!(
         serde_json::to_value(result).unwrap(),
-        json!({"status":"not_configured","version":null,"platform":"darwin","arch":"arm64","size":null,"error":null})
+        json!({"status":"not_configured","version":null,"revision":0,"platform":"darwin","arch":"arm64","size":null,"error":null})
     );
 }
 

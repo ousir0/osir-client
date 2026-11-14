@@ -1,4 +1,7 @@
 //! Native session coordinator. Raw credentials and grants never implement IPC serde.
+#[path = "anywhere_handoff_session.rs"]
+mod anywhere_handoff_session;
+
 #[path = "../../commands/osir_invoice.rs"]
 pub mod invoice;
 use super::{

@@ -96,7 +96,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
           setUpdateInfo(result.info);
           setIsDismissed(
             readDismissedVersion(capability.kind) ===
-              result.info.availableVersion,
+              (result.info.availableVersionId ?? result.info.availableVersion),
           );
           return true;
         }
@@ -133,7 +133,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
       try {
         localStorage.setItem(
           dismissalKey(distribution.kind),
-          updateInfo.availableVersion,
+          updateInfo.availableVersionId ?? updateInfo.availableVersion,
         );
         if (distribution.kind === "ccswitch")
           localStorage.removeItem(LEGACY_DISMISSED_KEY);
@@ -141,7 +141,11 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
         // Keep the dismissal for this window even when storage is unavailable.
       }
     }
-  }, [updateInfo?.availableVersion, distribution]);
+  }, [
+    updateInfo?.availableVersionId,
+    updateInfo?.availableVersion,
+    distribution,
+  ]);
 
   const resetDismiss = useCallback(() => {
     setIsDismissed(false);

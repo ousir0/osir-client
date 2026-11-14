@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { releaseVersion } from "./osir-release-version.mjs";
 import {
   createReleasePlan,
   inspectArtifact,
@@ -59,13 +60,15 @@ const signature = Buffer.from(
   "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==\n",
 ).toString("base64");
 const digest = (value) => createHash("sha256").update(value).digest("hex");
-function fixture(t, universal = false) {
+function fixture(
+  t,
+  universal = false,
+  { channel = "beta", version = "4.0.21-beta.1" } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "osir-publisher-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const channel = "beta",
-    version = "4.0.21-beta.1";
   const target = universal ? "universal-apple-darwin" : "aarch64-apple-darwin";
-  const name = `OSIR-Client-${channel}-${version}-${target}`;
+  const name = `OSIR-Client-${channel}-${releaseVersion(version).token}-${target}`;
   const config = {
     schemaVersion: 1,
     channel,
@@ -81,7 +84,7 @@ function fixture(t, universal = false) {
   writeFileSync(join(root, name + ".zip"), "synthetic installer");
   const entry = {
     signature,
-    url: `${config.downloadBaseUrl}${channel}/${version}/${name}.app.tar.gz`,
+    url: `${config.downloadBaseUrl}${channel}/${releaseVersion(version).token}/${name}.app.tar.gz`,
   };
   const feed = {
     version,
@@ -92,7 +95,7 @@ function fixture(t, universal = false) {
       ...(universal ? { "darwin-x86_64": entry } : {}),
     },
   };
-  writeFileSync(join(root, "updater-beta.json"), JSON.stringify(feed));
+  writeFileSync(join(root, `updater-${channel}.json`), JSON.stringify(feed));
   const manifest = {
     channel,
     version,
@@ -621,4 +624,28 @@ test("Windows release verifies the actual installer updater signature without cl
   f.manifest.peArchitectureVerified = false;
   save();
   assert.throws(() => createReleasePlan(f.options));
+});
+
+test("stable revisions retain internal versions but get distinct safe release IDs and artifact paths", (t) => {
+  const plans = ["0.1.11", "0.1.11+1", "0.1.11+10"].map((version) => {
+    const f = fixture(t, false, { channel: "prod", version });
+    const plan = createReleasePlan(f.options);
+    assert.equal(plan.version, version);
+    assert.equal(createServiceReleaseMetadata(plan).version, version);
+    for (const artifact of plan.artifacts) {
+      assert.match(artifact.file_name, /^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/);
+      assert.equal(artifact.url.includes("+"), false);
+      assert.equal(artifact.url.includes("%2B"), false);
+      assert.ok(artifact.url.includes(`/${plan.release_id}/`));
+    }
+    return plan;
+  });
+  assert.deepEqual(
+    plans.map((p) => p.release_id),
+    ["prod-0.1.11", "prod-0.1.11.build.1", "prod-0.1.11.build.10"],
+  );
+  assert.equal(
+    new Set(plans.flatMap((p) => p.artifacts.map((a) => a.url))).size,
+    6,
+  );
 });

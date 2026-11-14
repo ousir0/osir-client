@@ -197,6 +197,13 @@ test("resume accepts only a matching pre-publication failure after upload", (t) 
       source_sha: "f".repeat(64),
     }),
   );
+  for (const patch of [
+    { notes: "new review cannot resume an old registered draft" },
+    { notes_review: { override_sha256: "a".repeat(64) } },
+  ])
+    assert.throws(() =>
+      verifyResumeReceipt(receiptPath, spec, { ...plan, ...patch }),
+    );
   receipt.publish_attempted = true;
   writeJson("cloud-receipt.json", receipt);
   assert.throws(() => verifyResumeReceipt(receiptPath, spec, plan));

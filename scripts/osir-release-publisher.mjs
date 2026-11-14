@@ -1,5 +1,6 @@
 // Publishes only verified, already-built OSIR release artifacts. This module
 // never builds, signs, uploads files or reads credentials from a keychain.
+import { releaseVersion } from "./osir-release-version.mjs";
 import {
   closeSync,
   constants,
@@ -224,11 +225,7 @@ export function createReleasePlan({
       ),
     "Build manifest is not an explicit verified OSIR distribution with signed updates.",
   );
-  requireThat(
-    /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version) &&
-      (channel !== "prod" || !manifest.version.includes("-")),
-    "Build version is invalid for the selected channel.",
-  );
+  const { token: versionToken } = releaseVersion(manifest.version, channel);
   requireThat(
     manifest.architectures?.length > 0 &&
       manifest.architectures.every((architecture) =>
@@ -258,7 +255,7 @@ export function createReleasePlan({
       ),
     "Generated updater manifest does not match this signed release.",
   );
-  const releaseId = `${channel}-${manifest.version}`;
+  const releaseId = `${channel}-${versionToken}`;
   requireThat(
     /^[a-z0-9][a-z0-9.-]{0,95}$/.test(releaseId),
     "Release ID is invalid.",
@@ -294,7 +291,7 @@ export function createReleasePlan({
     const updaterPath = join(root, updaterName);
     requireThat(
       updaterName ===
-        `OSIR-Client-${channel}-${manifest.version}-${buildTarget}${windows ? "-setup.exe" : ".app.tar.gz"}`,
+        `OSIR-Client-${channel}-${versionToken}-${buildTarget}${windows ? "-setup.exe" : ".app.tar.gz"}`,
       "Updater artifact name does not match its platform.",
     );
     const updater = inspectArtifact(updaterPath);
@@ -332,7 +329,7 @@ export function createReleasePlan({
       ...updater,
       url: `${origin}/api/v1/osir-client/artifacts/${encodeURIComponent(releaseId)}/${encodeURIComponent(updaterName)}`,
     });
-    const installerStem = `OSIR-Client-${channel}-${manifest.version}-${buildTarget}`;
+    const installerStem = `OSIR-Client-${channel}-${versionToken}-${buildTarget}`;
     const installerName = manifest.installerArtifact?.name;
     requireThat(
       (windows

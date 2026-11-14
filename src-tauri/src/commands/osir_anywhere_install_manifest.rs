@@ -30,6 +30,8 @@ pub(super) struct Release {
     pub channel: String,
     pub release_id: String,
     pub version: String,
+    #[serde(default)]
+    pub revision: u32,
     pub published_at: String,
     pub minimum_client_version: Option<String>,
     pub minimum_server_version: Option<String>,
@@ -88,6 +90,22 @@ pub(super) fn version(value: &str) -> Result<[u64; 3], String> {
     Ok(result)
 }
 
+pub(super) fn client_version(value: &str) -> Result<[u64; 3], String> {
+    let base = if let Some((base, revision)) = value.split_once('+') {
+        if revision.is_empty()
+            || revision.starts_with('0')
+            || !revision.bytes().all(|c| c.is_ascii_digit())
+            || !revision.parse::<u32>().is_ok_and(|n| n <= 65535)
+        {
+            return Err("Client 版本格式无效，请更新后重试".into());
+        }
+        base
+    } else {
+        value
+    };
+    version(base)
+}
+
 fn token(value: &str, limit: usize, spaces: bool) -> bool {
     !value.is_empty()
         && value.len() <= limit
@@ -134,6 +152,7 @@ impl Release {
             || !token(&self.release_id, 128, false)
             || self.artifacts.is_empty()
             || self.artifacts.len() > 8
+            || self.revision > 65535
         {
             return Err("发行清单产品、渠道或格式不受支持".into());
         }
@@ -144,7 +163,7 @@ impl Release {
             return Err("发行日期尚未生效，请检查系统时间".into());
         }
         if let Some(minimum) = &self.minimum_client_version {
-            version(minimum)?;
+            client_version(minimum)?;
         }
         if let Some(minimum) = &self.minimum_server_version {
             version(minimum)?;
@@ -166,9 +185,9 @@ impl Release {
         if self
             .minimum_client_version
             .as_ref()
-            .map(|s| version(s))
+            .map(|s| client_version(s))
             .transpose()?
-            .is_some_and(|minimum| version(client).map_or(true, |current| current < minimum))
+            .is_some_and(|minimum| client_version(client).map_or(true, |current| current < minimum))
         {
             return Err("请先更新 Client，再安装此版本 Anywhere".into());
         }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Packaging only: never start the UI, change HOME, or provision a Keychain.
 // Built executables run only their read-only release diagnostics entry point.
+import { releaseVersion } from "./osir-release-version.mjs";
 import {
   accessSync,
   closeSync,
@@ -156,6 +157,11 @@ const inputFiles = [
   "src-tauri/resources/products/osir-anywhere/release-public.pub",
   "src-tauri/resources/products/osir-anywhere/manifest.dev.json",
   "scripts/osir-build.mjs",
+  "scripts/osir-release-version.mjs",
+  "scripts/osir-release-version.test.mjs",
+  "scripts/osir-release-updater-order.test.mjs",
+  "scripts/osir-release-notes.mjs",
+  "scripts/osir-release-notes.test.mjs",
   "tests/native-windows-backup/Cargo.toml",
   "tests/native-windows-backup/Cargo.lock",
   "tests/native-windows-backup/src/lib.rs",
@@ -328,8 +334,8 @@ export function verifyRustIncludeInputs(sourceRoot, files) {
   return { references };
 }
 
-export function sourceSnapshot() {
-  const sourceRoot = realpathSync(root);
+export function sourceSnapshot(directory = root) {
+  const sourceRoot = realpathSync(directory);
   function statInput(relative) {
     let absolute = sourceRoot;
     let stat;
@@ -650,7 +656,9 @@ function channelConfig(channel) {
 }
 
 export function configuredChannel(channel, updater) {
-  return merge(channelConfig(channel), updaterConfigPatch(updater));
+  const config = merge(channelConfig(channel), updaterConfigPatch(updater));
+  releaseVersion(config.version, channel);
+  return config;
 }
 
 function buildArgs(options, config) {
@@ -729,6 +737,7 @@ export function checkProject() {
       new Set(values).size === 3,
       "Channel identities, names and schemes must be distinct.",
     );
+  releaseVersion(base.version);
   return base.version;
 }
 
@@ -1374,7 +1383,7 @@ async function main() {
     }
     const installerPath = join(
       output,
-      `OSIR-Client-${options.channel}-${version}-${target}.zip`,
+      `OSIR-Client-${options.channel}-${releaseVersion(version).token}-${target}.zip`,
     );
     if (distribution)
       checkedTool(
@@ -1394,7 +1403,7 @@ async function main() {
         "Expected a small regular updater signature file.",
       );
       const signature = readFileSync(sourceUpdater + ".sig", "utf8").trim();
-      const artifactName = `OSIR-Client-${options.channel}-${version}-${target}.app.tar.gz`;
+      const artifactName = `OSIR-Client-${options.channel}-${releaseVersion(version).token}-${target}.app.tar.gz`;
       const artifactPath = join(output, artifactName);
       cpSync(sourceUpdater, artifactPath, { errorOnExist: true, force: false });
       updaterArtifact = verifyUpdaterArtifact(

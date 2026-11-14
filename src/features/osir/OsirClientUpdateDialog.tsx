@@ -201,7 +201,7 @@ export function OsirClientUpdateDialog() {
     setError(null);
     setProgress(null);
     setConfirmUnsaved(false);
-  }, [updateInfo?.availableVersion]);
+  }, [updateInfo?.availableVersionId, updateInfo?.availableVersion]);
 
   async function install(approvedDiscard: boolean) {
     if (!enabled || !hasUpdate || !updateInfo || installing.current) return;

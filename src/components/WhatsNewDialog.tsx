@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
+import { displayClientVersion } from "@/lib/updater";
 import { ChevronRight, ExternalLink, Sparkles } from "lucide-react";
 import {
   Dialog,
@@ -86,12 +87,14 @@ export function WhatsNewDialog({
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-fg-1" />
             {updatedTo
-              ? t("whatsNew.updatedTo", { version: updatedTo })
+              ? t("whatsNew.updatedTo", {
+                  version: displayClientVersion(updatedTo),
+                })
               : t("whatsNew.recentTitle")}
           </DialogTitle>
           {since && (
             <DialogDescription>
-              {t("whatsNew.since", { version: since })}
+              {t("whatsNew.since", { version: displayClientVersion(since) })}
             </DialogDescription>
           )}
         </DialogHeader>
@@ -100,7 +103,7 @@ export function WhatsNewDialog({
             <section key={entry.version}>
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-strong tabular-nums text-fg-1">
-                  v{entry.version}
+                  v{displayClientVersion(entry.version)}
                 </h3>
                 <button
                   type="button"

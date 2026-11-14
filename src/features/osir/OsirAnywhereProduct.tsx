@@ -69,7 +69,7 @@ function Actions({
         桌面客户端可用
       </button>
     );
-  if (installed)
+  if (installed && !state.updateAvailable)
     return (
       <button
         className="primary"
@@ -81,7 +81,7 @@ function Actions({
         ) : (
           <ExternalLink size={16} />
         )}
-        {action === "launch" ? "正在打开" : compact ? "打开" : "打开 Anywhere"}
+        {action === "launch" ? "正在连接" : compact ? "打开" : "打开 Anywhere"}
       </button>
     );
   if (
@@ -104,11 +104,9 @@ function Actions({
         {action === "install" && <Loader2 size={15} className="animate-spin" />}
         {action === "install"
           ? "正在准备安装"
-          : phase === "ready"
-            ? "继续安装"
-            : phase === "error" || phase === "cancelled"
-              ? "重新安装"
-              : "安装"}
+          : phase === "error" || phase === "cancelled"
+            ? "重新安装"
+            : state.updateAvailable ? "更新 Anywhere" : "安装"}
       </button>
     );
   if (label === "即将开放" || label === "平台暂不支持")
@@ -174,9 +172,9 @@ function UnsignedInstallNotice() {
   const release = state.release.data;
   if (
     !state.desktop ||
-    state.installed ||
+    (state.installed && !state.updateAvailable) ||
     state.detectionFailed ||
-    state.local.data?.status !== "not_installed" ||
+    !["installed", "not_installed"].includes(state.local.data?.status ?? "") ||
     state.release.isError ||
     release?.status !== "ready" ||
     release.systemSignature !== "unsigned"
@@ -321,7 +319,7 @@ function AnywherePage() {
           <UnsignedInstallNotice />
         </div>
         <Actions />
-        {!state.installed && !state.detectionFailed && <DownloadProgress />}
+        {(!state.installed || state.updateAvailable) && !state.detectionFailed && <DownloadProgress />}
       </section>
       {state.actionError && (
         <p className="osir-anywhere-error" role="alert">
@@ -334,15 +332,15 @@ function AnywherePage() {
           <li>
             <span>1</span>
             <div>
-              <h3>登录 OSIR 账号</h3>
-              <p>在 Anywhere 中通过浏览器完成账号授权。</p>
+              <h3>在客户端登录并配置模型</h3>
+              <p>沿用 OSIR 客户端中已配置的 Claude、Codex 和 DSH 模型。</p>
             </div>
           </li>
           <li>
             <span>2</span>
             <div>
-              <h3>选择项目并连接</h3>
-              <p>选择允许远程访问的项目。</p>
+              <h3>安装并打开 Anywhere</h3>
+              <p>使用当前账号登录、连接本机并自动添加已配置的工具实例。</p>
             </div>
           </li>
           <li>

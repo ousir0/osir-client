@@ -12,6 +12,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { displayClientVersion } from "@/lib/updater";
 
 const PRODUCT_URL = "https://osirclaw.com/";
 const COMMUNITY_RELEASES_URL =
@@ -190,9 +191,10 @@ export function DatabaseUpgrade({
         {phase === "upgradable" && availableVersion && (
           <p className="text-sm text-fg-2">
             {t("dbUpgrade.updateAvailable", {
-              version: availableVersion,
+              version: displayClientVersion(availableVersion),
               defaultValue: "发现新版本 v{{version}}，可尝试更新后重新打开。",
             })}
+            {availableVersion.includes("+") && "（修订更新）"}
           </p>
         )}
 

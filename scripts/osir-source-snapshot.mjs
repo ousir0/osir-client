@@ -19,6 +19,7 @@ import {
   gitProvenance,
 } from "./osir-build.mjs";
 import { loadUpdaterReleaseConfig } from "./osir-release-updater.mjs";
+import { releaseVersion, setSnapshotVersion } from "./osir-release-version.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const extraFiles = [
@@ -57,10 +58,14 @@ export function validateSnapshotPath(relative) {
 
 function main() {
   const [flag, destination, ...rest] = process.argv.slice(2);
+  const version =
+    rest.length === 2 && rest[0] === "--version" ? rest[1] : undefined;
   assert.ok(
-    flag === "--output" && destination && rest.length === 0,
-    "Usage: node scripts/osir-source-snapshot.mjs --output <new-private-source-directory>",
+    flag === "--output" && destination && (rest.length === 0 || version),
+    "Usage: node scripts/osir-source-snapshot.mjs --output <new-private-source-directory> [--version <base+revision>]",
   );
+  if (version)
+    assert.ok(releaseVersion(version).revision, "Expected +revision");
   const output = resolve(destination);
   assert.ok(!existsSync(output), "Snapshot destination must not exist");
   assert.ok(
@@ -106,10 +111,20 @@ function main() {
   ])
     copy(relative);
   verifySourceSnapshot(snapshot, git);
+  assert.equal(
+    sourceSnapshot(output).provenance.sourceSha256,
+    snapshot.provenance.sourceSha256,
+    "Exported inputs differ from source",
+  );
+  if (version) setSnapshotVersion(output, version);
+  const exported = sourceSnapshot(output);
   const metadata = {
     schemaVersion: 1,
-    sourceSha256: snapshot.provenance.sourceSha256,
-    inputsManifestSha256: snapshot.provenance.inputsManifestSha256,
+    sourceSha256: exported.provenance.sourceSha256,
+    inputsManifestSha256: exported.provenance.inputsManifestSha256,
+    ...(version
+      ? { version, originalSourceSha256: snapshot.provenance.sourceSha256 }
+      : {}),
     exportedFrom: git,
     files: copied.sort(),
     fileListSha256: createHash("sha256")

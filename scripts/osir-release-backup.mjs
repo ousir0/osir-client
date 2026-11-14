@@ -28,10 +28,11 @@ import {
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { downloadReleaseArtifact } from "./osir-release-download.mjs";
+import { inspectArtifact } from "./osir-release-publisher.mjs";
 import {
-  createReleasePlan,
-  inspectArtifact,
-} from "./osir-release-publisher.mjs";
+  createReviewedReleasePlan,
+  readReviewedNotes,
+} from "./osir-release-notes.mjs";
 
 const ORIGIN = "https://osirclaw.com";
 const SAFE_PATH =
@@ -106,6 +107,9 @@ function canonical(plan) {
     version: plan.version,
     source_sha: plan.source_sha,
     git_head: plan.git_head,
+    ...(plan.notes_review
+      ? { notes: plan.notes, notes_review: plan.notes_review }
+      : {}),
     artifacts: plan.artifacts.map(
       ({ platform, kind, file_name, url, sha256, size_bytes, signature }) => ({
         platform,
@@ -210,11 +214,17 @@ export async function backupRelease({
   updaterConfigPath,
   destination,
   fetchImpl = globalThis.fetch,
+  notesOverride,
 }) {
   ordinary(buildDirectory, true);
   const source = realpathSync(buildDirectory);
   const expected = canonical(
-    createReleasePlan({ channel, buildDirectory: source, updaterConfigPath }),
+    createReviewedReleasePlan({
+      channel,
+      buildDirectory: source,
+      updaterConfigPath,
+      notesOverride,
+    }),
   );
   const root = fresh(destination, source);
   const tree = join(root, "release");
@@ -244,6 +254,13 @@ export async function backupRelease({
   for (const name of metadata)
     copyChecked(join(source, name), join(tree, name));
   copyChecked(updaterConfigPath, join(root, "public-updater.json"));
+  if (notesOverride) {
+    const { raw } = readReviewedNotes(notesOverride);
+    writeFileSync(join(root, "reviewed-notes.json"), raw, {
+      flag: "wx",
+      mode: 0o600,
+    });
+  }
   const unique = new Map();
   for (const artifact of expected.artifacts) {
     const previous = unique.get(artifact.file_name);
@@ -313,10 +330,16 @@ export async function backupRelease({
   requireThat(
     isDeepStrictEqual(
       canonical(
-        createReleasePlan({
+        createReviewedReleasePlan({
           channel,
           buildDirectory: tree,
           updaterConfigPath: join(root, "public-updater.json"),
+          notesOverride: notesOverride
+            ? {
+                path: join(root, "reviewed-notes.json"),
+                sha256: notesOverride.sha256,
+              }
+            : undefined,
         }),
       ),
       expected,
@@ -340,6 +363,14 @@ export async function backupRelease({
     status: "verified",
     created_at: new Date().toISOString(),
     plan: expected,
+    ...(notesOverride
+      ? {
+          notes_override: {
+            path: "reviewed-notes.json",
+            sha256: notesOverride.sha256,
+          },
+        }
+      : {}),
     cloud_unique_artifacts: unique.size,
     missing_evidence: missingEvidence,
     scope:
@@ -428,11 +459,26 @@ export function restoreRelease({
       );
     }
   }
+  let notesOverride;
+  if (receipt.plan.notes_review || receipt.notes_override) {
+    requireThat(
+      receipt.notes_override?.path === "reviewed-notes.json" &&
+        receipt.notes_override.sha256 ===
+          receipt.plan.notes_review?.override_sha256 &&
+        seen.has("reviewed-notes.json"),
+      "Backup reviewed notes binding missing or changed.",
+    );
+    notesOverride = {
+      path: join(root, "reviewed-notes.json"),
+      sha256: receipt.notes_override.sha256,
+    };
+  }
   const plan = canonical(
-    createReleasePlan({
+    createReviewedReleasePlan({
       channel: receipt.plan.channel,
       buildDirectory: join(root, "release"),
       updaterConfigPath: join(root, "public-updater.json"),
+      notesOverride,
     }),
   );
   requireThat(
@@ -443,10 +489,13 @@ export function restoreRelease({
   for (const file of receipt.files)
     copyChecked(join(root, file.path), join(output, file.path));
   const restored = canonical(
-    createReleasePlan({
+    createReviewedReleasePlan({
       channel: plan.channel,
       buildDirectory: join(output, "release"),
       updaterConfigPath: join(output, "public-updater.json"),
+      notesOverride: notesOverride
+        ? { ...notesOverride, path: join(output, "reviewed-notes.json") }
+        : undefined,
     }),
   );
   requireThat(

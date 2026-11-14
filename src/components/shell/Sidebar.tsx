@@ -2,6 +2,7 @@ import { useRef, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
+import { displayClientVersion } from "@/lib/updater";
 import {
   ArrowLeft,
   BookOpen,
@@ -709,7 +710,7 @@ function SettingsDirectory({
       </div>
       {!collapsed && version && (
         <div className="shrink-0 px-4 pb-4 text-caption text-fg-3">
-          CC Switch v{version}
+          CC Switch v{displayClientVersion(version)}
         </div>
       )}
     </>

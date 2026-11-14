@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Finalize only previously built CI outputs. Private material remains in the
 // native signer/keychain; CI artifacts never contain release private keys.
+import { releaseVersion } from "./osir-release-version.mjs";
 import {
   cpSync,
   existsSync,
@@ -109,9 +110,9 @@ export async function finalize({ input, output, channel, target }) {
   const pending = JSON.parse(
     readFileSync(join(input, "build-manifest.json"), "utf8"),
   );
+  releaseVersion(pending.version, channel);
   ensure(
     pending.channel === channel &&
-      /^\d+\.\d+\.\d+$/.test(pending.version) &&
       pending.sourceProvenance?.verifiedAtEnd === true,
     "CI source provenance is incomplete.",
   );
@@ -134,7 +135,7 @@ export async function finalize({ input, output, channel, target }) {
   };
   requireUpdaterSigner(signerEnv);
   mkdirSync(output, { recursive: true, mode: 0o700 });
-  const stem = `OSIR-Client-${channel}-${pending.version}-${target}`;
+  const stem = `OSIR-Client-${channel}-${releaseVersion(pending.version).token}-${target}`;
   let app,
     installer,
     localSigningIdentity,

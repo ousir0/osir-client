@@ -3,6 +3,8 @@
 mod io;
 #[path = "osir_anywhere_install_manifest.rs"]
 mod manifest;
+#[path = "osir_anywhere_install_revision.rs"]
+mod revision;
 #[path = "osir_anywhere_install_signature.rs"]
 mod signature;
 use serde::Serialize;
@@ -44,12 +46,19 @@ impl Default for AnywhereInstallStatus {
 pub struct AnywhereReleaseStatus {
     pub status: &'static str,
     pub version: Option<String>,
+    pub revision: u32,
     pub platform: Option<String>,
     pub arch: Option<String>,
     pub size: Option<u64>,
     pub error: Option<String>,
     #[serde(rename = "systemSignature", skip_serializing_if = "Option::is_none")]
     pub system_signature: Option<&'static str>,
+}
+
+// The path/version are supplied by native installation detection, never IPC,
+// an environment override, a server value or a cached release-feed revision.
+pub(super) fn local_revision(path: &str, version: &str) -> Result<u32, String> {
+    revision::installed(std::path::Path::new(path), version)
 }
 
 #[derive(Default)]
@@ -148,16 +157,19 @@ impl OsirAnywhereInstaller {
             return Err(local.error.unwrap_or("请先修复已有 Anywhere 安装".into()));
         }
         if local.installed {
-            let installed = manifest::version(
-                local
-                    .version
-                    .as_deref()
-                    .ok_or("无法确认已有应用版本，请先修复安装")?,
-            )?;
+            let installed = local
+                .version
+                .as_deref()
+                .ok_or("无法确认已有应用版本，请先修复安装")?;
             if local.path.is_none() {
                 return Err("无法确认已有应用安装路径".into());
             }
-            if installed >= manifest::version(&release.version)? {
+            if !revision::needs_install(
+                installed,
+                local.revision.ok_or("无法确认已有应用修订，请先修复安装")?,
+                &release.version,
+                release.revision,
+            )? {
                 self.begin_opening()?;
                 super::osir_tools::osir_anywhere_launch(
                     app.clone(),
@@ -212,6 +224,7 @@ pub async fn osir_anywhere_release(app: tauri::AppHandle) -> AnywhereReleaseStat
     let mut result = AnywhereReleaseStatus {
         status: "unsupported",
         version: None,
+        revision: 0,
         platform: None,
         arch: None,
         size: None,
@@ -235,6 +248,7 @@ pub async fn osir_anywhere_release(app: tauri::AppHandle) -> AnywhereReleaseStat
         }
         Ok(Some(release)) => {
             result.version = Some(release.version.clone());
+            result.revision = release.revision;
             match release.select(platform, arch, &app.package_info().version.to_string()) {
                 Ok(artifact) => match release.check_server().await {
                     Ok(()) => {

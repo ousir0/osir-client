@@ -207,6 +207,7 @@ pub struct OsirAnywhereLocalState {
     pub status: &'static str,
     pub installed: bool,
     pub version: Option<String>,
+    pub revision: Option<u32>,
     pub path: Option<String>,
     pub error: Option<String>,
     pub bundle_display_name: &'static str,
@@ -227,17 +228,40 @@ pub async fn osir_anywhere_detect(app: tauri::AppHandle) -> OsirAnywhereLocalSta
             windows::refresh_runtime(&app, &mut records).await;
             records.remove(0)
         };
-        let status = match detected.status {
+        let mut status = match detected.status {
             ToolStatus::Installed => "installed",
             ToolStatus::NotInstalled => "not_installed",
             ToolStatus::Error | ToolStatus::Unavailable => "error",
+        };
+        let mut error = detected.error;
+        let revision = if detected.installed && status == "installed" {
+            match (detected.path.as_deref(), detected.version.as_deref()) {
+                (Some(path), Some(version)) => {
+                    match super::osir_anywhere_install::local_revision(path, version) {
+                        Ok(revision) => Some(revision),
+                        Err(failure) => {
+                            status = "error";
+                            error = Some(failure);
+                            None
+                        }
+                    }
+                }
+                _ => {
+                    status = "error";
+                    error = Some("无法确认 Anywhere 安装版本，请修复安装".into());
+                    None
+                }
+            }
+        } else {
+            None
         };
         OsirAnywhereLocalState {
             status,
             installed: detected.installed,
             version: detected.version,
+            revision,
             path: detected.path,
-            error: detected.error,
+            error,
             bundle_display_name: "OSIR Anywhere",
             distribution: "osir_standalone",
             runtime_status: detected.runtime_status,
@@ -250,6 +274,7 @@ pub async fn osir_anywhere_detect(app: tauri::AppHandle) -> OsirAnywhereLocalSta
             status: "unsupported",
             installed: false,
             version: None,
+            revision: None,
             path: None,
             error: Some("此系统尚不支持 OSIR Anywhere 本地检测".into()),
             bundle_display_name: "OSIR Anywhere",
@@ -309,7 +334,7 @@ pub async fn osir_anywhere_launch(
         .map_err(|_| "本机模型信息暂时无法更新，请重试".to_string())?;
     #[cfg(target_os = "macos")]
     {
-        macos::launch_desktop(&app, "osir-anywhere", false).await
+        super::osir_anywhere_handoff::launch(&app).await
     }
     #[cfg(target_os = "windows")]
     {
@@ -513,7 +538,7 @@ fn cli_file_in_dirs(id: &str, dirs: &[PathBuf]) -> bool {
 
 #[cfg(target_os = "macos")]
 #[path = "osir_tools_macos.rs"]
-mod macos;
+pub(super) mod macos;
 
 #[cfg(target_os = "windows")]
 #[path = "osir_tools_windows.rs"]

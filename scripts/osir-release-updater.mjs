@@ -1,5 +1,6 @@
 // Explicit OSIR release updater inputs and artifact verification. No network,
 // key generation, signing, Keychain access, publishing or app installation.
+import { releaseVersion } from "./osir-release-version.mjs";
 import {
   accessSync,
   closeSync,
@@ -392,15 +393,7 @@ export function createUpdaterManifest({
   signature,
   pubDate,
 }) {
-  requireThat(
-    typeof version === "string" &&
-      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version),
-    "OSIR updater version must be semver.",
-  );
-  requireThat(
-    config.channel !== "prod" || !version.includes("-"),
-    "Production updater manifests cannot promote a prerelease version.",
-  );
+  const { token } = releaseVersion(version, config.channel);
   const platforms = {
     "aarch64-apple-darwin": ["darwin-aarch64"],
     "x86_64-apple-darwin": ["darwin-x86_64"],
@@ -411,7 +404,7 @@ export function createUpdaterManifest({
   requireThat(platforms, "OSIR updater target is unsupported.");
   requireThat(
     artifactName ===
-      `OSIR-Client-${config.channel}-${version}-${target}${target.endsWith("windows-msvc") ? "-setup.exe" : ".app.tar.gz"}`,
+      `OSIR-Client-${config.channel}-${token}-${target}${target.endsWith("windows-msvc") ? "-setup.exe" : ".app.tar.gz"}`,
     "OSIR updater artifact name does not match channel/version/target.",
   );
   requireThat(
@@ -419,7 +412,7 @@ export function createUpdaterManifest({
     "OSIR updater publication date is invalid.",
   );
   const url = new URL(
-    `${config.channel}/${encodeURIComponent(version)}/${encodeURIComponent(artifactName)}`,
+    `${config.channel}/${encodeURIComponent(token)}/${encodeURIComponent(artifactName)}`,
     config.downloadBaseUrl,
   ).toString();
   return {

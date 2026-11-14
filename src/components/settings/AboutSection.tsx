@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { getVersion } from "@tauri-apps/api/app";
+import { displayClientVersion } from "@/lib/updater";
 import { settingsApi } from "@/lib/api";
 import { useUpdate } from "@/contexts/UpdateContext";
 import { Badge } from "@/components/ui/badge";
@@ -233,7 +234,9 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
     updateInfo?.availableVersion,
   ]);
 
-  const displayVersion = version ?? t("common.unknown");
+  const displayVersion = version
+    ? displayClientVersion(version)
+    : t("common.unknown");
 
   return (
     <div className="divide-y divide-border overflow-hidden rounded-panel border border-border bg-surface">

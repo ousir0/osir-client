@@ -3,6 +3,9 @@
 //! Account API calls must be made by native code with a scoped desktop session.
 //! Keep account API URL configuration separate from model gateway URLs.
 
+#[path = "anywhere_handoff_client.rs"]
+mod anywhere_handoff_client;
+
 use super::{
     models::DesktopAuthCapability,
     request_budget::{AdmissionError, AttemptGuard, RequestBudget, RequestClass},

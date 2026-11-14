@@ -13,9 +13,12 @@ import { createHash } from "node:crypto";
 import { resolve, join, isAbsolute, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCloudRelease } from "./osir-release-cloud.mjs";
-import { createReleasePlan } from "./osir-release-publisher.mjs";
 import { createServiceReleaseMetadata } from "./osir-release-publisher.mjs";
 import { backupRelease, restoreRelease } from "./osir-release-backup.mjs";
+import {
+  createReviewedReleasePlan,
+  releasePlanFingerprint,
+} from "./osir-release-notes.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 export function checkReleaseSpec(spec, plan) {
@@ -262,10 +265,11 @@ export async function releaseTool(action, spec, resumeReceiptPath) {
     "config",
     `osir-updater-${spec.channel}.json`,
   );
-  const plan = createReleasePlan({
+  const plan = createReviewedReleasePlan({
     channel: spec.channel,
     buildDirectory: spec.buildDirectory,
     updaterConfigPath,
+    notesOverride: spec.notesOverride,
   });
   checkReleaseSpec(spec, plan);
   const resume =
@@ -282,6 +286,19 @@ export async function releaseTool(action, spec, resumeReceiptPath) {
       ...(action !== "plan" ? ["--publish"] : []),
     ],
     {
+      createPlan: (options) => {
+        const current = createReviewedReleasePlan({
+          ...options,
+          notesOverride: spec.notesOverride,
+        });
+        checkReleaseSpec(spec, current);
+        assert.equal(
+          releasePlanFingerprint(current),
+          releasePlanFingerprint(plan),
+          "Reviewed plan changed after initial validation",
+        );
+        return current;
+      },
       expectedCurrentRelease: spec.expectedCurrent,
       resumeReceiptSha256: resume?.sha256,
       resumeReceiptOperator: resume?.operator,
@@ -297,6 +314,7 @@ export async function releaseTool(action, spec, resumeReceiptPath) {
           buildDirectory,
           updaterConfigPath,
           destination: spec.backupDirectory,
+          notesOverride: spec.notesOverride,
         });
         assert.equal(backup.available, true);
         assert.deepEqual(
@@ -314,14 +332,25 @@ export async function releaseTool(action, spec, resumeReceiptPath) {
           destination: spec.restoreDirectory,
           expectedReceiptSha256: backup.receipt_sha256,
         });
-        const restoredPlan = createReleasePlan({
+        const restoredPlan = createReviewedReleasePlan({
           channel: spec.channel,
           buildDirectory: join(spec.restoreDirectory, "release"),
-          updaterConfigPath,
+          updaterConfigPath: join(spec.restoreDirectory, "public-updater.json"),
+          notesOverride: spec.notesOverride
+            ? {
+                path: join(spec.restoreDirectory, "reviewed-notes.json"),
+                sha256: spec.notesOverride.sha256,
+              }
+            : undefined,
         });
         checkReleaseSpec(
           { ...spec, buildDirectory: join(spec.restoreDirectory, "release") },
           restoredPlan,
+        );
+        assert.equal(
+          releasePlanFingerprint(restoredPlan),
+          releasePlanFingerprint(current),
+          "Restored reviewed plan differs from publication",
         );
         writeFileSync(
           join(runDirectory, "independent-restore.json"),

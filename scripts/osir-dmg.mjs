@@ -1,5 +1,6 @@
 // Packages an already validated OSIR app. It never changes or signs the app,
 // reads signing credentials, changes Gatekeeper, or claims Apple notarization.
+import { releaseVersion } from "./osir-release-version.mjs";
 import {
   closeSync,
   constants,
@@ -239,7 +240,7 @@ export function validateDmgInput({ buildDirectory, manifest, target }) {
       contained(directory, realpathSync(app)),
     "App bundle must be inside the build directory.",
   );
-  const name = `OSIR-Client-${manifest.channel}-${manifest.version}-${derivedTarget}.dmg`;
+  const name = `OSIR-Client-${manifest.channel}-${releaseVersion(manifest.version, manifest.channel).token}-${derivedTarget}.dmg`;
   const output = join(directory, name);
   let existing;
   try {

@@ -408,6 +408,27 @@ pub(super) async fn launch_desktop(
     launch_checked_desktop(app, id, &path, restart).await
 }
 
+pub(in crate::commands) async fn handoff_bundle() -> Result<PathBuf, String> {
+    checked_launch_path("osir-anywhere").await
+}
+
+pub(in crate::commands) async fn launch_handoff_bundle(bundle: &Path, flow_id: &str) -> Result<(), String> {
+    let _guard = desktop_action_guard("osir-anywhere")?;
+    if flow_id.len() != 43 || !flow_id.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
+        || checked_launch_path("osir-anywhere").await? != bundle {
+        return Err("Anywhere 安装状态已改变，请重试".into());
+    }
+    // A second Electron process forwards the non-sensitive flow ID to the
+    // existing instance, then exits through its single-instance lock.
+    let mut command = tokio::process::Command::new("/usr/bin/open");
+    command.args(["-n", "-a"]).arg(bundle).args(["--args", "--osir-client-handoff-flow", flow_id]);
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+    let status = tokio::time::timeout(Duration::from_secs(5), command.status()).await
+        .map_err(|_| "Anywhere 打开超时，请重试")?.map_err(|_| "Anywhere 无法打开，请重试")?;
+    if !status.success() { return Err("Anywhere 无法打开，请重试".into()); }
+    Ok(())
+}
+
 /// The installer holds its transaction/filesystem leases and supplies its
 /// native-owned, signature-verified bundle. No renderer path reaches here.
 pub(super) async fn launch_managed_codex(

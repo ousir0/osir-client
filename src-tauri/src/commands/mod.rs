@@ -23,6 +23,8 @@ mod omp;
 mod openclaw;
 mod osir;
 mod osir_anywhere_install;
+#[cfg(target_os = "macos")]
+mod osir_anywhere_handoff;
 mod osir_claude_models;
 mod osir_connection_details;
 mod osir_credential_recovery;

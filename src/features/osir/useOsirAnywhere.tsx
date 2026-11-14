@@ -17,6 +17,7 @@ export type AnywhereState = {
   status: "installed" | "not_installed" | "error" | "unsupported";
   installed: boolean;
   version: string | null;
+  revision?: number | null;
   path: string | null;
   error: string | null;
   runtimeStatus: "running" | "stopped" | "unavailable";
@@ -24,6 +25,7 @@ export type AnywhereState = {
 export type AnywhereRelease = {
   status: "ready" | "not_configured" | "unsupported" | "error";
   version: string | null;
+  revision?: number;
   platform: string | null;
   arch: string | null;
   size: number | null;
@@ -52,6 +54,7 @@ function useAnywhereController(desktop: boolean) {
   const actionLock = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const previousInstallation = useRef<AnywhereState | null>(null);
+  const installAndConnect = useRef<{ version: string; revision: number } | null>(null);
   const local = useQuery({
     queryKey: ANYWHERE_LOCAL_QUERY,
     queryFn: () => invoke<AnywhereState>("osir_anywhere_detect"),
@@ -76,8 +79,8 @@ function useAnywhereController(desktop: boolean) {
   const release = useQuery({
     queryKey: RELEASE_QUERY,
     queryFn: () => invoke<AnywhereRelease>("osir_anywhere_release"),
-    enabled:
-      desktop && local.data?.status === "not_installed" && !local.isError,
+    enabled: desktop && !local.isError &&
+      ["installed", "not_installed"].includes(local.data?.status ?? ""),
     retry: false,
     staleTime: 60_000,
   });
@@ -88,14 +91,23 @@ function useAnywhereController(desktop: boolean) {
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: false,
-    // No idle, installer-waiting or error polling. A failed status read needs
-    // an explicit retry before another installation can be requested.
+    // Ready still belongs to the native worker: package verification and the
+    // OS handoff continue after download. Stop only at a terminal/handoff state.
+    // A failed status read needs an explicit retry before another request.
     refetchInterval: (query) =>
-      !action && !query.state.error && query.state.data?.phase === "downloading"
+      !action &&
+      !query.state.error &&
+      ["downloading", "ready", "opening"].includes(
+        query.state.data?.phase ?? "",
+      )
         ? 750
         : false,
   });
   const phase = installation.data?.phase;
+  const updateAvailable = installed && release.data?.status === "ready" &&
+    !!local.data?.version && !!release.data.version &&
+    compareAnywhereBuild(release.data.version, release.data.revision ?? 0,
+      local.data.version, local.data.revision ?? 0) > 0;
   const previousPhase = useRef(phase);
   useEffect(() => {
     if (
@@ -135,9 +147,11 @@ function useAnywhereController(desktop: boolean) {
         "osir_anywhere_launch",
       );
       if (!result?.foreground) throw new Error("unconfirmed");
-      toast.success("OSIR Anywhere 已打开。");
-    } catch {
-      setActionError("暂时无法确认应用已打开，请查看应用或重新检测后重试。");
+      toast.success("OSIR Anywhere 已打开，正在准备账号连接和实例。");
+    } catch (error) {
+      const message = typeof error === "string" ? error : "";
+      setActionError(/^(请先登录 OSIR 客户端|Anywhere |账号已改变|无法验证应用版本|无法创建本机安全连接)/.test(message)
+        && message.length < 120 ? message : "暂时无法确认应用已打开，请查看应用或重新检测后重试。");
     } finally {
       await client.invalidateQueries({ queryKey: ANYWHERE_LOCAL_QUERY });
       actionLock.current = false;
@@ -146,16 +160,18 @@ function useAnywhereController(desktop: boolean) {
   }
   const canInstall =
     desktop &&
-    !installed &&
+    (!installed || updateAvailable) &&
     !local.isError &&
-    local.data?.status === "not_installed" &&
+    ["installed", "not_installed"].includes(local.data?.status ?? "") &&
     release.data?.status === "ready" &&
     !release.isError &&
     !release.isFetching &&
     !installation.isPending &&
     !installation.isError &&
     !local.isFetching &&
-    !["downloading", "opening", "waiting_installation"].includes(phase ?? "");
+    !["downloading", "ready", "opening", "waiting_installation"].includes(
+      phase ?? "",
+    );
   async function install() {
     if (!canInstall || actionLock.current) return;
     actionLock.current = true;
@@ -164,10 +180,13 @@ function useAnywhereController(desktop: boolean) {
     try {
       await client.cancelQueries({ queryKey: ANYWHERE_INSTALL_QUERY });
       const result = await invoke<AnywhereInstall>("osir_anywhere_install");
+      if (release.data?.version && !["error", "cancelled"].includes(result.phase))
+        installAndConnect.current = { version: release.data.version, revision: release.data.revision ?? 0 };
       client.setQueryData(ANYWHERE_INSTALL_QUERY, result);
       if (result.phase !== "downloading")
         await client.invalidateQueries({ queryKey: ANYWHERE_LOCAL_QUERY });
     } catch {
+      installAndConnect.current = null;
       setActionError("安装未完成，请重新检测下载状态后重试。");
       await installation.refetch();
     } finally {
@@ -179,6 +198,7 @@ function useAnywhereController(desktop: boolean) {
     if (!desktop || actionLock.current || phase !== "downloading") return;
     actionLock.current = true;
     setAction("cancel");
+    installAndConnect.current = null;
     setActionError(null);
     try {
       await client.cancelQueries({ queryKey: ANYWHERE_INSTALL_QUERY });
@@ -194,6 +214,14 @@ function useAnywhereController(desktop: boolean) {
       setAction(null);
     }
   }
+  useEffect(() => {
+    const target = installAndConnect.current;
+    if (!target || !installed || action || local.isFetching || !local.data?.version) return;
+    if (compareAnywhereBuild(local.data.version, local.data.revision ?? 0, target.version, target.revision) >= 0) {
+      installAndConnect.current = null;
+      void launch();
+    }
+  }, [installed, action, local.isFetching, local.data]);
   const detectionFailed = local.isError || local.data?.status === "error";
   let label = "检测中";
   let description = "正在检查本机安装状态…";
@@ -204,8 +232,9 @@ function useAnywhereController(desktop: boolean) {
     label = "检测异常";
     description = "本机检测失败，请重新检测。";
   } else if (installed) {
-    label = local.data?.runtimeStatus === "running" ? "运行中" : "已安装";
-    description = "安装已完成，打开应用后开始连接。";
+    label = updateAvailable ? "有修订更新" : local.data?.runtimeStatus === "running" ? "运行中" : "已安装";
+    description = updateAvailable ? "更新 Anywhere 后，使用当前账号和已配置模型直接连接。"
+      : "打开后使用当前 OSIR 账号连接本机，自动添加已配置的工具实例。";
   } else if (local.data?.status === "unsupported") {
     label = "平台暂不支持";
     description = "当前系统暂不支持安装 OSIR Anywhere。";
@@ -225,8 +254,8 @@ function useAnywhereController(desktop: boolean) {
     description =
       "请在安装器中完成安装；macOS 请将应用拖入 Applications，然后重新检测。";
   } else if (phase === "ready") {
-    label = "安装包已就绪";
-    description = "安装包已下载并校验，点击继续安装。";
+    label = "正在准备安装";
+    description = "下载已完成，正在检查安装包，随后将打开安装器。";
   } else if (
     local.data?.status === "not_installed" &&
     !release.isPending &&
@@ -255,6 +284,7 @@ function useAnywhereController(desktop: boolean) {
     release,
     installation,
     installed,
+    updateAvailable,
     label,
     description,
     displayPath: detectionFailed
@@ -269,6 +299,14 @@ function useAnywhereController(desktop: boolean) {
     install,
     cancel,
   };
+}
+
+function compareAnywhereBuild(left: string, leftRevision: number, right: string, rightRevision: number): number {
+  const parts = (value: string) => /^\d+\.\d+\.\d+$/.test(value) ? value.split(".").map(Number) : null;
+  const a = parts(left), b = parts(right);
+  if (!a || !b) return 0;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+  return leftRevision - rightRevision;
 }
 
 type AnywhereController = ReturnType<typeof useAnywhereController>;

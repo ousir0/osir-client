@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getName, getVersion } from "@tauri-apps/api/app";
+import { displayClientVersion } from "@/lib/updater";
 import {
   Terminal,
   LayoutDashboard,
@@ -214,7 +215,7 @@ function OsirWorkbenchContent() {
     queryKey: ["osir-client-build"],
     queryFn: async () => {
       const [name, version] = await Promise.all([getName(), getVersion()]);
-      return `${name} · ${version}`;
+      return `${name} · ${displayClientVersion(version)}`;
     },
     enabled: desktop,
     staleTime: Infinity,

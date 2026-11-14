@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // CI produces unsigned NSIS payloads. Independent updater signing is local only.
+import { releaseVersion } from "./osir-release-version.mjs";
 import {
   cpSync,
   mkdirSync,
@@ -121,6 +122,7 @@ export function windowsConfig(channel, updater) {
       webviewInstallMode: { type: "embedBootstrapper", silent: true },
     },
   });
+  releaseVersion(config.version, channel);
   return config;
 }
 
@@ -143,6 +145,7 @@ async function main() {
     "Unknown Windows build option",
   );
   const version = json(join(root, "package.json")).version;
+  releaseVersion(version, channel);
   requireThat(
     json(join(native, "tauri.conf.json")).version === version &&
       readFileSync(join(native, "Cargo.toml"), "utf8").match(
@@ -259,7 +262,7 @@ async function main() {
       !installerPe.authenticodeCertificatePresent,
       "CI installer unexpectedly has an Authenticode certificate",
     );
-    const installerName = `OSIR-Client-${channel}-${version}-${target}-setup.exe`;
+    const installerName = `OSIR-Client-${channel}-${releaseVersion(version).token}-${target}-setup.exe`;
     cpSync(installer, join(output, installerName), {
       errorOnExist: true,
       force: false,
