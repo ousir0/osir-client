@@ -12,6 +12,7 @@ export const ROOT=dirname(fileURLToPath(import.meta.url));
 export const LOCKED_PATHS=[
  'prepare-next.mjs','baseline-feed.json',
  'baseline-manifests/darwin-aarch64.json','baseline-manifests/darwin-x86_64.json','baseline-manifests/windows-x86_64.json',
+ 'final-manifests/darwin-aarch64.json','final-manifests/darwin-x86_64.json','final-manifests/windows-x86_64.json','final-manifests/provenance.json',
  '.gitattributes','README.md','NEXT-ANYWHERE-CONTRACT.md','contract.mjs','contract.test.mjs','live-macos.py','live-windows.ps1',
  'workflow.review.yml','bridge.review.yml','test_harness.py','seal.mjs','reviewed-provenance.json',
  'helpers/check-ui.mjs','helpers/click.swift','helpers/gui-preflight.swift',

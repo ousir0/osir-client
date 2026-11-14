@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "status": "final-manifests-bound-not-dispatched",
+  "preparedAt": "2026-11-14T15:56:39.011223+00:00",
+  "fromVersion": "0.1.10",
+  "toVersion": "0.1.11",
+  "productCommit": "902ac8bc50bda2fa25ac54f8f24b12a15797ae32",
+  "sourceSha256": "a9a7c27e85c1fcf4b1f2805e8fbe8913e43c069688ffcb6abd494a33e7ee52ae",
+  "controlParent": "47c59cfb3d1b3b62de65bf493782c000566258cb",
+  "combinedDirectory": "/Users/ouwei/.codex/release-evidence/20261114-client-0111-ci-artifacts/combined-native-r1",
+  "combineToolSha256": "ac114402e6b629c7255d6208c2be64a7b58c719a58c4d3898311701bef6407ef",
+  "originalUpdaterConfigSha256": "5f440ed73744d1695e279967932e295cafe54cfe8a53cf3cdce72b8b1b326d82",
+  "manifestsCopiedWithoutReserialization": true,
+  "originalSignaturesPreserved": true,
+  "nativeEvidencePreservedInCombined": true,
+  "notesModified": false,
+  "published": false,
+  "dispatched": false,
+  "cutoverConfirmed": false,
+  "nativeUpgradeExecution": "not-run",
+  "platforms": [
+    {
+      "platform": "darwin-aarch64",
+      "manifestPath": "final-manifests/darwin-aarch64.json",
+      "manifestBytes": 7892,
+      "manifestSha256": "a479ee6ee1e88f0675a08f1b6d813a4729374f20ed68499fdab4ecbfd9611d63",
+      "sourceDirectory": "/Users/ouwei/.codex/release-evidence/20261114-client-0111-ci-artifacts/arm-final-stable-r1",
+      "combinedChild": "mac-arm64",
+      "buildRun": {
+        "id": 43601475491,
+        "attempt": 1,
+        "artifactId": 14118469362,
+        "conclusion": "success"
+      },
+      "originalGithubArchive": {
+        "bytes": 20456149,
+        "sha256": "16efcb570df70a3ab5d71334406cf3cd8239e8d8a8470dff4d324ecd2e4f5930"
+      },
+      "updaterArtifact": {
+        "bytes": 20234498,
+        "sha256": "c853a790e1057539e5ba62e3a865c962686890ccf961ac435aba67f6c9cb3f17",
+        "signatureVerified": true
+      },
+      "updaterUpgradeAcceptance": "not-run",
+      "nativeAcceptance": {
+        "path": "macos-packaged-smoke.json",
+        "sha256": "e7d71c595f2ecff020e267f131c20c71de5bea843def06ab9fe38c8835bc68b6",
+        "bytes": 2751,
+        "scope": "native-arm64-ci-before-local-signing"
+      }
+    },
+    {
+      "platform": "darwin-x86_64",
+      "manifestPath": "final-manifests/darwin-x86_64.json",
+      "manifestBytes": 7891,
+      "manifestSha256": "994200db02105fb3e7841bd78bfc83181f9b1faa7310c1b9536b172da0f6c5e1",
+      "sourceDirectory": "/Users/ouwei/.codex/release-evidence/20261114-client-0111-ci-artifacts/intel-final-stable-r2",
+      "combinedChild": "mac-intel",
+      "buildRun": {
+        "id": 43601479837,
+        "attempt": 1,
+        "artifactId": 14117662427,
+        "conclusion": "success"
+      },
+      "originalGithubArchive": {
+        "bytes": 21549226,
+        "sha256": "094ab0c138c39d9251d8d0e7fa766fd8fd4822fac51bef1db774e1d1bb2e05ef"
+      },
+      "updaterArtifact": {
+        "bytes": 21309618,
+        "sha256": "077b567bf2b1ec7799300200ab0ccd6d478f54c6ce0cb60425104963704e4ae7",
+        "signatureVerified": true
+      },
+      "updaterUpgradeAcceptance": "not-run",
+      "nativeAcceptance": {
+        "path": "macos-packaged-smoke.json",
+        "sha256": "76ce3b6c3bedaecb324474f431d0dbf1b9be334e801d3824e8be5f9c86396597",
+        "bytes": 2746,
+        "scope": "native-intel-ci-before-local-signing"
+      }
+    },
+    {
+      "platform": "windows-x86_64",
+      "manifestPath": "final-manifests/windows-x86_64.json",
+      "manifestBytes": 10386,
+      "manifestSha256": "c8a9f7ce14614383e6365d802f0d1303e51dc825a38f529d0c368514970c6b85",
+      "sourceDirectory": "/Users/ouwei/.codex/release-evidence/20261114-client-0111-ci-artifacts/windows-final-r1",
+      "combinedChild": "windows-x64",
+      "buildRun": {
+        "id": 43601479837,
+        "attempt": 1,
+        "artifactId": 14118547324,
+        "conclusion": "success"
+      },
+      "originalGithubArchive": {
+        "bytes": 122863847,
+        "sha256": "66a24056cf9ebbd8fcd2129d276278b3f5c1e8d7b8dfc88f60e2c6b3cda20788"
+      },
+      "updaterArtifact": {
+        "bytes": 16064345,
+        "sha256": "7c090348fdda971f8058c7da0305d193839b3fbb884e1cef2a27be229e029e15",
+        "signatureVerified": true
+      },
+      "updaterUpgradeAcceptance": "not-run",
+      "nativeAcceptance": "passed-CI-smoke"
+    }
+  ],
+  "remaining": [
+    "Main coordinator provides real public 0.1.11 cutover receipt and exact feed bytes after release.",
+    "Use final reviewed control commit as context.harnessCommit; never reuse the parent SHA.",
+    "Run original prepare-next.mjs assemble and validate against real cutover files before any authorized dispatch."
+  ],
+  "inspectBoundary": "Original inspect pending text is static. Three final manifests are now present; this handoff records successful CI provenance and finalization. Cutover and actual native upgrade remain unproved.",
+  "notesBoundary": "Original product config and all original final manifests are immutable in this step. Separate controlled release-copy work is owned by main coordinator."
+}

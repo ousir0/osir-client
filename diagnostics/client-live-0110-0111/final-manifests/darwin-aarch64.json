@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 1,
+  "channel": "prod",
+  "version": "0.1.11",
+  "target": "aarch64-apple-darwin",
+  "mode": "release-self-signed-distribution",
+  "identifier": "com.osir.client",
+  "scheme": "osir-client",
+  "architectures": [
+    "arm64"
+  ],
+  "renderer": "embedded",
+  "signing": "local-certificate-not-notarized",
+  "distributionSignatureVerified": false,
+  "codeSignatureVerified": true,
+  "notarization": "not-notarized",
+  "updaterConfigured": true,
+  "updaterRuntimeConfigured": true,
+  "updaterEnabled": true,
+  "updaterSignature": "pending-local",
+  "updaterConfigSha256": "5f440ed73744d1695e279967932e295cafe54cfe8a53cf3cdce72b8b1b326d82",
+  "embeddedUpdaterPublicConfigVerified": true,
+  "releaseDiagnostics": {
+    "schemaVersion": 1,
+    "executableSha256": "57e82227797767ff02f7df630b7671c62ba5d21201cdb151efd922dcdf1f14b5",
+    "reportSha256": "7597fb726224cabe5c34c0640cb71b49c167f131fcb2d96052082e213cc5a7fb",
+    "report": {
+      "schemaVersion": 1,
+      "identifier": "com.osir.client",
+      "version": "0.1.11",
+      "packageVersion": "0.1.11",
+      "releaseBuild": true,
+      "bundleType": "app",
+      "updater": {
+        "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
+        "endpoints": [
+          "https://osirclaw.com/api/v1/osir-client/updater/prod.json"
+        ]
+      },
+      "releaseMarker": {
+        "schemaVersion": 1,
+        "channel": "prod",
+        "bundleArtifacts": true
+      },
+      "updateDistribution": {
+        "kind": "osir",
+        "updatesEnabled": true,
+        "reason": null
+      }
+    }
+  },
+  "sourceProvenance": {
+    "schemaVersion": 1,
+    "algorithm": "sha256",
+    "sourceSha256": "a9a7c27e85c1fcf4b1f2805e8fbe8913e43c069688ffcb6abd494a33e7ee52ae",
+    "inputsManifestSha256": "26f41e03f9c98cea828e708229ab92e5f9405a72e6edfa483afa4866c1ff1f10",
+    "fileCount": 1453,
+    "inputs": {
+      "directories": [
+        "assets/brand/osir-client",
+        "src",
+        "public",
+        "icons",
+        "vendor",
+        "src-tauri/src",
+        "tests/fixtures/sessions",
+        "src-tauri/capabilities",
+        "src-tauri/icons",
+        "src-tauri/vendor"
+      ],
+      "files": [
+        ".cargo/config",
+        ".cargo/config.toml",
+        ".gitattributes",
+        ".github/workflows/osir-macos-arm-release.yml",
+        ".github/workflows/osir-windows-release.yml",
+        ".gitignore",
+        ".node-version",
+        "components.json",
+        "config/osir-updater-beta.json",
+        "config/osir-updater-prod.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "postcss.config.cjs",
+        "rust-toolchain.toml",
+        "scripts/osir-build-macos-ci.mjs",
+        "scripts/osir-build-windows.mjs",
+        "scripts/osir-build.mjs",
+        "scripts/osir-ci-artifact.mjs",
+        "scripts/osir-dev-signing.mjs",
+        "scripts/osir-dmg.mjs",
+        "scripts/osir-icons.py",
+        "scripts/osir-macos-packaged-smoke.mjs",
+        "scripts/osir-macos-window-probe.swift",
+        "scripts/osir-nsis-payload.mjs",
+        "scripts/osir-packaged-renderer-check.mjs",
+        "scripts/osir-packaged-renderer-check.test.mjs",
+        "scripts/osir-pe-verify.mjs",
+        "scripts/osir-platform-build.test.mjs",
+        "scripts/osir-release-backup.mjs",
+        "scripts/osir-release-backup.test.mjs",
+        "scripts/osir-release-ci.test.mjs",
+        "scripts/osir-release-cloud.mjs",
+        "scripts/osir-release-combine.mjs",
+        "scripts/osir-release-diagnostics.mjs",
+        "scripts/osir-release-diagnostics.test.mjs",
+        "scripts/osir-release-download.mjs",
+        "scripts/osir-release-download.test.mjs",
+        "scripts/osir-release-finalize.mjs",
+        "scripts/osir-release-local.mjs",
+        "scripts/osir-release-publisher.mjs",
+        "scripts/osir-release-publisher.test.mjs",
+        "scripts/osir-release-tool.mjs",
+        "scripts/osir-release-tool.test.mjs",
+        "scripts/osir-release-updater.mjs",
+        "scripts/osir-source-snapshot.mjs",
+        "scripts/osir-windows-packaged-smoke.ps1",
+        "scripts/requirements-icons.txt",
+        "src-tauri/.cargo/config",
+        "src-tauri/.cargo/config.toml",
+        "src-tauri/.gitignore",
+        "src-tauri/Cargo.lock",
+        "src-tauri/Cargo.toml",
+        "src-tauri/Entitlements.plist",
+        "src-tauri/Info.plist",
+        "src-tauri/build.rs",
+        "src-tauri/common-controls.manifest",
+        "src-tauri/resources/products/osir-anywhere/manifest.dev.json",
+        "src-tauri/resources/products/osir-anywhere/release-public.pub",
+        "src-tauri/src/database/upstream_v26_schema.sql",
+        "src-tauri/tauri.conf.json",
+        "src-tauri/tauri.osir-beta.conf.json",
+        "src-tauri/tauri.osir-dev.conf.json",
+        "src-tauri/tauri.osir.conf.json",
+        "src-tauri/tauri.windows.conf.json",
+        "tailwind.config.cjs",
+        "tests/config/claudeKeyFields.json",
+        "tests/fixtures/copilot-endpoint-cases.json",
+        "tests/native-windows-backup/Cargo.lock",
+        "tests/native-windows-backup/Cargo.toml",
+        "tests/native-windows-backup/src/lib.rs",
+        "tsconfig.json",
+        "tsconfig.node.json",
+        "vite.config.ts"
+      ],
+      "patterns": {
+        ".": "^(?:vite\\.config\\.(?:ts|js|mts|mjs)|tsconfig(?:\\.[\\w-]+)*\\.json|(?:tailwind|postcss)\\.config\\.(?:js|cjs|mjs|ts))$",
+        "src-tauri": "^(?:tauri(?:\\.[\\w-]+)*\\.conf\\.json5?|.*\\.entitlements(?:\\.plist)?)$"
+      },
+      "excludedDirectoryNames": [
+        ".cc-switch",
+        ".claude",
+        ".codex",
+        ".gemini",
+        ".git",
+        ".osir-dev-home",
+        "dist",
+        "node_modules",
+        "release",
+        "target"
+      ],
+      "symlinks": "rejected-without-following"
+    },
+    "git": {
+      "head": "902ac8bc50bda2fa25ac54f8f24b12a15797ae32",
+      "dirty": false,
+      "dirtyAtStart": false
+    },
+    "verifiedAtEnd": true
+  },
+  "builtAt": "2026-11-14T14:58:09.495Z",
+  "packagedMacAcceptance": {
+    "name": "macos-packaged-smoke.json",
+    "sha256": "e7d71c595f2ecff020e267f131c20c71de5bea843def06ab9fe38c8835bc68b6",
+    "bytes": 2751,
+    "scope": "native-arm64-window-launch-reopen-no-renderer-ipc"
+  },
+  "finalizerToolSha256": "b2348a6a0059bfc3eaa39ee41feefb0d99701b5f5524d060add99190f28e6592",
+  "updaterUpgradeAcceptance": "not-run",
+  "updaterArtifact": {
+    "bytes": 20234498,
+    "sha256": "c853a790e1057539e5ba62e3a865c962686890ccf961ac435aba67f6c9cb3f17",
+    "signatureVerified": true
+  },
+  "localSigningIdentity": "B6B50912E57CC894EE7A3D527FCB34F88E6CCC0D",
+  "localSigningRequirement": "identifier \"com.osir.client\" and certificate leaf = H\"b6b50912e57cc894ee7a3d527fcb34f88e6ccc0d\"",
+  "packagedMacScreenshots": [
+    {
+      "name": "macos-launch-window.png",
+      "sha256": "54da7774db2a3c82ed8511cadaaf777b0011a659c4d4e1cd493cc89bf55b4711",
+      "bytes": 130306
+    },
+    {
+      "name": "macos-reopen-window.png",
+      "sha256": "67ca747fcf1eee63ebbb29617185cb2b99a4261faa344f946f2753adb0fea3b8",
+      "bytes": 130643
+    }
+  ],
+  "nativeAcceptance": {
+    "path": "macos-packaged-smoke.json",
+    "sha256": "e7d71c595f2ecff020e267f131c20c71de5bea843def06ab9fe38c8835bc68b6",
+    "bytes": 2751,
+    "scope": "native-arm64-ci-before-local-signing"
+  },
+  "installerArtifact": {
+    "name": "OSIR-Client-prod-0.1.11-aarch64-apple-darwin.dmg",
+    "sha256": "3273948c975b9c1da4898ba079848778f3a7f34a3f4024664a2a185e41da3448",
+    "bytes": 22757293
+  },
+  "dmgVerification": {
+    "format": "UDZO",
+    "readOnly": true,
+    "checksumVerified": true,
+    "contentsVerified": true,
+    "applicationsLink": "/Applications",
+    "codeSignature": "ad-hoc",
+    "notarization": "not-notarized",
+    "sourceAppUnchanged": true
+  }
+}
