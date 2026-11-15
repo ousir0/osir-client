@@ -30,7 +30,7 @@ pub(super) async fn launch(app: &tauri::AppHandle) -> Result<super::osir_tools::
     let bundle = super::osir_tools::macos::handoff_bundle().await?;
     let trust = anywhere_handoff_trust::fetch().await?;
     trust.verify_bundle(&bundle, "osir-anywhere").await?;
-    let tools = configured_tools(app).await?;
+    let tools = configured_tools(app).await;
     if auth.status().generation != status.generation || !auth.status().connected { return Err("账号已改变，请重新打开 Anywhere".into()); }
     let transport = HandoffTransport::bind(&home).map_err(|_| "无法创建本机安全连接，请重试")?;
     super::osir_tools::macos::launch_handoff_bundle(&bundle, transport.flow_id()).await?;
@@ -67,22 +67,110 @@ pub(super) async fn launch(app: &tauri::AppHandle) -> Result<super::osir_tools::
     })
 }
 
-async fn configured_tools(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
+async fn configured_tools(app: &tauri::AppHandle) -> Vec<String> {
     use crate::app_config::AppType;
     let state = app.state::<crate::store::AppState>();
+    collect_configured_tools(
+        async {
+            let claude =
+                crate::mode::controller::connection_mode(state.inner(), &AppType::Claude).await?;
+            Ok(matches!(claude.mode, "native" | "api_key"))
+        },
+        async {
+            Ok(
+                crate::mode::controller::anywhere_codex_connection(state.inner())
+                    .await?
+                    .0
+                    == Some(true),
+            )
+        },
+        async {
+            if crate::distribution::is_isolated()
+                || crate::dsh_config::current_selection()
+                    .map_err(|_| "DSH 模型配置无法读取")?
+                    .is_none()
+            {
+                return Ok(false);
+            }
+            // Keep DSH's existing CLI/bridge checks. Its local failure must not
+            // block the account handoff or other independently verified tools.
+            let dsh = super::osir_tools::osir_launch_tool(
+                app.clone(),
+                app.state::<crate::store::AppState>(),
+                "dsh".into(),
+                "desktop".into(),
+                None,
+                Some(false),
+            )
+            .await?;
+            Ok(matches!(
+                dsh.runtime_status,
+                super::osir_tools::ToolRuntimeStatus::Running
+            ))
+        },
+    )
+    .await
+}
+
+/// Tool types are optional hints, never account authorization. Unknown/failed
+/// probes contribute no type; even an empty list can complete a secure handoff.
+async fn collect_configured_tools<C, X, D>(claude: C, codex: X, dsh: D) -> Vec<String>
+where
+    C: Future<Output = Result<bool, String>>,
+    X: Future<Output = Result<bool, String>>,
+    D: Future<Output = Result<bool, String>>,
+{
     let mut tools = Vec::new();
-    let claude = crate::mode::controller::connection_mode(state.inner(), &AppType::Claude).await?;
-    if matches!(claude.mode, "native" | "api_key") { tools.push("claude".into()); }
-    if crate::mode::controller::anywhere_codex_connection(state.inner()).await?.0 == Some(true) {
-        tools.push("codex".into());
+    for (tool, result) in [
+        ("claude", claude.await),
+        ("codex", codex.await),
+        ("dsh", dsh.await),
+    ] {
+        match result {
+            Ok(true) => tools.push(tool.into()),
+            Ok(false) => {}
+            // Raw configuration errors may contain paths or credentials.
+            Err(_) => log::warn!("Anywhere handoff: {tool} readiness unavailable"),
+        }
     }
-    // Reuse the native DSH launch path: it validates the official Desktop CLI,
-    // installs the bridge bundled with this verified Anywhere, and preserves
-    // the model selection. No provider/credential is copied into cloud config.
-    if !crate::distribution::is_isolated() && crate::dsh_config::current_selection().map_err(|_| "DSH 模型配置无法读取")?.is_some() {
-        let dsh = super::osir_tools::osir_launch_tool(app.clone(), state, "dsh".into(), "desktop".into(), None, Some(false)).await?;
-        if !matches!(dsh.runtime_status, super::osir_tools::ToolRuntimeStatus::Running) { return Err("DSH 尚未启动，请检查 DSH 安装后重试".into()); }
-        tools.push("dsh".into());
+    tools
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn configured_tools_isolate_each_failed_or_unavailable_probe() {
+        async fn probe(status: u8, calls: &AtomicUsize) -> Result<bool, String> {
+            calls.fetch_add(1, Ordering::Relaxed);
+            match status {
+                0 => Err("private configuration fixture".into()),
+                1 => Ok(false),
+                _ => Ok(true),
+            }
+        }
+        // All 27 combinations cover individual/combined failures, unknown
+        // connections, stopped DSH, no tools and stable transport allowlist order.
+        for claude in 0..3 {
+            for codex in 0..3 {
+                for dsh in 0..3 {
+                    let calls = AtomicUsize::new(0);
+                    let tools = collect_configured_tools(
+                        probe(claude, &calls),
+                        probe(codex, &calls),
+                        probe(dsh, &calls),
+                    )
+                    .await;
+                    let expected: Vec<_> = [("claude", claude), ("codex", codex), ("dsh", dsh)]
+                        .into_iter()
+                        .filter_map(|(tool, status)| (status == 2).then_some(tool))
+                        .collect();
+                    assert_eq!(tools, expected);
+                    assert_eq!(calls.load(Ordering::Relaxed), 3);
+                }
+            }
+        }
     }
-    Ok(tools)
 }

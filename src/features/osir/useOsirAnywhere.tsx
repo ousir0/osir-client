@@ -15,6 +15,33 @@ import { useAccountSession, type AccountSession } from "./accountApi";
 export const ANYWHERE_LOCAL_QUERY = ["osir-anywhere-local"] as const;
 export const ANYWHERE_INSTALL_QUERY = ["osir-anywhere-install"] as const;
 const RELEASE_QUERY = ["osir-anywhere-release"] as const;
+// Only complete, known native messages may reach the UI. Prefix matching both
+// hid real launch blockers and allowed arbitrary diagnostics after a safe prefix.
+const ANYWHERE_LAUNCH_ERRORS = new Set([
+  "请先登录 OSIR 客户端，再打开 Anywhere",
+  "本机模型信息暂时无法更新，请重试",
+  "DSH 模型配置无法读取",
+  "DSH 尚未启动，请检查 DSH 安装后重试",
+  "Anywhere 正在连接，请稍候",
+  "OSIR Anywhere 正在打开，请稍后重试",
+  "未找到可安全启动的 OSIR Anywhere，请先安装或重新检查",
+  "OSIR Anywhere 安装状态已改变，请重新检查",
+  "Anywhere 安装状态已改变，请重试",
+  "无法验证应用版本，请通过 OSIR 客户端重新安装 Anywhere",
+  "无法创建本机安全连接，请重试",
+  "Anywhere 版本无法验证，请通过客户端修复安装",
+  "账号已改变，请重新打开 Anywhere",
+  "账号已改变，已取消本次 Anywhere 连接",
+  "Anywhere 账号连接未完成，请检查服务状态后重试",
+  "Anywhere 连接超时，请重新打开",
+  "Anywhere 安全连接未完成，请重新打开",
+  "Anywhere 打开超时，请重试",
+  "Anywhere 无法打开，请重试",
+  "Anywhere 无法打开，请检查安装后重试",
+  "无法确认 OSIR Anywhere 的安装身份与版本，请修复安装",
+  "macOS 系统策略拒绝打开 OSIR Anywhere，客户端已尝试打开设置。",
+  "macOS 系统策略拒绝打开 OSIR Anywhere，客户端已尝试打开“系统设置 → 隐私与安全性”。是否允许打开由你和系统决定；若有“仍要打开”选项且你信任该应用，可手动批准后重试。",
+]);
 export type AnywhereState = {
   status: "installed" | "not_installed" | "error" | "unsupported";
   installed: boolean;
@@ -294,11 +321,14 @@ function useAnywhereController(desktop: boolean) {
       if (!result?.foreground) throw new Error("unconfirmed");
       toast.success("OSIR Anywhere 已打开，正在准备账号连接和实例。");
     } catch (error) {
-      const message = typeof error === "string" ? error : "";
+      const message =
+        typeof error === "string"
+          ? error
+          : error instanceof Error
+            ? error.message
+            : "";
       setActionError(
-        /^(请先登录 OSIR 客户端|macOS (?:未能(?:打开|启动) OSIR Anywhere|系统策略拒绝打开)|Anywhere |账号已改变|无法验证应用版本|无法创建本机安全连接)/.test(
-          message,
-        ) && message.length < 120
+        ANYWHERE_LAUNCH_ERRORS.has(message)
           ? message
           : "暂时无法确认应用已打开，请查看应用或重新检测后重试。",
       );

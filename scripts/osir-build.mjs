@@ -152,6 +152,7 @@ const inputFiles = [
   ".node-version",
   "rust-toolchain.toml",
   "tests/config/claudeKeyFields.json",
+  "tests/components/useOsirAnywhere.test.tsx",
   "tests/fixtures/copilot-endpoint-cases.json",
   "src-tauri/src/database/upstream_v26_schema.sql",
   "src-tauri/resources/products/osir-anywhere/release-public.pub",

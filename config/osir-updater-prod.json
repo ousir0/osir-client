@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "新增 OSIR Anywhere 入口，可在客户端下载安装并打开。\n修复部分已有数据库导致客户端无法启动的问题。\n支持在 Anywhere 使用 OSIR 客户端当前发布的 Codex 模型；首次使用需完成账号和项目授权。"
+  "notes": "优化 OSIR Anywhere 首次使用体验，可从客户端安装、打开并连接当前 OSIR 账号。\n修复部分本机工具配置异常导致 Anywhere 无法完成账号连接的问题。\n连接失败时显示更明确的原因，便于重试或修复安装。首次使用仍需完成账号和项目授权。"
 }
