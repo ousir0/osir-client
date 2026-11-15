@@ -13,6 +13,10 @@ mod path_safety;
 mod windows;
 #[path = "../../../src-tauri/src/services/osir/windows_durable.rs"]
 mod windows_durable;
+// Run the same production installation-evidence regression before the full
+// Tauri compilation, so Windows file-identity failures stop in the fast gate.
+#[path = "../../../src-tauri/src/commands/osir_anywhere_install_completion.rs"]
+mod anywhere_install_completion;
 
 #[cfg(test)]
 mod tests {

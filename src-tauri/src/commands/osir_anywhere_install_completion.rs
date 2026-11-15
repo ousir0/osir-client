@@ -9,7 +9,9 @@ pub(super) struct Marker {
     modified: std::time::SystemTime,
     #[cfg(unix)]
     identity: (u64, u64),
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    identity: (u32, u64),
+    #[cfg(not(any(unix, windows)))]
     created: std::time::SystemTime,
 }
 
@@ -34,6 +36,20 @@ pub(super) fn marker(bundle: &Path) -> Result<Marker, String> {
             }
         }
     }
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(0x0020_0000) // FILE_FLAG_OPEN_REPARSE_POINT
+            .open(&path)
+            .map_err(|_| "无法确认应用安装文件，请重新检测")?
+    };
+    #[cfg(windows)]
+    let meta = file
+        .metadata()
+        .map_err(|_| "无法确认应用安装文件，请重新检测")?;
+    #[cfg(not(windows))]
     let meta = std::fs::metadata(&path).map_err(|_| "无法确认应用安装文件，请重新检测")?;
     if !bundle.is_absolute() || !meta.is_file() || meta.len() == 0 {
         return Err("应用安装文件无效，请重新检测".into());
@@ -49,7 +65,26 @@ pub(super) fn marker(bundle: &Path) -> Result<Marker, String> {
             // installed bytes changing. It must not complete a same-build install.
             (meta.dev(), meta.ino())
         },
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        identity: {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Storage::FileSystem::{
+                GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+            };
+            let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+            // The live handle binds metadata and identity to one ordinary file.
+            // NTFS tunneling may preserve creation time across replacement.
+            if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0
+                || info.dwFileAttributes & 0x400 != 0
+            {
+                return Err("无法确认应用安装文件标识，请重新检测".into());
+            }
+            (
+                info.dwVolumeSerialNumber,
+                (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+            )
+        },
+        #[cfg(not(any(unix, windows)))]
         created: meta.created().map_err(|_| "无法确认应用安装时间")?,
     })
 }
@@ -77,11 +112,11 @@ impl Marker {
         if self.path != current.path {
             return false;
         }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             self.identity != current.identity
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             self.created != current.created
         }
