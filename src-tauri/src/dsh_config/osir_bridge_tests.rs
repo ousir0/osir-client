@@ -156,6 +156,98 @@ impl Drop for Fixture {
 }
 
 #[test]
+#[serial_test::serial]
+fn osir_bridge_readiness_only_observes_existing_installation_and_profiles() {
+    fn tree(root: &Path) -> BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTime)> {
+        fn visit(path: &Path, out: &mut BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTime)>) {
+            let meta = fs::symlink_metadata(path).unwrap();
+            let bytes = if meta.is_file() {
+                fs::read(path).unwrap()
+            } else {
+                vec![]
+            };
+            out.insert(path.to_owned(), (bytes, meta.modified().unwrap()));
+            if meta.is_dir() {
+                for entry in fs::read_dir(path).unwrap() {
+                    visit(&entry.unwrap().path(), out);
+                }
+            }
+        }
+        let mut out = BTreeMap::new();
+        visit(root, &mut out);
+        out
+    }
+
+    for case in [
+        "missing",
+        "ready",
+        "wrong-root",
+        "disabled",
+        "changed-host",
+        "upstream-conflict",
+        "missing-resource",
+    ] {
+        let fixture = Fixture::new();
+        if case != "missing" {
+            let desktop = profile_dir("desktop");
+            let package = desktop.join("node_modules").join(PACKAGE);
+            for (name, bytes) in package_files() {
+                let path = package.join(name);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, bytes).unwrap();
+            }
+            fs::copy(
+                data_dir().join("fake-profile.json"),
+                desktop.join("package.json"),
+            )
+            .unwrap();
+            let root = if case == "wrong-root" {
+                fixture.dir.path()
+            } else {
+                &fixture.root
+            };
+            let text = inject(
+                OTHER,
+                root,
+                &Artifact::load(&fixture.resources).unwrap().defaults,
+            )
+            .unwrap();
+            fs::write(profile_path("desktop"), text).unwrap();
+            match case {
+                "disabled" => fs::write(
+                    profile_path("desktop"),
+                    format!("- id: {ID}\n  disabled: true\n"),
+                )
+                .unwrap(),
+                "changed-host" => {
+                    fs::write(package.join("lib/index.js"), "incompatible fixture").unwrap()
+                }
+                "upstream-conflict" => {
+                    fs::write(home_patch_path(), format!("- id: {UPSTREAM_ID}\n")).unwrap()
+                }
+                "missing-resource" => {
+                    fs::remove_file(fixture.resources.join("dsh-bridge/osir-dsh-bridge.tgz"))
+                        .unwrap()
+                }
+                _ => {}
+            }
+        }
+        let before = tree(fixture.dir.path());
+        let ready = bridge_ready(&fixture.resources, &fixture.root);
+        match case {
+            "ready" => assert!(ready.unwrap()),
+            "missing" | "wrong-root" => assert!(!ready.unwrap()),
+            _ => assert!(ready.is_err()),
+        }
+        assert_eq!(
+            tree(fixture.dir.path()),
+            before,
+            "readiness wrote files in {case}"
+        );
+    }
+}
+
+#[test]
 fn osir_bridge_product_gate_and_root_match_packaged_desktop_contract() {
     assert!(enabled_for(true, false));
     assert!(!enabled_for(false, false));

@@ -540,6 +540,20 @@ fn cli_file_in_dirs(id: &str, dirs: &[PathBuf]) -> bool {
 #[path = "osir_tools_macos.rs"]
 pub(super) mod macos;
 
+#[cfg(target_os = "macos")]
+pub(super) async fn handoff_dsh_runtime_status(app: &tauri::AppHandle) -> ToolRuntimeStatus {
+    let mut dsh = [macos::detect("dsh").await];
+    macos::refresh_runtime(app, &mut dsh).await;
+    dsh[0].runtime_status.clone()
+}
+
+#[cfg(target_os = "macos")]
+pub(super) async fn handoff_anywhere_bridge_ready() -> Result<bool, String> {
+    let bundle = macos::checked_launch_path("osir-anywhere").await?;
+    crate::dsh_config::desktop_bridge_ready(&bundle.join("Contents/Resources"))
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(target_os = "windows")]
 #[path = "osir_tools_windows.rs"]
 pub(crate) mod windows;
@@ -697,11 +711,14 @@ pub async fn osir_launch_tool(
             }
         };
         let dsh_bundle = macos::checked_launch_path("dsh").await?;
-        let cli = crate::dsh_config::desktop_cli(&dsh_bundle)
-            .map_err(|error| error.to_string())?;
-        crate::dsh_config::prepare_desktop_bridge(&bundle.join("Contents/Resources"), &cli, running)
-            .await
-            .map_err(|error| error.to_string())?;
+        let cli = crate::dsh_config::desktop_cli(&dsh_bundle).map_err(|error| error.to_string())?;
+        crate::dsh_config::prepare_desktop_bridge(
+            &bundle.join("Contents/Resources"),
+            &cli,
+            running,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
     }
     #[cfg(target_os = "macos")]
     let result = if target == "desktop" {

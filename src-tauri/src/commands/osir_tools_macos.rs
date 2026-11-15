@@ -70,6 +70,7 @@ fn desktop_action_guard(id: &str) -> Result<tokio::sync::MutexGuard<'static, ()>
 include!("osir_tools_macos_runtime.rs");
 include!("osir_tools_codex_profile.rs");
 include!("osir_tools_desktop_lifecycle.rs");
+include!("osir_tools_dsh_background.rs");
 
 #[derive(Debug)]
 struct InspectionError {
@@ -415,19 +416,37 @@ pub(in crate::commands) async fn handoff_bundle() -> Result<PathBuf, String> {
     checked_launch_path("osir-anywhere").await
 }
 
-pub(in crate::commands) async fn launch_handoff_bundle(bundle: &Path, flow_id: &str) -> Result<(), String> {
+pub(in crate::commands) async fn launch_handoff_bundle(
+    bundle: &Path,
+    flow_id: &str,
+) -> Result<(), String> {
     let _guard = desktop_action_guard("osir-anywhere")?;
-    if flow_id.len() != 43 || !flow_id.bytes().all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
-        || checked_launch_path("osir-anywhere").await? != bundle {
+    if flow_id.len() != 43
+        || !flow_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
+        || checked_launch_path("osir-anywhere").await? != bundle
+    {
         return Err("Anywhere 安装状态已改变，请重试".into());
     }
     // A second Electron process forwards the non-sensitive flow ID to the
     // existing instance, then exits through its single-instance lock.
     let mut command = tokio::process::Command::new("/usr/bin/open");
-    command.args(["-n", "-a"]).arg(bundle).args(["--args", "--osir-client-handoff-flow", flow_id]);
-    command.env("LC_ALL", "C").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
-    let (status, stderr) = tokio::time::timeout(Duration::from_secs(5), bounded_anywhere_open(&mut command)).await
-        .map_err(|_| "Anywhere 打开超时，请重试")?.map_err(|_| "Anywhere 无法打开，请重试")?;
+    command
+        .args(["-n", "-a"])
+        .arg(bundle)
+        .args(["--args", "--osir-client-handoff-flow", flow_id]);
+    command
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let (status, stderr) =
+        tokio::time::timeout(Duration::from_secs(5), bounded_anywhere_open(&mut command))
+            .await
+            .map_err(|_| "Anywhere 打开超时，请重试")?
+            .map_err(|_| "Anywhere 无法打开，请重试")?;
     if !status.success() {
         if security_guidance::should_open_security_settings(status.code(), &stderr) {
             open_privacy_security_settings().await;
@@ -445,10 +464,16 @@ async fn bounded_anywhere_open(
 ) -> std::io::Result<(std::process::ExitStatus, Vec<u8>)> {
     use tokio::io::AsyncReadExt;
     let mut child = command.spawn()?;
-    let stderr = child.stderr.take().ok_or_else(|| std::io::Error::other("missing stderr"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| std::io::Error::other("missing stderr"))?;
     let capture = async {
         let mut bytes = Vec::new();
-        stderr.take((security_guidance::OPEN_STDERR_LIMIT + 1) as u64).read_to_end(&mut bytes).await?;
+        stderr
+            .take((security_guidance::OPEN_STDERR_LIMIT + 1) as u64)
+            .read_to_end(&mut bytes)
+            .await?;
         if bytes.len() > security_guidance::OPEN_STDERR_LIMIT {
             return Err(std::io::Error::other("open diagnostic exceeds limit"));
         }
@@ -462,7 +487,11 @@ async fn bounded_anywhere_open(
 async fn open_privacy_security_settings() {
     let mut settings = tokio::process::Command::new("/usr/bin/open");
     settings.arg(security_guidance::SECURITY_SETTINGS_URL);
-    settings.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+    settings
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
     let _ = tokio::time::timeout(Duration::from_secs(5), settings.status()).await;
 }
 

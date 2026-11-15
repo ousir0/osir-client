@@ -353,19 +353,41 @@ pub(super) async fn get_before_headers(
     url: &str,
     failure: &'static str,
 ) -> Result<reqwest::Response, String> {
+    get_before_headers_with(
+        || {
+            client
+                .get(url)
+                .header("Accept", "application/json, application/octet-stream")
+                .header("Accept-Encoding", "identity")
+                .header("Cache-Control", "no-cache")
+                .send()
+        },
+        transient_get_error,
+        failure,
+    )
+    .await
+}
+
+// Inject only the transport future and its error classification so tests can
+// exercise the same deadlines and retry loop without OS TCP timing assumptions.
+pub(super) async fn get_before_headers_with<T, E, Send, Request, Retryable>(
+    mut send: Send,
+    retryable_error: Retryable,
+    failure: &'static str,
+) -> Result<T, String>
+where
+    Send: FnMut() -> Request,
+    Request: std::future::Future<Output = Result<T, E>>,
+    Retryable: Fn(&E) -> bool,
+{
     use std::time::Duration;
     for attempt in 0..3 {
-        let request = client
-            .get(url)
-            .header("Accept", "application/json, application/octet-stream")
-            .header("Accept-Encoding", "identity")
-            .header("Cache-Control", "no-cache");
         // This timeout ends at headers. It does not impose a short total timeout
         // on a large, valid installer body after the response is returned.
-        let response = tokio::time::timeout(Duration::from_secs(25), request.send()).await;
+        let response = tokio::time::timeout(Duration::from_secs(25), send()).await;
         let retryable = match response {
             Ok(Ok(response)) => return Ok(response),
-            Ok(Err(ref error)) => transient_get_error(error),
+            Ok(Err(ref error)) => retryable_error(error),
             Err(_) => true,
         };
         if !retryable || attempt == 2 {

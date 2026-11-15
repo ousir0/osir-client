@@ -16,7 +16,9 @@ use std::{
 
 mod osir_bridge;
 #[cfg(target_os = "macos")]
-pub(crate) use osir_bridge::{desktop_cli, enabled as osir_bridge_enabled, prepare_desktop_bridge};
+pub(crate) use osir_bridge::{
+    desktop_bridge_ready, desktop_cli, enabled as osir_bridge_enabled, prepare_desktop_bridge,
+};
 
 pub(crate) fn data_dir() -> PathBuf {
     if crate::distribution::is_isolated() {

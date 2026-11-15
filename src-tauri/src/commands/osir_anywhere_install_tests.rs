@@ -795,23 +795,120 @@ async fn anywhere_install_get_recovers_connection_refusal_before_headers() {
     server.await.unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn anywhere_install_get_connection_failure_is_bounded_and_static() {
-    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = reservation.local_addr().unwrap();
-    drop(reservation);
-    let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    let start = std::time::Instant::now();
-    let error = manifest::get_before_headers(
-        &client,
-        &format!("http://{address}/fixture"),
+    use std::time::Duration;
+    let start = tokio::time::Instant::now();
+    let mut attempts = Vec::new();
+    let error = manifest::get_before_headers_with(
+        || {
+            attempts.push(start.elapsed());
+            std::future::ready(Err::<(), _>("synthetic transport detail"))
+        },
+        |_| true,
         "static failure",
     )
     .await
     .unwrap_err();
     assert_eq!(error, "static failure");
-    assert!(start.elapsed() >= std::time::Duration::from_secs(4));
-    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    assert_eq!(
+        attempts,
+        [
+            Duration::ZERO,
+            Duration::from_secs(1),
+            Duration::from_secs(4)
+        ]
+    );
+    assert_eq!(start.elapsed(), Duration::from_secs(4));
+}
+
+#[tokio::test(start_paused = true)]
+async fn anywhere_install_get_header_timeout_cancels_each_attempt_and_stops() {
+    use std::{cell::Cell, time::Duration};
+    struct Cancelled<'a>(&'a Cell<usize>);
+    impl Drop for Cancelled<'_> {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    let cancelled = Cell::new(0);
+    let start = tokio::time::Instant::now();
+    let mut attempts = Vec::new();
+    let error = manifest::get_before_headers_with(
+        || {
+            attempts.push(start.elapsed());
+            let guard = Cancelled(&cancelled);
+            async move {
+                let _guard = guard;
+                std::future::pending::<Result<(), ()>>().await
+            }
+        },
+        |_| panic!("header timeout must not classify a transport error"),
+        "static timeout",
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, "static timeout");
+    assert_eq!(
+        attempts,
+        [
+            Duration::ZERO,
+            Duration::from_secs(26),
+            Duration::from_secs(54)
+        ]
+    );
+    assert_eq!(start.elapsed(), Duration::from_secs(79));
+    assert_eq!(cancelled.get(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn anywhere_install_get_recovers_on_final_attempt_without_extra_backoff() {
+    use std::time::Duration;
+    let start = tokio::time::Instant::now();
+    let mut attempts = Vec::new();
+    let response = manifest::get_before_headers_with(
+        || {
+            attempts.push(start.elapsed());
+            std::future::ready(if attempts.len() == 3 {
+                Ok("headers")
+            } else {
+                Err(())
+            })
+        },
+        |_| true,
+        "static failure",
+    )
+    .await
+    .unwrap();
+    assert_eq!(response, "headers");
+    assert_eq!(
+        attempts,
+        [
+            Duration::ZERO,
+            Duration::from_secs(1),
+            Duration::from_secs(4)
+        ]
+    );
+    assert_eq!(start.elapsed(), Duration::from_secs(4));
+}
+
+#[tokio::test(start_paused = true)]
+async fn anywhere_install_get_nontransient_failure_does_not_retry() {
+    let start = tokio::time::Instant::now();
+    let mut attempts = 0;
+    let error = manifest::get_before_headers_with(
+        || {
+            attempts += 1;
+            std::future::ready(Err::<(), _>("synthetic certificate failure"))
+        },
+        |_| false,
+        "static failure",
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, "static failure");
+    assert_eq!(attempts, 1);
+    assert_eq!(start.elapsed(), std::time::Duration::ZERO);
 }
 
 #[tokio::test]

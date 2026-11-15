@@ -400,6 +400,41 @@ fn inject(text: &str, root: &Path, defaults: &Yaml) -> Result<String, AppError> 
     replace_entry(text, ID, Some(row))
 }
 
+/// Read-only readiness for Client handoff. Never run the CLI, acquire write
+/// locks, repair a profile or start/activate DSH. Reachability belongs to the
+/// Anywhere runtime; this only checks the existing pinned Desktop bridge.
+#[cfg(target_os = "macos")]
+pub(crate) fn desktop_bridge_ready(resources: &Path) -> Result<bool, AppError> {
+    if !enabled() {
+        return Ok(false);
+    }
+    bridge_ready(resources, &connector_root(dirs::config_dir())?)
+}
+
+fn bridge_ready(resources: &Path, root: &Path) -> Result<bool, AppError> {
+    let artifact = Artifact::load(resources)?;
+    let profiles = target_paths();
+    let mut files = profiles.clone();
+    files.push(home_patch_path());
+    validate_write_paths(&files)?;
+    let texts = files
+        .iter()
+        .map(|p| read_text(p))
+        .collect::<Result<Vec<_>, _>>()?;
+    preflight(&profiles, &texts[..profiles.len()], &texts[profiles.len()])?;
+    if !artifact.installed(&profile_dir("desktop"))? {
+        return Ok(false);
+    }
+    for (path, text) in profiles.iter().zip(&texts) {
+        if (*path == profile_path("desktop") || artifact.installed(path.parent().unwrap())?)
+            && inject(text, root, &artifact.defaults)? != *text
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Called only by an explicit production DSH Desktop launch. `resources` and
 /// `cli` must come from native application/CLI identity discovery, never IPC.
 /// Missing resources, incompatible installed packages and upstream conflicts
