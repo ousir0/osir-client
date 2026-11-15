@@ -13,6 +13,79 @@ struct Receiver {
     bundle: PathBuf,
     trust: Trust,
 }
+
+#[derive(Debug)]
+struct ApprovalRecovery {
+    awaiting_approval: bool,
+    running_instance_seen: bool,
+}
+
+impl ApprovalRecovery {
+    fn new(awaiting_approval: bool) -> Self {
+        Self {
+            awaiting_approval,
+            running_instance_seen: false,
+        }
+    }
+
+    fn record_launch(&mut self, status: super::osir_tools::macos::HandoffLaunchStatus) {
+        self.awaiting_approval |=
+            status == super::osir_tools::macos::HandoffLaunchStatus::AwaitingSystemApproval;
+    }
+
+    fn should_retry_for_running_instance(&mut self, running: bool) -> bool {
+        if !self.awaiting_approval {
+            return false;
+        }
+        if !running {
+            return false;
+        }
+        if self.running_instance_seen {
+            return false;
+        }
+        self.running_instance_seen = true;
+        true
+    }
+}
+
+enum RecoveryStep<T> {
+    Completed(T),
+    PeerConnected,
+    TransportFinished(Result<(), TransportError>),
+}
+
+// A native probe/open may take seconds. Keep the socket, its total deadline and
+// account cancellation live while it runs, and stop recovery upon a trusted peer.
+async fn await_recovery_step<T, S, O, C>(
+    step: S,
+    mut operation: Pin<&mut O>,
+    mut peer_connected: tokio::sync::watch::Receiver<bool>,
+    account_current: C,
+) -> RecoveryStep<T>
+where
+    S: Future<Output = T>,
+    O: Future<Output = Result<(), TransportError>>,
+    C: Fn() -> bool,
+{
+    tokio::pin!(step);
+    let mut cancellation_tick = tokio::time::interval(Duration::from_millis(250));
+    loop {
+        if !account_current() {
+            return RecoveryStep::TransportFinished(Err(TransportError::Cancelled));
+        }
+        if *peer_connected.borrow() {
+            return RecoveryStep::PeerConnected;
+        }
+        tokio::select! {
+            biased;
+            _ = cancellation_tick.tick() => {},
+            result = &mut operation => return RecoveryStep::TransportFinished(result),
+            _ = peer_connected.changed() => {},
+            result = &mut step => return RecoveryStep::Completed(result),
+        }
+    }
+}
+
 impl PeerVerifier for Receiver {
     fn verify<'a>(
         &'a self,
@@ -69,7 +142,10 @@ pub(super) async fn launch(
     let transport = HandoffTransport::bind(&home)
         .inspect_err(|_| log::warn!("Anywhere handoff stage=transport"))
         .map_err(|_| "无法创建本机安全连接，请重试")?;
-    super::osir_tools::macos::launch_handoff_bundle(&bundle, transport.flow_id())
+    let bundle_for_retry = bundle.clone();
+    let flow_id = transport.flow_id().to_owned();
+    let peer_connected = transport.peer_connected();
+    let launch_status = super::osir_tools::macos::launch_handoff_bundle(&bundle, &flow_id)
         .await
         .inspect_err(|_| log::warn!("Anywhere handoff stage=app_launch"))?;
     let receiver = Receiver { bundle, trust };
@@ -88,9 +164,57 @@ pub(super) async fn launch(
         rx,
     );
     tokio::pin!(operation);
+    let retry_after = tokio::time::Instant::now() + Duration::from_secs(8);
+    let mut recovery_tick = tokio::time::interval(Duration::from_secs(1));
+    recovery_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut retry_sent = false;
+    let mut approval = ApprovalRecovery::new(
+        launch_status == super::osir_tools::macos::HandoffLaunchStatus::AwaitingSystemApproval,
+    );
     let result = loop {
         tokio::select! {
+            biased;
             result = &mut operation => break result,
+            _ = recovery_tick.tick(), if !*peer_connected.borrow() => {
+                let current = auth.status();
+                if !current.connected || current.generation != status.generation {
+                    let _ = cancel.send(true);
+                    continue;
+                }
+                if approval.awaiting_approval {
+                    let running = match await_recovery_step(
+                        super::osir_tools::macos::handoff_bundle_running(app, &bundle_for_retry),
+                        operation.as_mut(), peer_connected.clone(),
+                        || { let current = auth.status(); current.connected && current.generation == status.generation },
+                    ).await {
+                        RecoveryStep::Completed(result) => result.unwrap_or(false),
+                        RecoveryStep::PeerConnected => continue,
+                        RecoveryStep::TransportFinished(result) => break result,
+                    };
+                    if !approval.should_retry_for_running_instance(running) {
+                        continue;
+                    }
+                } else {
+                    if retry_sent || tokio::time::Instant::now() < retry_after {
+                        continue;
+                    }
+                    retry_sent = true;
+                }
+                // Gatekeeper's "Open Anyway" can launch a plain app instance
+                // after the original launch request was denied. Re-submit the
+                // same short-lived flow once so the running instance receives
+                // it through Electron's single-instance handoff.
+                let retry_status = match await_recovery_step(
+                    super::osir_tools::macos::launch_handoff_bundle(&bundle_for_retry, &flow_id),
+                    operation.as_mut(), peer_connected.clone(),
+                    || { let current = auth.status(); current.connected && current.generation == status.generation },
+                ).await {
+                    RecoveryStep::Completed(result) => result.inspect_err(|_| log::warn!("Anywhere handoff stage=app_launch_retry"))?,
+                    RecoveryStep::PeerConnected => continue,
+                    RecoveryStep::TransportFinished(result) => break result,
+                };
+                approval.record_launch(retry_status);
+            }
             _ = tokio::time::sleep(Duration::from_millis(250)) => {
                 let current = auth.status();
                 if !current.connected || current.generation != status.generation { let _ = cancel.send(true); }
@@ -197,7 +321,158 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn fallback_policy_denial_allows_first_running_instance_replay() {
+        use super::super::osir_tools::macos::HandoffLaunchStatus::{
+            AwaitingSystemApproval, Opened,
+        };
+        let mut recovery = ApprovalRecovery::new(false);
+        recovery.record_launch(Opened);
+        assert!(!recovery.should_retry_for_running_instance(true));
+        // The eight-second fallback is denied. No stopped observation is
+        // required before the user permits/opens the target through macOS.
+        recovery.record_launch(AwaitingSystemApproval);
+        assert!(recovery.should_retry_for_running_instance(true));
+        assert!(!recovery.should_retry_for_running_instance(true));
+    }
+
+    #[test]
+    fn policy_replay_is_once_even_when_runtime_probe_flaps() {
+        use super::super::osir_tools::macos::HandoffLaunchStatus::AwaitingSystemApproval;
+        let mut recovery = ApprovalRecovery::new(true);
+        assert!(!recovery.should_retry_for_running_instance(false));
+        assert!(recovery.should_retry_for_running_instance(true));
+        recovery.record_launch(AwaitingSystemApproval);
+        assert!(!recovery.should_retry_for_running_instance(false));
+        assert!(!recovery.should_retry_for_running_instance(true));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn recovery_keeps_transport_progressing_during_slow_native_action() {
+        let (_connected, peer) = tokio::sync::watch::channel(false);
+        let operation = async {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            Ok(())
+        };
+        tokio::pin!(operation);
+        let late_launch = Cell::new(false);
+        let result = await_recovery_step(
+            async {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                late_launch.set(true);
+            },
+            operation.as_mut(),
+            peer,
+            || true,
+        )
+        .await;
+        assert!(matches!(result, RecoveryStep::TransportFinished(Ok(()))));
+        assert!(!late_launch.get());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn recovery_cancels_slow_native_action_within_account_poll_budget() {
+        let (_connected, peer) = tokio::sync::watch::channel(false);
+        let operation = std::future::pending::<Result<(), TransportError>>();
+        tokio::pin!(operation);
+        let current = Cell::new(true);
+        let late_launch = Cell::new(false);
+        let started = tokio::time::Instant::now();
+        let recovery = await_recovery_step(
+            async {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                late_launch.set(true);
+            },
+            operation.as_mut(),
+            peer,
+            || current.get(),
+        );
+        let change_account = async {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            current.set(false);
+        };
+        let (result, _) = tokio::join!(recovery, change_account);
+        assert!(matches!(
+            result,
+            RecoveryStep::TransportFinished(Err(TransportError::Cancelled))
+        ));
+        assert!(started.elapsed() <= Duration::from_millis(250));
+        assert!(!late_launch.get());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn recovery_does_not_poll_action_after_account_already_changed() {
+        let (_connected, peer) = tokio::sync::watch::channel(false);
+        let operation = std::future::pending::<Result<(), TransportError>>();
+        tokio::pin!(operation);
+        let result = await_recovery_step(
+            async { panic!("cancelled launch must never start") },
+            operation.as_mut(),
+            peer,
+            || false,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            RecoveryStep::TransportFinished(Err(TransportError::Cancelled))
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn trusted_peer_stops_pending_replay_without_dropping_transport() {
+        let (connected, peer) = tokio::sync::watch::channel(false);
+        let operation = async {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            connected.send(true).unwrap();
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            Ok(())
+        };
+        tokio::pin!(operation);
+        let result = await_recovery_step(
+            std::future::pending::<()>(),
+            operation.as_mut(),
+            peer,
+            || true,
+        )
+        .await;
+        assert!(matches!(result, RecoveryStep::PeerConnected));
+        assert_eq!(operation.await, Ok(()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn recovery_cannot_extend_transport_deadline() {
+        let (_connected, peer) = tokio::sync::watch::channel(false);
+        let operation = async {
+            tokio::time::sleep(Duration::from_secs(300)).await;
+            Err(TransportError::Timeout)
+        };
+        tokio::pin!(operation);
+        let started = tokio::time::Instant::now();
+        let result = await_recovery_step(
+            std::future::pending::<()>(),
+            operation.as_mut(),
+            peer,
+            || true,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            RecoveryStep::TransportFinished(Err(TransportError::Timeout))
+        ));
+        assert_eq!(started.elapsed(), Duration::from_secs(300));
+    }
+
+    #[tokio::test]
+    async fn recovery_returns_completed_native_result() {
+        let (_connected, peer) = tokio::sync::watch::channel(false);
+        let operation = std::future::pending::<Result<(), TransportError>>();
+        tokio::pin!(operation);
+        let result = await_recovery_step(async { 42 }, operation.as_mut(), peer, || true).await;
+        assert!(matches!(result, RecoveryStep::Completed(42)));
+    }
 
     #[tokio::test]
     async fn dsh_probe_reuses_a_ready_bridge_and_never_blocks_other_tools() {

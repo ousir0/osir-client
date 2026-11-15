@@ -181,7 +181,7 @@ struct CustomImage {
     model: String,
     version: String,
 }
-// Endpoint and credential are stored together in the OS credential store.
+// Endpoint and credential share the native model-key store (legacy: OS store).
 // A modified settings record cannot send an existing secret to another host.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -228,20 +228,39 @@ fn custom_secret_matches(selection: &CustomImage, secret: &CustomSecret) -> bool
         && secret.api_key.trim() == secret.api_key
         && !secret.api_key.chars().any(char::is_control)
 }
-async fn read_custom_secret(identity: String, selection: &CustomImage) -> Result<CustomSecret> {
-    use super::credentials::{CredentialBackend, NativeKeychain};
-    let service = custom_service(&identity);
-    let item = selection.version.clone();
-    let bytes = tokio::task::spawn_blocking(move || NativeKeychain.read(&service, &item))
-        .await
-        .map_err(|_| ImageBindingError)?
+fn read_custom_secret_with_backend(
+    backend: &impl super::credentials::CredentialBackend,
+    identity: &str,
+    selection: &CustomImage,
+) -> Result<CustomSecret> {
+    let service = custom_service(identity);
+    let bytes = backend
+        .read_without_prompt(&service, &selection.version)
         .map_err(|_| ImageBindingError)?
         .ok_or(ImageBindingError)?;
     let secret: CustomSecret = serde_json::from_slice(&bytes).map_err(|_| ImageBindingError)?;
     if !custom_secret_matches(selection, &secret) {
         return Err(ImageBindingError);
     }
+    // Validate the endpoint binding before persisting any silent legacy read.
+    // Keep the old system item for rollback; denied access never destroys it.
+    backend
+        .commit_model_key_read(&service, &selection.version, &bytes)
+        .map_err(|_| ImageBindingError)?;
     Ok(secret)
+}
+async fn read_custom_secret(
+    db: &std::sync::Arc<crate::database::Database>,
+    identity: String,
+    selection: &CustomImage,
+) -> Result<CustomSecret> {
+    let backend = super::local_key_store::LocalCredentialBackend::new(db.clone());
+    let selection = selection.clone();
+    tokio::task::spawn_blocking(move || {
+        read_custom_secret_with_backend(&backend, &identity, &selection)
+    })
+    .await
+    .map_err(|_| ImageBindingError)?
 }
 pub(crate) async fn save_custom(
     db: &crate::database::Database,
@@ -250,36 +269,34 @@ pub(crate) async fn save_custom(
     model: String,
     api_key: String,
 ) -> Result<GlobalImageSelectionDto> {
-    use super::credentials::{CredentialBackend, NativeKeychain};
     let endpoint = custom_endpoint(&endpoint)?;
-    if !text(&model)
-        || api_key.is_empty()
+    let model = standard_image_model(&model)?;
+    if api_key.is_empty()
         || api_key.len() > 8192
         || api_key.trim() != api_key
         || api_key.chars().any(char::is_control)
     {
         return Err(ImageBindingError);
     }
-    let old = custom_selection(db)?;
     let selection = CustomImage {
         endpoint: endpoint.clone(),
         model,
         version: uuid::Uuid::new_v4().to_string(),
     };
     let service = custom_service(&identity);
-    let item = selection.version.clone();
     let bytes =
         serde_json::to_vec(&CustomSecret { endpoint, api_key }).map_err(|_| ImageBindingError)?;
-    let service_write = service.clone();
-    let item_write = item.clone();
-    tokio::task::spawn_blocking(move || NativeKeychain.write(&service_write, &item_write, &bytes))
-        .await
-        .map_err(|_| ImageBindingError)?
-        .map_err(|_| ImageBindingError)?;
     let encoded = serde_json::to_string(&selection).map_err(|_| ImageBindingError)?;
-    let saved = (|| {
+    {
         let mut conn = db.conn.lock().map_err(|_| ImageBindingError)?;
         let tx = conn.transaction().map_err(|_| ImageBindingError)?;
+        // The selection and endpoint-bound secret commit together. New saves
+        // never depend on Keychain ACLs or a process-local credential cache.
+        tx.execute(
+            "INSERT INTO osir_model_credentials (service, account, payload) VALUES (?1, ?2, ?3)",
+            rusqlite::params![service, selection.version, bytes],
+        )
+        .map_err(|_| ImageBindingError)?;
         tx.execute(
             "INSERT OR REPLACE INTO settings (key,value) VALUES (?1,?2)",
             rusqlite::params![CUSTOM_KEY, encoded],
@@ -287,17 +304,8 @@ pub(crate) async fn save_custom(
         .map_err(|_| ImageBindingError)?;
         tx.execute("DELETE FROM settings WHERE key = ?1", [SELECTION_KEY])
             .map_err(|_| ImageBindingError)?;
-        tx.commit().map_err(|_| ImageBindingError)
-    })();
-    let obsolete = if saved.is_err() {
-        Some(item)
-    } else {
-        old.map(|v| v.version)
-    };
-    if let Some(item) = obsolete {
-        let _ = tokio::task::spawn_blocking(move || NativeKeychain.remove(&service, &item)).await;
+        tx.commit().map_err(|_| ImageBindingError)?;
     }
-    saved?;
     Ok(GlobalImageSelectionDto {
         source: "custom",
         provider_id: None,
@@ -310,7 +318,7 @@ pub(crate) async fn save_custom(
 pub(crate) async fn global_get(
     identity: String,
     auth: &super::session::AuthManager,
-    db: &crate::database::Database,
+    db: &std::sync::Arc<crate::database::Database>,
 ) -> Result<GlobalImageDto> {
     let generation = auth.status().generation;
     let groups = image_groups(auth, generation).await.ok();
@@ -334,7 +342,7 @@ pub(crate) async fn global_get(
         })
         .collect();
     if let Some(c) = custom_selection(db)? {
-        let has_key = read_custom_secret(identity, &c).await.is_ok();
+        let has_key = read_custom_secret(db, identity, &c).await.is_ok();
         return Ok(GlobalImageDto {
             status: if has_key { "unverified" } else { "unavailable" },
             reason: Some(if has_key {
@@ -373,7 +381,7 @@ pub(crate) async fn global_get(
     Ok(GlobalImageDto {
         status: if ready { "unverified" } else { "unavailable" },
         reason: Some(if ready {
-            "已配置标准 Images 接口，实际生图结果尚未验证；默认模型为服务端现有默认 gpt-image-2"
+            "生图配置已保存，实际生图结果以请求返回为准"
         } else {
             "账户或密钥不可用，或分组未开启 OpenAI 生图权限"
         }),
@@ -420,7 +428,7 @@ pub(crate) async fn prepare_auto_default(
     Err(ImageBindingError)
 }
 pub(crate) async fn custom_target(
-    db: &crate::database::Database,
+    db: &std::sync::Arc<crate::database::Database>,
     identity: String,
     endpoint: &str,
     body: &mut serde_json::Value,
@@ -431,7 +439,7 @@ pub(crate) async fn custom_target(
     if !matches!(endpoint, "/images/generations" | "/images/edits") || !text(&c.model) {
         return Err(ImageBindingError);
     }
-    let secret = read_custom_secret(identity, &c).await?;
+    let secret = read_custom_secret(db, identity, &c).await?;
     if custom_selection(db)?.is_none_or(|now| {
         now.version != c.version || now.endpoint != c.endpoint || now.model != c.model
     }) {
@@ -1295,6 +1303,184 @@ mod tests {
             .is_ok());
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
+    struct ImageLegacy {
+        payload: Option<Vec<u8>>,
+        reads: std::sync::atomic::AtomicUsize,
+        locked: bool,
+    }
+    impl super::super::credentials::CredentialBackend for ImageLegacy {
+        fn read(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> std::result::Result<Option<Vec<u8>>, super::super::credentials::CredentialError>
+        {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.locked {
+                return Err(super::super::credentials::CredentialError::InteractionRequired);
+            }
+            Ok(self.payload.clone())
+        }
+        fn write(
+            &self,
+            _: &str,
+            _: &str,
+            _: &[u8],
+        ) -> std::result::Result<(), super::super::credentials::CredentialError> {
+            panic!("image persistence must not write legacy credentials")
+        }
+        fn remove(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> std::result::Result<(), super::super::credentials::CredentialError> {
+            panic!("image migration must preserve legacy credentials")
+        }
+    }
+    fn image_legacy(locked: bool, endpoint: &str) -> ImageLegacy {
+        ImageLegacy {
+            payload: Some(
+                serde_json::to_vec(&CustomSecret {
+                    endpoint: endpoint.into(),
+                    api_key: "synthetic-image-key".into(),
+                })
+                .unwrap(),
+            ),
+            reads: Default::default(),
+            locked,
+        }
+    }
+    fn local_image_backend(
+        db: std::sync::Arc<crate::database::Database>,
+        locked: bool,
+        endpoint: &str,
+    ) -> super::super::local_key_store::LocalCredentialBackend<ImageLegacy> {
+        super::super::local_key_store::LocalCredentialBackend::with_legacy(
+            db,
+            image_legacy(locked, endpoint),
+        )
+    }
+
+    #[tokio::test]
+    async fn custom_image_save_survives_database_reopen_without_keychain_access() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("images.db");
+        let db = crate::database::Database::memory().unwrap();
+        let dto = save_custom(
+            &db,
+            "fixture".into(),
+            "https://images.example/v1".into(),
+            "chosen-image-model".into(),
+            "synthetic-image-key".into(),
+        )
+        .await
+        .unwrap();
+        {
+            let source = db.conn.lock().unwrap();
+            let mut dest = rusqlite::Connection::open(&path).unwrap();
+            let backup = rusqlite::backup::Backup::new(&source, &mut dest).unwrap();
+            backup
+                .run_to_completion(20, std::time::Duration::ZERO, None)
+                .unwrap();
+        }
+        drop(db);
+        let restarted = std::sync::Arc::new(crate::database::Database {
+            conn: std::sync::Mutex::new(rusqlite::Connection::open(&path).unwrap()),
+            log_count_cache: Default::default(),
+        });
+        let selection = custom_selection(&restarted).unwrap().unwrap();
+        assert_eq!(selection.model, "chosen-image-model");
+        assert_eq!(selection.version, dto.version);
+        let backend = local_image_backend(restarted, true, "https://unused.example/v1");
+        // Any fallback to the legacy store returns an error.
+        let secret = read_custom_secret_with_backend(&backend, "fixture", &selection).unwrap();
+        assert_eq!(secret.api_key, "synthetic-image-key");
+    }
+
+    #[tokio::test]
+    async fn custom_image_save_failure_is_atomic_and_blank_model_uses_default() {
+        let db = crate::database::Database::memory().unwrap();
+        let first = save_custom(
+            &db,
+            "fixture".into(),
+            "https://images.example/v1".into(),
+            "".into(),
+            "synthetic-image-key".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.model, "gpt-image-2");
+        db.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_image_save BEFORE INSERT ON settings WHEN NEW.key = 'osir.codex.image-custom.v1' BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;").unwrap();
+        assert!(save_custom(
+            &db,
+            "fixture".into(),
+            "https://other.example/v1".into(),
+            "other".into(),
+            "synthetic-new-key".into()
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            custom_selection(&db).unwrap().unwrap().version,
+            first.version
+        );
+        let count: i64 = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM osir_model_credentials", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1, "failed save must not leave a credential behind");
+    }
+
+    #[test]
+    fn custom_image_legacy_migrates_only_after_binding_validation() {
+        let db = std::sync::Arc::new(crate::database::Database::memory().unwrap());
+        let selection = CustomImage {
+            endpoint: "https://images.example/v1".into(),
+            model: "chosen".into(),
+            version: "legacy-fixture".into(),
+        };
+        let wrong = local_image_backend(db.clone(), false, "https://other.example/v1");
+        assert!(read_custom_secret_with_backend(&wrong, "fixture", &selection).is_err());
+        let count: i64 = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM osir_model_credentials", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0, "mismatched legacy secret must not migrate");
+        let good = local_image_backend(db.clone(), false, &selection.endpoint);
+        assert!(read_custom_secret_with_backend(&good, "fixture", &selection).is_ok());
+        let restarted = local_image_backend(db, true, &selection.endpoint);
+        assert!(read_custom_secret_with_backend(&restarted, "fixture", &selection).is_ok());
+    }
+
+    #[test]
+    fn custom_image_locked_legacy_preserves_selection_and_deletion_does_not_resurrect() {
+        use super::super::credentials::CredentialBackend;
+        let db = std::sync::Arc::new(crate::database::Database::memory().unwrap());
+        let selection = CustomImage {
+            endpoint: "https://images.example/v1".into(),
+            model: "chosen".into(),
+            version: "legacy-fixture".into(),
+        };
+        let encoded = serde_json::to_string(&selection).unwrap();
+        db.set_setting(CUSTOM_KEY, &encoded).unwrap();
+        let locked = local_image_backend(db.clone(), true, &selection.endpoint);
+        assert!(read_custom_secret_with_backend(&locked, "fixture", &selection).is_err());
+        assert_eq!(db.get_setting(CUSTOM_KEY).unwrap().unwrap(), encoded);
+        let available = local_image_backend(db.clone(), false, &selection.endpoint);
+        available
+            .remove(&custom_service("fixture"), &selection.version)
+            .unwrap();
+        assert!(read_custom_secret_with_backend(&available, "fixture", &selection).is_err());
+    }
+
     #[test]
     fn global_custom_endpoint_secret_binding_and_input_boundaries() {
         for endpoint in [

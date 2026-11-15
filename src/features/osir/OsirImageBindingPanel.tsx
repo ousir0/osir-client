@@ -108,15 +108,8 @@ export function OsirImageBindingPanel({
     summarySource === "saved" &&
     selected?.source === "saved" &&
     summaryCandidate?.provider_id === selected.provider_id;
-  const summaryModel = showDraft
-    ? source === "custom"
-      ? model || "尚未填写"
-      : sameSavedKey
-        ? selected?.model || "后台配置"
-        : summaryCandidate
-          ? "由所选密钥决定"
-          : "选择密钥后确定"
-    : selected?.model || "后台配置";
+  const summaryModel =
+    (showDraft ? model.trim() : selected?.model) || "gpt-image-2";
   const summaryEndpoint = showDraft
     ? source === "custom"
       ? endpoint || "尚未填写"
@@ -223,11 +216,16 @@ export function OsirImageBindingPanel({
     try {
       const request =
         source === "saved"
-          ? { source, provider_id: providerId, model: "", generation }
+          ? {
+              source,
+              provider_id: providerId,
+              model: model.trim() || "gpt-image-2",
+              generation,
+            }
           : {
               source,
               endpoint: endpoint.trim(),
-              model: model.trim(),
+              model: model.trim() || "gpt-image-2",
               api_key: key,
             };
       const result = await invoke<ImageConfig>("osir_image_save", { request });
@@ -440,17 +438,17 @@ export function OsirImageBindingPanel({
                       placeholder="输入此接口对应的密钥"
                     />
                   </label>
-                  <label>
-                    生图模型
-                    <input
-                      required
-                      value={model}
-                      disabled={busy}
-                      onChange={(event) => setModel(event.target.value)}
-                    />
-                  </label>
                 </>
               )}
+              <label>
+                生图模型
+                <input
+                  value={model}
+                  disabled={busy}
+                  onChange={(event) => setModel(event.target.value)}
+                  placeholder="gpt-image-2（留空默认）"
+                />
+              </label>
             </form>
             {error && (
               <p role="alert" className="osir-error">

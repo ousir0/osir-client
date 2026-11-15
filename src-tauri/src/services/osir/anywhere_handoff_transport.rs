@@ -93,6 +93,7 @@ pub(crate) struct HandoffTransport {
     discovery_identity: (u64, u64),
     flow_id: String,
     created_at: Instant,
+    peer_connected: watch::Sender<bool>,
 }
 
 // Walk anchored directory descriptors with O_NOFOLLOW. Never follow a symlink,
@@ -206,6 +207,7 @@ impl HandoffTransport {
         }
         let mut file = unsafe { File::from_raw_fd(fd) };
         let metadata = file.metadata().map_err(|_| TransportError::UnsafePath)?;
+        let (peer_connected, _) = watch::channel(false);
         let transport = Self {
             listener,
             directory,
@@ -214,6 +216,7 @@ impl HandoffTransport {
             discovery_identity: (metadata.dev(), metadata.ino()),
             flow_id,
             created_at: Instant::now(),
+            peer_connected,
         };
         let manifest = serde_json::to_vec(&Discovery {
             version: 1,
@@ -233,6 +236,10 @@ impl HandoffTransport {
     }
     pub(crate) fn launch_arguments(&self) -> [&str; 2] {
         ["--osir-client-handoff-flow", &self.flow_id]
+    }
+
+    pub(crate) fn peer_connected(&self) -> watch::Receiver<bool> {
+        self.peer_connected.subscribe()
     }
 
     /// Consumes the flow even on malformed/untrusted peers. No automatic replay.
@@ -275,6 +282,7 @@ impl HandoffTransport {
                 .verify(&peer)
                 .await
                 .map_err(|_| TransportError::PeerUntrusted)?;
+            let _ = self.peer_connected.send(true);
             let bytes = tokio::time::timeout(IO_TIMEOUT, read_frame(&mut stream))
                 .await
                 .map_err(|_| TransportError::Timeout)??;
@@ -581,6 +589,7 @@ mod tests {
     async fn authenticated_one_shot_delivery_rechecks_peer() {
         let home = home();
         let t = HandoffTransport::bind(home.path()).unwrap();
+        let mut connected = t.peer_connected();
         let bytes = request(t.flow_id());
         let socket = t.directory.path().join("s");
         let verify = verifier(false);
@@ -611,6 +620,7 @@ mod tests {
         );
         drop(cancel);
         assert_eq!(result, Ok(()));
+        assert!(*connected.borrow_and_update());
         assert_eq!(verify.calls.load(Ordering::SeqCst), 2);
     }
 
@@ -618,6 +628,7 @@ mod tests {
     async fn failed_peer_never_authorizes() {
         let home = home();
         let t = HandoffTransport::bind(home.path()).unwrap();
+        let connected = t.peer_connected();
         let socket = t.directory.path().join("s");
         let verify = verifier(true);
         let (_cancel, rx) = watch::channel(false);
@@ -632,6 +643,7 @@ mod tests {
         );
         assert!(stream.is_ok());
         assert_eq!(result, Err(TransportError::PeerUntrusted));
+        assert!(!*connected.borrow());
     }
 
     #[tokio::test]

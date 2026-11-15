@@ -416,10 +416,16 @@ pub(in crate::commands) async fn handoff_bundle() -> Result<PathBuf, String> {
     checked_launch_path("osir-anywhere").await
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::commands) enum HandoffLaunchStatus {
+    Opened,
+    AwaitingSystemApproval,
+}
+
 pub(in crate::commands) async fn launch_handoff_bundle(
     bundle: &Path,
     flow_id: &str,
-) -> Result<(), String> {
+) -> Result<HandoffLaunchStatus, String> {
     let _guard = desktop_action_guard("osir-anywhere")?;
     if flow_id.len() != 43
         || !flow_id
@@ -450,11 +456,19 @@ pub(in crate::commands) async fn launch_handoff_bundle(
     if !status.success() {
         if security_guidance::should_open_security_settings(status.code(), &stderr) {
             open_privacy_security_settings().await;
-            return Err("macOS 系统策略拒绝打开 OSIR Anywhere，客户端已尝试打开“系统设置 → 隐私与安全性”。是否允许打开由你和系统决定；若有“仍要打开”选项且你信任该应用，可手动批准后重试。".into());
+            return Ok(HandoffLaunchStatus::AwaitingSystemApproval);
         }
         return Err("Anywhere 无法打开，请检查安装后重试".into());
     }
-    Ok(())
+    Ok(HandoffLaunchStatus::Opened)
+}
+
+pub(in crate::commands) async fn handoff_bundle_running(
+    app: &tauri::AppHandle,
+    bundle: &Path,
+) -> Result<bool, String> {
+    let instance = current_desktop_instance(app, "osir-anywhere").await?;
+    Ok(instance.is_some_and(|instance| instance.installation.path == bundle.to_string_lossy()))
 }
 
 // Capture only bounded native diagnostics; never log/return stderr (which can

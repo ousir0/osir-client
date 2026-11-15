@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "修复打开 OSIR Anywhere 时主动激活 DeepSeek Harness 窗口的问题，已有实例会直接复用，未运行时改为请求后台启动。\n修复 Anywhere 安装失败后重新安装无效的问题，并改进下载失败提示和连接故障诊断。"
+  "notes": "改进 Anywhere 首次打开后的自动连接。\n修复 Codex 既有项目和会话无法显示。\n修复原生生图设置重启后不可用，支持账户密钥和自定义接口的默认生图模型。"
 }
