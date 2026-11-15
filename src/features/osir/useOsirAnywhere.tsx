@@ -42,6 +42,24 @@ const ANYWHERE_LAUNCH_ERRORS = new Set([
   "macOS 系统策略拒绝打开 OSIR Anywhere，客户端已尝试打开设置。",
   "macOS 系统策略拒绝打开 OSIR Anywhere，客户端已尝试打开“系统设置 → 隐私与安全性”。是否允许打开由你和系统决定；若有“仍要打开”选项且你信任该应用，可手动批准后重试。",
 ]);
+// Exact static native messages only; never surface URLs, tokens or appended diagnostics.
+const ANYWHERE_INSTALL_ERRORS = new Set([
+  "安装包下载失败，请检查网络后重试",
+  "无法获取正式发行信息，请检查网络后重试",
+  "发行信息检查超时，请重试",
+  "发行信息下载中断",
+  "无法确认服务端兼容版本，请稍后重试",
+  "服务端版本检查超时，请稍后重试",
+  "正式发行信息暂不可用，未跟随跳转",
+  "服务端版本检查不可用，已阻止不确定的安装",
+  "下载长时间没有响应，请重试",
+  "下载中断，请重试",
+  "安装包下载超时，请重试",
+  "无法写入安装缓存，请检查权限",
+  "安装包写入失败，请检查空间及权限",
+  "安装包大小或校验值不符，已阻止打开",
+  "安装包校验失败，已阻止打开，请重新下载",
+]);
 export type AnywhereState = {
   status: "installed" | "not_installed" | "error" | "unsupported";
   installed: boolean;
@@ -490,13 +508,17 @@ function useAnywhereController(desktop: boolean) {
   useEffect(() => {
     const intent = intentRef.current;
     if (!intent) return;
+    // Cached terminal states belong to the previous native generation
+    // until install() binds this button's intent to the returned install ID.
+    // After binding, terminal states still revoke conservatively even if the
+    // status ID is unexpected; auto-launch retains its exact ID checks below.
+    const installStarted = intent.installId !== null;
     if (
       local.isError ||
       installation.isError ||
       local.data?.status === "error" ||
       local.data?.status === "unsupported" ||
-      phase === "cancelled" ||
-      phase === "error" ||
+      (installStarted && (phase === "cancelled" || phase === "error")) ||
       (intent.wasInstalled && local.data?.status === "not_installed") ||
       (!action && phase === "idle")
     ) {
@@ -522,6 +544,7 @@ function useAnywhereController(desktop: boolean) {
     local.isError,
     local.data,
     installation.isError,
+    installation.data?.installId,
     rememberIntent,
   ]);
   useEffect(() => {
@@ -603,9 +626,12 @@ function useAnywhereController(desktop: boolean) {
     description = "当前系统暂不支持安装 OSIR Anywhere。";
   } else if (installation.isError || phase === "error") {
     label = "安装异常";
+    const installError = installation.data?.error ?? "";
     description = installation.isError
       ? "下载状态读取失败，请重新检测后重试。"
-      : "下载或安装未完成，请检查网络、磁盘空间与系统权限后重试。";
+      : ANYWHERE_INSTALL_ERRORS.has(installError)
+        ? installError
+        : "下载或安装未完成，请检查网络、磁盘空间与系统权限后重试。";
   } else if (phase === "downloading") {
     label = "下载中";
     description = "正在下载安装包，完成后将打开安装器。";
@@ -643,7 +669,11 @@ function useAnywhereController(desktop: boolean) {
   ) {
     if (release.isError || release.data?.status === "error") {
       label = "发行信息异常";
-      description = "暂时无法获取安装包信息，请重试。";
+      const releaseError = release.data?.error ?? "";
+      description =
+        !release.isError && ANYWHERE_INSTALL_ERRORS.has(releaseError)
+          ? releaseError
+          : "暂时无法获取安装包信息，请重试。";
     } else if (release.data?.status === "unsupported") {
       label = "平台暂不支持";
       description = "当前系统或处理器暂没有可用安装包。";

@@ -87,6 +87,25 @@ pub struct OsirAnywhereInstaller {
     // previous runs' files; rehash and recheck system signatures on every use.
     cache: Arc<tokio::sync::Mutex<Option<tempfile::TempDir>>>,
 }
+fn install_failure_code(error: &str) -> &'static str {
+    match error {
+        "无法获取正式发行信息，请检查网络后重试" | "发行信息检查超时，请重试" => {
+            "release_transport"
+        }
+        "无法确认服务端兼容版本，请稍后重试" | "服务端版本检查超时，请稍后重试" => {
+            "compatibility_transport"
+        }
+        "安装包下载失败，请检查网络后重试" | "下载长时间没有响应，请重试" | "下载中断，请重试" => {
+            "installer_transport"
+        }
+        "安装包大小或校验值不符，已阻止打开" | "发行签名验证失败，已阻止下载" => {
+            "integrity_rejected"
+        }
+        "下载已取消" => "cancelled",
+        _ => "install_failed",
+    }
+}
+
 impl OsirAnywhereInstaller {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner
@@ -104,7 +123,11 @@ impl OsirAnywhereInstaller {
         if inner.active || inner.status.install_id != expected_install_id {
             return Err("安装状态已改变，请重新检测后重试".into());
         }
-        let install_id = inner.status.install_id.checked_add(1).ok_or("请重启客户端后重试")?;
+        let install_id = inner
+            .status
+            .install_id
+            .checked_add(1)
+            .ok_or("请重启客户端后重试")?;
         let (send, receive) = tokio::sync::watch::channel(false);
         inner.cancel = Some(send);
         inner.active = true;
@@ -129,6 +152,12 @@ impl OsirAnywhereInstaller {
         let mut inner = self.lock();
         if inner.status.phase != AnywhereInstallPhase::Cancelled {
             if let Err(error) = result {
+                // Keep diagnostics useful without logging arbitrary error text,
+                // credentials, URLs, user paths, or response bodies.
+                log::warn!(
+                    "Anywhere installer failed: {}",
+                    install_failure_code(&error)
+                );
                 inner.status.phase = AnywhereInstallPhase::Error;
                 inner.status.error = Some(error);
             }

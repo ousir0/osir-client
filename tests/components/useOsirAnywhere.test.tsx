@@ -74,6 +74,13 @@ function show() {
 }
 const count = (command: string) =>
   native.invoke.mock.calls.filter(([c]) => c === command).length;
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 async function advance(ms = 20) {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
@@ -227,7 +234,277 @@ describe("Anywhere launch error reporting", () => {
   }
 });
 
+describe("Anywhere installation error reporting", () => {
+  it.each([
+    "无法确认服务端兼容版本，请稍后重试",
+    "服务端版本检查超时，请稍后重试",
+    "正式发行信息暂不可用，未跟随跳转",
+    "服务端版本检查不可用，已阻止不确定的安装",
+  ])("shows the static preflight failure before first install: %s", async (message) => {
+    const original = native.invoke.getMockImplementation()!;
+    native.invoke.mockImplementation((command: string) =>
+      command === "osir_anywhere_release"
+        ? Promise.resolve({ ...released, status: "error", error: message })
+        : original(command),
+    );
+    show();
+    await advance();
+    expect(controller.description).toBe(message);
+    expect(controller.label).toBe("发行信息异常");
+    expect(controller.canInstall).toBe(false);
+  });
+
+  it.each([
+    "private-fixture-secret",
+    "无法确认服务端兼容版本，请稍后重试 token=private-fixture-secret",
+    "服务端版本检查超时，请稍后重试 token=private-fixture-secret",
+    "正式发行信息暂不可用，未跟随跳转 token=private-fixture-secret",
+    "服务端版本检查不可用，已阻止不确定的安装 token=private-fixture-secret",
+  ])("keeps preflight diagnostics generic: %s", async (message) => {
+    const original = native.invoke.getMockImplementation()!;
+    native.invoke.mockImplementation((command: string) =>
+      command === "osir_anywhere_release"
+        ? Promise.resolve({ ...released, status: "error", error: message })
+        : original(command),
+    );
+    show();
+    await advance();
+    expect(controller.description).toBe("暂时无法获取安装包信息，请重试。");
+    expect(controller.canInstall).toBe(false);
+  });
+
+  it("does not expose an allowlisted cached preflight failure when IPC fails", async () => {
+    const original = native.invoke.getMockImplementation()!;
+    let fail = false;
+    native.invoke.mockImplementation((command: string) =>
+      command === "osir_anywhere_release"
+        ? fail
+          ? Promise.reject(Error("private-fixture-secret"))
+          : Promise.resolve({
+              ...released,
+              status: "error",
+              error: "无法确认服务端兼容版本，请稍后重试",
+            })
+        : original(command),
+    );
+    show();
+    await advance();
+    fail = true;
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["osir-anywhere-release"] });
+    });
+    await advance();
+    expect(controller.description).toBe("暂时无法获取安装包信息，请重试。");
+    expect(controller.canInstall).toBe(false);
+  });
+
+  it.each([
+    "安装包下载失败，请检查网络后重试",
+    "无法获取正式发行信息，请检查网络后重试",
+    "发行信息检查超时，请重试",
+    "发行信息下载中断",
+    "无法确认服务端兼容版本，请稍后重试",
+    "服务端版本检查超时，请稍后重试",
+    "正式发行信息暂不可用，未跟随跳转",
+    "服务端版本检查不可用，已阻止不确定的安装",
+    "下载长时间没有响应，请重试",
+    "下载中断，请重试",
+    "安装包下载超时，请重试",
+    "无法写入安装缓存，请检查权限",
+    "安装包写入失败，请检查空间及权限",
+    "安装包大小或校验值不符，已阻止打开",
+    "安装包校验失败，已阻止打开，请重新下载",
+  ])("shows only the complete static native message: %s", async (message) => {
+    status = { ...idle, phase: "error", error: message };
+    show();
+    await advance();
+    expect(controller.description).toBe(message);
+    expect(controller.label).toBe("安装异常");
+    expect(controller.canInstall).toBe(true);
+  });
+
+  it.each([
+    "private-fixture-secret",
+    "安装包下载失败，请检查网络后重试 token=private-fixture-secret",
+    "下载中断，请重试\nAuthorization: Bearer private-fixture-secret",
+    ...[
+      "无法确认服务端兼容版本，请稍后重试",
+      "服务端版本检查超时，请稍后重试",
+      "正式发行信息暂不可用，未跟随跳转",
+      "服务端版本检查不可用，已阻止不确定的安装",
+    ].map((message) => `${message} token=private-fixture-secret`),
+    "安装包写入失败，请检查空间及权限 /private-fixture-secret",
+    "https://fixture.invalid/download?token=private-fixture-secret",
+    "",
+    null,
+  ])("keeps unknown native diagnostics generic: %s", async (message) => {
+    status = { ...idle, phase: "error", error: message };
+    show();
+    await advance();
+    expect(controller.description).toBe(
+      "下载或安装未完成，请检查网络、磁盘空间与系统权限后重试。",
+    );
+    expect(controller.actionError).toBeNull();
+  });
+
+  it("does not expose even an allowlisted cached message when status IPC fails", async () => {
+    status = { ...idle, phase: "error", error: "下载中断，请重试" };
+    show();
+    await advance();
+    statusFailure = true;
+    await refresh();
+    expect(controller.description).toBe("下载状态读取失败，请重新检测后重试。");
+    expect(controller.canInstall).toBe(false);
+  });
+});
+
 describe("Anywhere button-owned automatic installation connection", () => {
+  it.each(["error", "cancelled"] as const)(
+    "starts a fresh native generation after %s despite an asynchronously pending detection",
+    async (phase) => {
+      await begin();
+      status = { ...status, phase, error: "安装包下载失败，请检查网络后重试" };
+      await refresh();
+      expect(controller.canInstall).toBe(true);
+      expect(controller.autoConnectPending).toBe(false);
+
+      const detection = deferred<AnywhereState>();
+      const original = native.invoke.getMockImplementation()!;
+      native.invoke.mockImplementation((command: string) =>
+        command === "osir_anywhere_detect"
+          ? detection.promise
+          : original(command),
+      );
+      let retry!: Promise<void>;
+      act(() => {
+        retry = controller.install();
+      });
+      await advance(); // Let effects observe the old terminal status during IPC.
+      expect(controller.action).toBe("install");
+      expect(count("osir_anywhere_install")).toBe(1);
+      await act(async () => {
+        detection.resolve(absent);
+        await retry;
+      });
+      native.invoke.mockImplementation(original);
+      await advance();
+      expect(count("osir_anywhere_install")).toBe(2);
+      expect(
+        native.invoke.mock.calls
+          .filter(([c]) => c === "osir_anywhere_install")
+          .slice(-1)[0],
+      ).toEqual(["osir_anywhere_install", { expectedInstallId: 1 }]);
+      expect(status.installId).toBe(2);
+      expect(controller.autoConnectPending).toBe(true);
+      completeTargetInstall();
+      await handoff();
+      await advance(1500);
+      expect(count("osir_anywhere_launch")).toBe(1);
+    },
+  );
+
+  it.each(["account switch", "unmount", "timeout"])(
+    "does not start the retry after %s during its pending detection",
+    async (reason) => {
+      const view = await begin();
+      status = { ...status, phase: "error" };
+      await refresh();
+      const detection = deferred<AnywhereState>();
+      const original = native.invoke.getMockImplementation()!;
+      native.invoke.mockImplementation((command: string) =>
+        command === "osir_anywhere_detect"
+          ? detection.promise
+          : original(command),
+      );
+      let retry!: Promise<void>;
+      act(() => {
+        retry = controller.install();
+      });
+      await advance();
+      if (reason === "account switch") {
+        await act(async () => {
+          client.setQueryData(sessionKey, { connected: true, generation: 11 });
+        });
+      } else if (reason === "unmount") view.unmount();
+      else await advance(10 * 60_000 + 1000);
+      await act(async () => {
+        detection.resolve(absent);
+        await retry;
+      });
+      expect(count("osir_anywhere_install")).toBe(1);
+      expect(count("osir_anywhere_launch")).toBe(0);
+    },
+  );
+
+  it("revokes a retried download on cancel and never auto-connects its late completion", async () => {
+    await begin();
+    status = { ...status, phase: "error" };
+    await refresh();
+    await act(async () => {
+      await controller.install();
+    });
+    await advance();
+    expect(status.installId).toBe(2);
+    expect(controller.autoConnectPending).toBe(true);
+    await act(async () => {
+      await controller.cancel();
+    });
+    expect(count("osir_anywhere_cancel_install")).toBe(1);
+    expect(controller.autoConnectPending).toBe(false);
+    completeTargetInstall();
+    status = {
+      ...status,
+      phase: "waiting_installation",
+      installId: 2,
+      targetVersion: released.version,
+      targetRevision: released.revision!,
+      installationComplete: true,
+    };
+    await refresh();
+    await advance(2500);
+    expect(count("osir_anywhere_launch")).toBe(0);
+  });
+
+  it("does not let an old handoff launch while a retry install IPC is pending", async () => {
+    await begin();
+    status = { ...status, phase: "error" };
+    await refresh();
+    const pendingInstall = deferred<AnywhereInstall>();
+    const original = native.invoke.getMockImplementation()!;
+    native.invoke.mockImplementation((command: string) =>
+      command === "osir_anywhere_install"
+        ? pendingInstall.promise
+        : original(command),
+    );
+    let retry!: Promise<void>;
+    act(() => {
+      retry = controller.install();
+    });
+    await advance();
+    expect(count("osir_anywhere_install")).toBe(2);
+    completeTargetInstall();
+    status = {
+      ...status,
+      phase: "waiting_installation",
+      installationComplete: true,
+    };
+    await refresh();
+    expect(count("osir_anywhere_launch")).toBe(0);
+    await act(async () => {
+      client.setQueryData(sessionKey, { connected: true, generation: 11 });
+    });
+    await act(async () => {
+      status = { ...idle, phase: "downloading", installId: 2 };
+      pendingInstall.resolve(status);
+      await retry;
+    });
+    expect(controller.autoConnectPending).toBe(false);
+    await handoff();
+    await refresh();
+    await advance(2000);
+    expect(count("osir_anywhere_launch")).toBe(0);
+  });
+
   it.each(["new install", "revision upgrade", "patch upgrade"])(
     "polls after handoff and automatically launches %s exactly once without a Detect click",
     async (kind) => {

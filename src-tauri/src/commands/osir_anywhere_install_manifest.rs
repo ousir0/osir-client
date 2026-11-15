@@ -208,14 +208,12 @@ impl Release {
             return Ok(());
         };
         let run = async {
-            let response = http_client()?
-                .get(HEALTH)
-                .header("Accept", "application/json")
-                .header("Accept-Encoding", "identity")
-                .header("Cache-Control", "no-cache")
-                .send()
-                .await
-                .map_err(|_| "无法确认服务端兼容版本，请稍后重试")?;
+            let response = get_before_headers(
+                &http_client()?,
+                HEALTH,
+                "无法确认服务端兼容版本，请稍后重试",
+            )
+            .await?;
             if response.status() != reqwest::StatusCode::OK
                 || response.url().as_str() != HEALTH
                 || response
@@ -239,7 +237,7 @@ impl Release {
             }
             check_health(&bytes, minimum)
         };
-        tokio::time::timeout(std::time::Duration::from_secs(15), run)
+        tokio::time::timeout(std::time::Duration::from_secs(90), run)
             .await
             .map_err(|_| "服务端版本检查超时，请稍后重试")?
     }
@@ -323,15 +321,70 @@ pub(super) fn http_client() -> Result<reqwest::Client, String> {
         .map_err(|_| "安全下载服务不可用".into())
 }
 
+// Only idempotent GETs before response headers may recover from a transient
+// transport failure. HTTP status, certificate/protocol errors, response bodies,
+// file verification and installer launches never enter this retry loop.
+fn transient_get_error(error: &reqwest::Error) -> bool {
+    if error.is_timeout() {
+        return true;
+    }
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            if matches!(
+                io.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::UnexpectedEof
+            ) {
+                return true;
+            }
+        }
+        source = cause.source();
+    }
+    false
+}
+
+pub(super) async fn get_before_headers(
+    client: &reqwest::Client,
+    url: &str,
+    failure: &'static str,
+) -> Result<reqwest::Response, String> {
+    use std::time::Duration;
+    for attempt in 0..3 {
+        let request = client
+            .get(url)
+            .header("Accept", "application/json, application/octet-stream")
+            .header("Accept-Encoding", "identity")
+            .header("Cache-Control", "no-cache");
+        // This timeout ends at headers. It does not impose a short total timeout
+        // on a large, valid installer body after the response is returned.
+        let response = tokio::time::timeout(Duration::from_secs(25), request.send()).await;
+        let retryable = match response {
+            Ok(Ok(response)) => return Ok(response),
+            Ok(Err(ref error)) => transient_get_error(error),
+            Err(_) => true,
+        };
+        if !retryable || attempt == 2 {
+            return Err(failure.into());
+        }
+        tokio::time::sleep(Duration::from_secs(if attempt == 0 { 1 } else { 3 })).await;
+    }
+    unreachable!("bounded GET attempts return on final failure")
+}
+
 pub(super) async fn fetch() -> Result<Option<Release>, String> {
     use futures::StreamExt;
     let run = async {
-        let response = http_client()?
-            .get(FEED)
-            .header("Accept-Encoding", "identity")
-            .send()
-            .await
-            .map_err(|_| "无法获取正式发行信息，请检查网络后重试")?;
+        let response = get_before_headers(
+            &http_client()?,
+            FEED,
+            "无法获取正式发行信息，请检查网络后重试",
+        )
+        .await?;
         if matches!(response.status().as_u16(), 404 | 410) {
             return Ok(None);
         }
@@ -357,7 +410,7 @@ pub(super) async fn fetch() -> Result<Option<Release>, String> {
         }
         verify(&bytes, PUBLIC_KEY).map(Some)
     };
-    tokio::time::timeout(std::time::Duration::from_secs(30), run)
+    tokio::time::timeout(std::time::Duration::from_secs(90), run)
         .await
         .map_err(|_| "发行信息检查超时，请重试")?
 }

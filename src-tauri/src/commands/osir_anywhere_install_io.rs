@@ -433,12 +433,12 @@ pub(super) async fn download_with_client(
         .await
         .map_err(|_| "无法写入安装缓存，请检查权限")?;
     let transfer = async {
-        let response = client
-            .get(&artifact.url)
-            .header("Accept-Encoding", "identity")
-            .send()
-            .await
-            .map_err(|_| "安装包下载失败，请检查网络后重试")?;
+        let response = manifest::get_before_headers(
+            &client,
+            &artifact.url,
+            "安装包下载失败，请检查网络后重试",
+        )
+        .await?;
         if response.status() != reqwest::StatusCode::OK
             || response.url().as_str() != artifact.url
             || response

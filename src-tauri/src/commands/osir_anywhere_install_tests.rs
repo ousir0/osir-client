@@ -488,7 +488,10 @@ fn anywhere_install_retry_replaces_orphaned_wait_without_reusing_authorization()
     assert!(state.begin(1).is_err(), "handoff worker must finish first");
     state.finish(Ok(()));
     state.confirm_installation(1);
-    assert!(state.begin(0).is_err(), "stale renderer cannot replace a newer install");
+    assert!(
+        state.begin(0).is_err(),
+        "stale renderer cannot replace a newer install"
+    );
     let (retry, _receive) = state.begin(1).unwrap();
     assert_eq!(retry.install_id, 2);
     assert_eq!(retry.phase, AnywhereInstallPhase::Downloading);
@@ -497,7 +500,10 @@ fn anywhere_install_retry_replaces_orphaned_wait_without_reusing_authorization()
     assert!(retry.target_revision.is_none());
     state.progress(AnywhereInstallPhase::WaitingInstallation, 100, Some(100));
     state.confirm_installation(1);
-    assert!(!state.status().installation_complete, "old poll cannot complete retry");
+    assert!(
+        !state.status().installation_complete,
+        "old poll cannot complete retry"
+    );
 }
 
 #[test]
@@ -747,4 +753,75 @@ fn anywhere_install_dmg_package_identity_is_bounded_and_not_a_plist_lookalike() 
             mutation == 0
         );
     }
+}
+
+#[test]
+fn anywhere_install_failure_diagnostics_never_copy_unknown_error_text() {
+    assert_eq!(
+        install_failure_code("无法获取正式发行信息，请检查网络后重试"),
+        "release_transport"
+    );
+    assert_eq!(
+        install_failure_code("token=synthetic-secret /private/user/path"),
+        "install_failed"
+    );
+}
+
+#[tokio::test]
+async fn anywhere_install_get_recovers_connection_refusal_before_headers() {
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = reservation.local_addr().unwrap();
+    drop(reservation);
+    let server = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0; 4096];
+        let _ = socket.read(&mut request).await;
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await
+            .unwrap();
+    });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let response = manifest::get_before_headers(
+        &client,
+        &format!("http://{address}/fixture"),
+        "static failure",
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.text().await.unwrap(), "ok");
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn anywhere_install_get_connection_failure_is_bounded_and_static() {
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = reservation.local_addr().unwrap();
+    drop(reservation);
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let start = std::time::Instant::now();
+    let error = manifest::get_before_headers(
+        &client,
+        &format!("http://{address}/fixture"),
+        "static failure",
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, "static failure");
+    assert!(start.elapsed() >= std::time::Duration::from_secs(4));
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+}
+
+#[tokio::test]
+async fn anywhere_install_get_does_not_retry_http_rejection() {
+    let (url, server) =
+        fixture_server("503 Unavailable", b"no".to_vec(), "text/plain", false).await;
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let response = manifest::get_before_headers(&client, &url, "static failure")
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    server.await.unwrap();
 }
