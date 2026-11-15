@@ -397,10 +397,18 @@ mockIPC(
         };
       case "osir_anywhere_install_status":
         return {
-          phase: "idle",
+          phase:
+            new URLSearchParams(location.search).get("anywhere-install") ===
+            "waiting"
+              ? "waiting_installation"
+              : "idle",
           downloadedBytes: 0,
           totalBytes: null,
           error: null,
+          installId: 9,
+          targetVersion: "2.2.0",
+          targetRevision: 0,
+          installationComplete: false,
         };
       case "osir_anywhere_codex_status":
         return { state: "unavailable", model: null, models: [], error: null };

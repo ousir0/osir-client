@@ -36,6 +36,9 @@ static CLAUDE_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_n
 static WORKBUDDY_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static ANYWHERE_DESKTOP_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+#[path = "osir_macos_security_guidance.rs"]
+mod security_guidance;
+
 fn codex_launch_guard() -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
     CODEX_LAUNCH_GATE
         .try_lock()
@@ -422,11 +425,45 @@ pub(in crate::commands) async fn launch_handoff_bundle(bundle: &Path, flow_id: &
     // existing instance, then exits through its single-instance lock.
     let mut command = tokio::process::Command::new("/usr/bin/open");
     command.args(["-n", "-a"]).arg(bundle).args(["--args", "--osir-client-handoff-flow", flow_id]);
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
-    let status = tokio::time::timeout(Duration::from_secs(5), command.status()).await
+    command.env("LC_ALL", "C").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
+    let (status, stderr) = tokio::time::timeout(Duration::from_secs(5), bounded_anywhere_open(&mut command)).await
         .map_err(|_| "Anywhere 打开超时，请重试")?.map_err(|_| "Anywhere 无法打开，请重试")?;
-    if !status.success() { return Err("Anywhere 无法打开，请重试".into()); }
+    if !status.success() {
+        if security_guidance::should_open_security_settings(status.code(), &stderr) {
+            open_privacy_security_settings().await;
+            return Err("macOS 系统策略拒绝打开 OSIR Anywhere，客户端已尝试打开“系统设置 → 隐私与安全性”。是否允许打开由你和系统决定；若有“仍要打开”选项且你信任该应用，可手动批准后重试。".into());
+        }
+        return Err("Anywhere 无法打开，请检查安装后重试".into());
+    }
     Ok(())
+}
+
+// Capture only bounded native diagnostics; never log/return stderr (which can
+// contain local paths). Both reads and child exit share the caller's 5s budget.
+async fn bounded_anywhere_open(
+    command: &mut tokio::process::Command,
+) -> std::io::Result<(std::process::ExitStatus, Vec<u8>)> {
+    use tokio::io::AsyncReadExt;
+    let mut child = command.spawn()?;
+    let stderr = child.stderr.take().ok_or_else(|| std::io::Error::other("missing stderr"))?;
+    let capture = async {
+        let mut bytes = Vec::new();
+        stderr.take((security_guidance::OPEN_STDERR_LIMIT + 1) as u64).read_to_end(&mut bytes).await?;
+        if bytes.len() > security_guidance::OPEN_STDERR_LIMIT {
+            return Err(std::io::Error::other("open diagnostic exceeds limit"));
+        }
+        Ok(bytes)
+    };
+    // An oversized stream errors immediately; timeout/error drops the child
+    // with kill_on_drop rather than leaving open blocked on a full pipe.
+    tokio::try_join!(child.wait(), capture)
+}
+
+async fn open_privacy_security_settings() {
+    let mut settings = tokio::process::Command::new("/usr/bin/open");
+    settings.arg(security_guidance::SECURITY_SETTINGS_URL);
+    settings.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+    let _ = tokio::time::timeout(Duration::from_secs(5), settings.status()).await;
 }
 
 /// The installer holds its transaction/filesystem leases and supplies its

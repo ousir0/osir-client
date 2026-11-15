@@ -438,7 +438,8 @@ fn anywhere_install_contract_and_cancellation_boundary() {
     let state = OsirAnywhereInstaller::default();
     assert_eq!(
         serde_json::to_value(state.status()).unwrap(),
-        json!({"phase":"idle","downloadedBytes":0,"totalBytes":null,"error":null})
+        json!({"phase":"idle","downloadedBytes":0,"totalBytes":null,"error":null,
+            "installId":0,"targetVersion":null,"targetRevision":null,"installationComplete":false})
     );
     let (send, mut receive) = tokio::sync::watch::channel(false);
     {
@@ -475,6 +476,61 @@ fn anywhere_install_contract_and_cancellation_boundary() {
         serde_json::to_value(result).unwrap(),
         json!({"status":"not_configured","version":null,"revision":0,"platform":"darwin","arch":"arm64","size":null,"error":null})
     );
+}
+
+#[test]
+fn anywhere_install_retry_replaces_orphaned_wait_without_reusing_authorization() {
+    let state = OsirAnywhereInstaller::default();
+    let (initial, _receive) = state.begin(0).unwrap();
+    assert_eq!(initial.install_id, 1);
+    assert!(state.begin(1).is_err(), "active worker cannot be replaced");
+    state.progress(AnywhereInstallPhase::WaitingInstallation, 100, Some(100));
+    assert!(state.begin(1).is_err(), "handoff worker must finish first");
+    state.finish(Ok(()));
+    state.confirm_installation(1);
+    assert!(state.begin(0).is_err(), "stale renderer cannot replace a newer install");
+    let (retry, _receive) = state.begin(1).unwrap();
+    assert_eq!(retry.install_id, 2);
+    assert_eq!(retry.phase, AnywhereInstallPhase::Downloading);
+    assert!(!retry.installation_complete);
+    assert!(retry.target_version.is_none());
+    assert!(retry.target_revision.is_none());
+    state.progress(AnywhereInstallPhase::WaitingInstallation, 100, Some(100));
+    state.confirm_installation(1);
+    assert!(!state.status().installation_complete, "old poll cannot complete retry");
+}
+
+#[test]
+fn anywhere_install_completion_generation_phase_and_progress_contract() {
+    let state = OsirAnywhereInstaller::default();
+    {
+        let mut inner = state.lock();
+        inner.status.install_id = 2;
+        inner.status.target_version = Some("2.2.1".into());
+        inner.status.target_revision = Some(1);
+    }
+    state.progress(AnywhereInstallPhase::Opening, 1024, Some(1024));
+    state.confirm_installation(2);
+    assert!(
+        !state.status().installation_complete,
+        "OS handoff is not completion"
+    );
+    state.progress(AnywhereInstallPhase::WaitingInstallation, 1024, Some(1024));
+    state.confirm_installation(1);
+    assert!(
+        !state.status().installation_complete,
+        "stale poll cannot complete another install"
+    );
+    assert_eq!(state.status().target_version.as_deref(), Some("2.2.1"));
+    assert_eq!(state.status().target_revision, Some(1));
+    assert_eq!(state.status().install_id, 2);
+    state.confirm_installation(2);
+    assert!(state.status().installation_complete);
+    assert_eq!(
+        state.cancel().phase,
+        AnywhereInstallPhase::WaitingInstallation
+    );
+    assert!(state.status().installation_complete);
 }
 
 fn fake_dmg() -> Vec<u8> {

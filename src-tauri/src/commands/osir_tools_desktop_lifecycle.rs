@@ -334,6 +334,153 @@ pub(super) async fn close_desktop(
     })
 }
 
+/// Installer-only gate. Reuse the normal, PID-bound NSRunningApplication quit
+/// request, then retain the gate through opening the installer. Descendants
+/// are observed for exit only: no CLI, helper, or orphan is ever signalled.
+pub(in crate::commands) async fn prepare_anywhere_install(
+    app: &tauri::AppHandle,
+) -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
+    let guard = desktop_action_guard("osir-anywhere")?;
+    let mut bundles = Vec::new();
+    for candidate in candidates("osir-anywhere") {
+        match std::fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err("无法核对已有 Anywhere 安装，已停止安装".into()),
+            Ok(_) => (),
+        }
+        let details = inspect_bundle_details(&candidate, "osir-anywhere", Duration::from_secs(1))
+            .await
+            .map_err(|_| "无法核对已有 Anywhere 身份，已停止安装")?;
+        // A lookalike (including Agents Anywhere) is never a quit target.
+        let Some((installation, executable)) = details else {
+            continue;
+        };
+        let bundle = PathBuf::from(&installation.path);
+        if bundles.iter().any(|(path, _)| path == &bundle) {
+            continue;
+        }
+        bundles.push((bundle, executable));
+    }
+    let mut instances = Vec::new();
+    for (bundle, executable) in &bundles {
+        for found in desktop_process_snapshot(app, "osir-anywhere", bundle, None).await? {
+            let birth = process_birth(found.pid).ok_or("Anywhere 运行状态已变化，请重试安装")?;
+            let instance = DesktopInstance {
+                installation: DesktopInstallation {
+                    path: bundle.to_string_lossy().into(),
+                    version: None,
+                    build: None,
+                },
+                executable: executable.clone(),
+                pid: found.pid,
+                birth,
+                scope: DesktopScope::Registered,
+            };
+            validate_desktop_action_target("osir-anywhere", &instance)?;
+            instances.push(instance);
+        }
+    }
+    let paths = bundles.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>();
+    let roots = instances
+        .iter()
+        .map(|i| (i.pid, i.birth))
+        .collect::<Vec<_>>();
+    let uid = unsafe { libc::geteuid() };
+    let initial = anywhere_install_processes()?;
+    for (pid, birth) in &roots {
+        if !initial
+            .iter()
+            .any(|row| row.pid == *pid && row.birth == *birth && row.uid == uid)
+        {
+            return Err("无法确认 Anywhere 运行实例属于当前用户，已停止安装".into());
+        }
+    }
+    let quit = async {
+        for instance in &instances {
+            terminate_known(
+                app,
+                "osir-anywhere",
+                instance.bundle(),
+                &instance.executable,
+                &[(instance.pid, instance.birth)],
+                false,
+            )
+            .await?;
+        }
+        Ok::<(), String>(())
+    };
+    super::super::osir_anywhere_install::shutdown::wait_for_exit(
+        quit,
+        anywhere_install_processes,
+        &paths,
+        &roots,
+        uid,
+        Duration::from_secs(20),
+    )
+    .await?;
+    Ok(guard)
+}
+
+fn anywhere_install_processes(
+) -> Result<Vec<super::super::osir_anywhere_install::shutdown::Process>, String> {
+    use super::super::osir_anywhere_install::shutdown::Process;
+    let mut pids = vec![0i32; 16384];
+    // SDK sys/proc_info.h: PROC_UID_ONLY=4 (effective UID), not RUID=5.
+    // proc_listpids returns bytes. Do not inspect other users' protected PIDs.
+    const PROC_UID_ONLY: u32 = 4;
+    let capacity = (pids.len() * std::mem::size_of::<i32>()) as i32;
+    let bytes = unsafe {
+        libc::proc_listpids(
+            PROC_UID_ONLY,
+            libc::geteuid(),
+            pids.as_mut_ptr().cast(),
+            capacity,
+        )
+    };
+    if bytes <= 0 || bytes >= capacity || bytes as usize % std::mem::size_of::<i32>() != 0 {
+        return Err("无法确认 Anywhere 子进程退出，已停止安装".into());
+    }
+    let count = bytes as usize / std::mem::size_of::<i32>();
+    let mut rows = Vec::new();
+    for pid in pids.into_iter().take(count).filter(|pid| *pid > 1) {
+        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+        if unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
+        } != size
+        {
+            // Exited PIDs are harmless; a live unreadable PID cannot establish
+            // a safe complete ownership snapshot. Do not assume it stopped.
+            if process_is_alive(pid) {
+                return Err("无法完整核对运行进程，已停止安装；请稍后重试".into());
+            }
+            continue;
+        }
+        let info = unsafe { info.assume_init() };
+        if info.pbi_uid != unsafe { libc::geteuid() } {
+            continue;
+        }
+        let executable = process_path(pid);
+        // A pathless unrelated process is not an Anywhere target. observe()
+        // fails closed if a pathless row belongs to a root/tracked descendant.
+        rows.push(Process {
+            pid,
+            parent: info.pbi_ppid as i32,
+            uid: info.pbi_uid,
+            birth: (info.pbi_start_tvsec, info.pbi_start_tvusec),
+            executable,
+            alive: info.pbi_status != 5,
+        });
+    }
+    Ok(rows)
+}
+
 /// The UI confirms session interruption before requesting this action. Only
 /// the selected native instance is terminated, including when it hosts a chat.
 async fn force_terminate_instance(

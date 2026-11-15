@@ -69,6 +69,17 @@ function Actions({
         桌面客户端可用
       </button>
     );
+  if (
+    phase === "waiting_installation" &&
+    state.autoConnectPending &&
+    state.installed &&
+    !state.updateAvailable
+  )
+    return (
+      <button disabled={!!action} onClick={() => void state.cancel()}>
+        停止自动连接
+      </button>
+    );
   if (installed && !state.updateAvailable)
     return (
       <button
@@ -104,9 +115,13 @@ function Actions({
         {action === "install" && <Loader2 size={15} className="animate-spin" />}
         {action === "install"
           ? "正在准备安装"
-          : phase === "error" || phase === "cancelled"
+          : state.retryingWaitingInstall
             ? "重新安装"
-            : state.updateAvailable ? "更新 Anywhere" : "安装"}
+            : phase === "error" || phase === "cancelled"
+              ? "重新安装"
+              : state.updateAvailable
+                ? "更新 Anywhere"
+                : "安装"}
       </button>
     );
   if (label === "即将开放" || label === "平台暂不支持")
@@ -182,7 +197,7 @@ function UnsignedInstallNotice() {
     return null;
   const message =
     release.platform === "macos" || release.platform === "darwin"
-      ? "此安装包未签名。Mac 首次打开时，可能需要在“系统设置 → 隐私与安全”中允许打开。"
+      ? "此安装包未签名。若 macOS 阻止首次打开，客户端会尝试打开“系统设置 → 隐私与安全性”；仍需由你手动点击允许。"
       : release.platform === "windows" || release.platform === "win32"
         ? "此安装包未签名，Windows 可能提示“未知发布者”。"
         : "此安装包未签名，安装或首次打开时可能需要完成系统安全确认。";
@@ -319,7 +334,8 @@ function AnywherePage() {
           <UnsignedInstallNotice />
         </div>
         <Actions />
-        {(!state.installed || state.updateAvailable) && !state.detectionFailed && <DownloadProgress />}
+        {(!state.installed || state.updateAvailable) &&
+          !state.detectionFailed && <DownloadProgress />}
       </section>
       {state.actionError && (
         <p className="osir-anywhere-error" role="alert">

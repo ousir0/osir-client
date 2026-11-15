@@ -1,15 +1,19 @@
 //! Native-only, single-flight installer. Opening an installer is never installation evidence.
+#[path = "osir_anywhere_install_completion.rs"]
+mod completion;
 #[path = "osir_anywhere_install_io.rs"]
 mod io;
 #[path = "osir_anywhere_install_manifest.rs"]
 mod manifest;
 #[path = "osir_anywhere_install_revision.rs"]
 mod revision;
+#[cfg(target_os = "macos")]
+#[path = "osir_anywhere_install_shutdown.rs"]
+pub(crate) mod shutdown;
 #[path = "osir_anywhere_install_signature.rs"]
 mod signature;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +34,10 @@ pub struct AnywhereInstallStatus {
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
     pub error: Option<String>,
+    pub install_id: u64,
+    pub target_version: Option<String>,
+    pub target_revision: Option<u32>,
+    pub installation_complete: bool,
 }
 impl Default for AnywhereInstallStatus {
     fn default() -> Self {
@@ -38,6 +46,10 @@ impl Default for AnywhereInstallStatus {
             downloaded_bytes: 0,
             total_bytes: None,
             error: None,
+            install_id: 0,
+            target_version: None,
+            target_revision: None,
+            installation_complete: false,
         }
     }
 }
@@ -66,6 +78,7 @@ struct Inner {
     status: AnywhereInstallStatus,
     active: bool,
     cancel: Option<tokio::sync::watch::Sender<bool>>,
+    completion: Option<completion::Target>,
 }
 #[derive(Clone, Default)]
 pub struct OsirAnywhereInstaller {
@@ -83,15 +96,33 @@ impl OsirAnywhereInstaller {
     fn status(&self) -> AnywhereInstallStatus {
         self.lock().status.clone()
     }
+    fn begin(
+        &self,
+        expected_install_id: u64,
+    ) -> Result<(AnywhereInstallStatus, tokio::sync::watch::Receiver<bool>), String> {
+        let mut inner = self.lock();
+        if inner.active || inner.status.install_id != expected_install_id {
+            return Err("安装状态已改变，请重新检测后重试".into());
+        }
+        let install_id = inner.status.install_id.checked_add(1).ok_or("请重启客户端后重试")?;
+        let (send, receive) = tokio::sync::watch::channel(false);
+        inner.cancel = Some(send);
+        inner.active = true;
+        inner.completion = None;
+        inner.status = AnywhereInstallStatus {
+            phase: AnywhereInstallPhase::Downloading,
+            install_id,
+            ..Default::default()
+        };
+        Ok((inner.status.clone(), receive))
+    }
     fn progress(&self, phase: AnywhereInstallPhase, downloaded: u64, total: Option<u64>) {
         let mut inner = self.lock();
         if inner.status.phase != AnywhereInstallPhase::Cancelled {
-            inner.status = AnywhereInstallStatus {
-                phase,
-                downloaded_bytes: downloaded,
-                total_bytes: total,
-                error: None,
-            };
+            inner.status.phase = phase;
+            inner.status.downloaded_bytes = downloaded;
+            inner.status.total_bytes = total;
+            inner.status.error = None;
         }
     }
     fn finish(&self, result: Result<(), String>) {
@@ -131,6 +162,46 @@ impl OsirAnywhereInstaller {
         inner.status.phase = AnywhereInstallPhase::Opening;
         Ok(())
     }
+    async fn poll_status(&self, app: tauri::AppHandle) -> AnywhereInstallStatus {
+        let target = {
+            let inner = self.lock();
+            if inner.status.phase != AnywhereInstallPhase::WaitingInstallation
+                || inner.status.installation_complete
+            {
+                return inner.status.clone();
+            }
+            inner.completion.clone()
+        };
+        if let Some(target) = target {
+            let local = super::osir_tools::osir_anywhere_detect(app).await;
+            if local.status == "installed" && local.installed {
+                if let (Some(path), Some(version), Some(revision)) =
+                    (local.path, local.version, local.revision)
+                {
+                    if let Ok(current) = completion::marker(std::path::Path::new(&path)) {
+                        // Read the packed target between stable file markers;
+                        // never pair old metadata with a partially replaced file.
+                        if local_revision(&path, &version) == Ok(revision)
+                            && completion::marker(std::path::Path::new(&path)).as_ref()
+                                == Ok(&current)
+                            && target.confirmed(&version, revision, &current)
+                        {
+                            self.confirm_installation(target.install_id);
+                        }
+                    }
+                }
+            }
+        }
+        self.status()
+    }
+    fn confirm_installation(&self, install_id: u64) {
+        let mut inner = self.lock();
+        if inner.status.install_id == install_id
+            && inner.status.phase == AnywhereInstallPhase::WaitingInstallation
+        {
+            inner.status.installation_complete = true;
+        }
+    }
     async fn run(
         &self,
         app: tauri::AppHandle,
@@ -145,6 +216,11 @@ impl OsirAnywhereInstaller {
             release = manifest::fetch() => release?.ok_or("正式安装包尚未开放")?,
         };
         let artifact = release.select(platform, arch, &app.package_info().version.to_string())?;
+        {
+            let mut inner = self.lock();
+            inner.status.target_version = Some(release.version.clone());
+            inner.status.target_revision = Some(release.revision);
+        }
         tokio::select! {
             _ = cancel.wait_for(|cancelled| *cancelled) => return Err("下载已取消".into()),
             compatible = release.check_server() => compatible?,
@@ -164,22 +240,17 @@ impl OsirAnywhereInstaller {
             if local.path.is_none() {
                 return Err("无法确认已有应用安装路径".into());
             }
-            if !revision::needs_install(
-                installed,
-                local.revision.ok_or("无法确认已有应用修订，请先修复安装")?,
+            if revision::needs_install(
                 &release.version,
                 release.revision,
+                installed,
+                local.revision.ok_or("无法确认已有应用修订，请先修复安装")?,
             )? {
-                self.begin_opening()?;
-                super::osir_tools::osir_anywhere_launch(
-                    app.clone(),
-                    app.state::<crate::store::AppState>(),
-                )
-                .await?;
-                self.progress(AnywhereInstallPhase::Idle, 0, None);
-                return Ok(());
+                return Err("本机 Anywhere 比当前安装包更新，已阻止降级安装".into());
             }
-            // NSIS/DMG must not silently close an active conversation for an upgrade.
+            // Mac uses the targeted graceful-quit lifecycle immediately before
+            // opening the verified installer. Windows retains its existing gate.
+            #[cfg(not(target_os = "macos"))]
             if local.runtime_status != super::osir_tools::ToolRuntimeStatus::Stopped {
                 return Err("请先退出 Anywhere，再安装更新；正在进行的对话可能中断".into());
             }
@@ -206,14 +277,41 @@ impl OsirAnywhereInstaller {
         // changed cached bytes; only native-owned paths can reach this point.
         io::verify_file(&path, &artifact, &mut cancel).await?;
         self.begin_opening()?;
+        #[cfg(target_os = "macos")]
+        let _shutdown_gate = super::osir_tools::macos::prepare_anywhere_install(&app).await?;
+        // Snapshot immediately before the OS handoff. The same build already
+        // present on disk is not proof a subsequent drag-copy succeeded.
+        let before = super::osir_tools::osir_anywhere_detect(app.clone()).await;
+        if before.status == "error" {
+            return Err("无法确认安装前的 Anywhere 状态，已停止安装".into());
+        }
+        let marker = if before.installed {
+            Some(completion::marker(std::path::Path::new(
+                before.path.as_deref().ok_or("无法确认已有安装路径")?,
+            ))?)
+        } else {
+            None
+        };
+        {
+            let mut inner = self.lock();
+            inner.completion = Some(completion::Target {
+                install_id: inner.status.install_id,
+                version: release.version.clone(),
+                revision: release.revision,
+                before: marker,
+            });
+        }
+        // Recheck pinned bytes after graceful shutdown as well; shutdown must
+        // not create a new unchecked interval before opening a cached package.
+        io::verify_file(&path, &artifact, &mut cancel).await?;
         io::open_installer(&path).await?;
         self.progress(
             AnywhereInstallPhase::WaitingInstallation,
             artifact.size,
             Some(artifact.size),
         );
-        // UI polls osir_anywhere_detect. Its real version/path is the sole
-        // source of installed success; no installer exit code sets installed.
+        // UI polls install_status through waiting_installation. Native target
+        // metadata plus file replacement, never OS handoff, confirms completion.
         Ok(())
     }
 }
@@ -276,10 +374,11 @@ pub async fn osir_anywhere_release(app: tauri::AppHandle) -> AnywhereReleaseStat
 }
 
 #[tauri::command]
-pub fn osir_anywhere_install_status(
+pub async fn osir_anywhere_install_status(
+    app: tauri::AppHandle,
     state: tauri::State<'_, OsirAnywhereInstaller>,
-) -> AnywhereInstallStatus {
-    state.status()
+) -> Result<AnywhereInstallStatus, String> {
+    Ok(state.poll_status(app).await)
 }
 
 #[tauri::command]
@@ -293,20 +392,9 @@ pub fn osir_anywhere_cancel_install(
 pub fn osir_anywhere_install(
     app: tauri::AppHandle,
     state: tauri::State<'_, OsirAnywhereInstaller>,
-) -> AnywhereInstallStatus {
-    let mut inner = state.lock();
-    if inner.active {
-        return inner.status.clone();
-    }
-    let (send, receive) = tokio::sync::watch::channel(false);
-    inner.cancel = Some(send);
-    inner.active = true;
-    inner.status = AnywhereInstallStatus {
-        phase: AnywhereInstallPhase::Downloading,
-        ..Default::default()
-    };
-    let initial = inner.status.clone();
-    drop(inner);
+    expected_install_id: u64,
+) -> Result<AnywhereInstallStatus, String> {
+    let (initial, receive) = state.begin(expected_install_id)?;
     let installer = state.inner().clone();
     tauri::async_runtime::spawn(async move {
         // Ensure even an unexpected worker panic releases the single-flight gate.
@@ -317,7 +405,7 @@ pub fn osir_anywhere_install(
             .unwrap_or_else(|_| Err("安装任务中断，请重试".into()));
         installer.finish(result);
     });
-    initial
+    Ok(initial)
 }
 
 #[cfg(test)]

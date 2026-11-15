@@ -51,6 +51,8 @@ pub(super) async fn launch(app: &tauri::AppHandle) -> Result<super::osir_tools::
             }
         }
     };
+    // A successful open followed by a handoff timeout/stopped process can be a
+    // crash or transport failure. It supplies no system policy-denial evidence.
     result.map_err(|error| match error {
         TransportError::PeerUntrusted => "Anywhere 版本无法验证，请通过客户端修复安装",
         TransportError::Cancelled => "账号已改变，已取消本次 Anywhere 连接",

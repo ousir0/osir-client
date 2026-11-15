@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -9,6 +10,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "@/lib/toast";
+import { useAccountSession, type AccountSession } from "./accountApi";
 
 export const ANYWHERE_LOCAL_QUERY = ["osir-anywhere-local"] as const;
 export const ANYWHERE_INSTALL_QUERY = ["osir-anywhere-install"] as const;
@@ -44,6 +46,22 @@ export type AnywhereInstall = {
   downloadedBytes: number;
   totalBytes: number | null;
   error: string | null;
+  installId: number;
+  targetVersion: string | null;
+  targetRevision: number | null;
+  installationComplete: boolean;
+};
+
+const INSTALL_WAIT_MS = 5 * 60_000;
+type InstallIntent = {
+  version: string;
+  revision: number;
+  generation: number;
+  wasInstalled: boolean;
+  alreadySatisfied: boolean;
+  waitingSince: number | null;
+  expiresAt: number;
+  installId: number | null;
 };
 
 function useAnywhereController(desktop: boolean) {
@@ -54,7 +72,66 @@ function useAnywhereController(desktop: boolean) {
   const actionLock = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const previousInstallation = useRef<AnywhereState | null>(null);
-  const installAndConnect = useRef<{ version: string; revision: number } | null>(null);
+  const account = useAccountSession();
+  const accountSnapshot = useRef(account.data);
+  accountSnapshot.current = account.isError ? undefined : account.data;
+  const [installIntent, setInstallIntent] = useState<InstallIntent | null>(
+    null,
+  );
+  const intentRef = useRef<InstallIntent | null>(null);
+  const mounted = useRef(true);
+  const rememberIntent = useCallback((intent: InstallIntent | null) => {
+    intentRef.current = intent;
+    setInstallIntent(intent);
+  }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      intentRef.current = null;
+    };
+  }, []);
+  // Revoke synchronously on the shared session cache notification, including
+  // a switch while the install/detection IPC promise is still pending.
+  useEffect(
+    () =>
+      client.getQueryCache().subscribe((event) => {
+        if (
+          event.query.queryKey[0] !== "osir-account" ||
+          event.query.queryKey[1] !== "session"
+        )
+          return;
+        const next =
+          event.type === "removed" || event.query.state.status === "error"
+            ? undefined
+            : (event.query.state.data as AccountSession | undefined);
+        accountSnapshot.current = next;
+        const intent = intentRef.current;
+        if (
+          intent &&
+          (!next?.connected || next.generation !== intent.generation)
+        )
+          rememberIntent(null);
+      }),
+    [client, rememberIntent],
+  );
+  useEffect(() => {
+    const intent = intentRef.current;
+    if (
+      intent &&
+      (!desktop ||
+        account.isError ||
+        !account.data?.connected ||
+        account.data.generation !== intent.generation)
+    )
+      rememberIntent(null);
+  }, [
+    desktop,
+    account.isError,
+    account.data?.connected,
+    account.data?.generation,
+    rememberIntent,
+  ]);
   const local = useQuery({
     queryKey: ANYWHERE_LOCAL_QUERY,
     queryFn: () => invoke<AnywhereState>("osir_anywhere_detect"),
@@ -62,6 +139,14 @@ function useAnywhereController(desktop: boolean) {
     retry: false,
     staleTime: 15_000,
     refetchOnWindowFocus: "always",
+    refetchIntervalInBackground: true,
+    refetchInterval: (query) =>
+      installIntent?.waitingSince != null &&
+      !action &&
+      !query.state.error &&
+      Date.now() < installIntent.expiresAt
+        ? 1000
+        : false,
   });
   const installed =
     desktop &&
@@ -79,7 +164,9 @@ function useAnywhereController(desktop: boolean) {
   const release = useQuery({
     queryKey: RELEASE_QUERY,
     queryFn: () => invoke<AnywhereRelease>("osir_anywhere_release"),
-    enabled: desktop && !local.isError &&
+    enabled:
+      desktop &&
+      !local.isError &&
       ["installed", "not_installed"].includes(local.data?.status ?? ""),
     retry: false,
     staleTime: 60_000,
@@ -91,23 +178,34 @@ function useAnywhereController(desktop: boolean) {
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: false,
+    refetchIntervalInBackground: true,
     // Ready still belongs to the native worker: package verification and the
     // OS handoff continue after download. Stop only at a terminal/handoff state.
     // A failed status read needs an explicit retry before another request.
     refetchInterval: (query) =>
       !action &&
       !query.state.error &&
-      ["downloading", "ready", "opening"].includes(
+      (["downloading", "ready", "opening"].includes(
         query.state.data?.phase ?? "",
-      )
+      ) ||
+        (query.state.data?.phase === "waiting_installation" &&
+          installIntent?.waitingSince != null &&
+          Date.now() < installIntent.expiresAt))
         ? 750
         : false,
   });
   const phase = installation.data?.phase;
-  const updateAvailable = installed && release.data?.status === "ready" &&
-    !!local.data?.version && !!release.data.version &&
-    compareAnywhereBuild(release.data.version, release.data.revision ?? 0,
-      local.data.version, local.data.revision ?? 0) > 0;
+  const updateAvailable =
+    installed &&
+    release.data?.status === "ready" &&
+    !!local.data?.version &&
+    !!release.data.version &&
+    compareAnywhereBuild(
+      release.data.version,
+      release.data.revision ?? 0,
+      local.data.version,
+      local.data.revision ?? 0,
+    ) > 0;
   const previousPhase = useRef(phase);
   useEffect(() => {
     if (
@@ -136,26 +234,78 @@ function useAnywhereController(desktop: boolean) {
       setAction(null);
     }
   }
-  async function launch() {
+  async function launch(expectedIntent?: InstallIntent) {
     if (!desktop || actionLock.current || !installed || local.isFetching)
       return;
+    if (expectedIntent && intentRef.current !== expectedIntent) return;
+    // A separate explicit Open action consumes any pending automatic intent.
+    if (!expectedIntent) rememberIntent(null);
     actionLock.current = true;
     setAction("launch");
     setActionError(null);
     try {
+      if (expectedIntent) {
+        const [detected, installer] = await Promise.all([
+          local.refetch(),
+          installation.refetch(),
+        ]);
+        const session = accountSnapshot.current;
+        const current = detected.data;
+        if (!mounted.current || intentRef.current !== expectedIntent) return;
+        rememberIntent(null);
+        if (
+          !session?.connected ||
+          session.generation !== expectedIntent.generation ||
+          Date.now() >= expectedIntent.expiresAt ||
+          detected.isError ||
+          installer.isError ||
+          installer.data?.phase !== "waiting_installation" ||
+          !installer.data.installationComplete ||
+          installer.data.installId !== expectedIntent.installId ||
+          installer.data.targetVersion !== expectedIntent.version ||
+          installer.data.targetRevision !== expectedIntent.revision ||
+          current?.status !== "installed" ||
+          !current.installed ||
+          !current.path ||
+          !current.version ||
+          !validAnywhereBuild(current.version, current.revision) ||
+          compareAnywhereBuild(
+            current.version,
+            current.revision,
+            expectedIntent.version,
+            expectedIntent.revision,
+          ) !== 0
+        ) {
+          setActionError(
+            "安装尚未确认，已停止自动连接。请重新检测后点击打开。",
+          );
+          return;
+        }
+      }
       const result = await invoke<{ foreground: boolean }>(
         "osir_anywhere_launch",
       );
+      if (
+        !mounted.current ||
+        (expectedIntent &&
+          accountSnapshot.current?.generation !== expectedIntent.generation)
+      )
+        return;
       if (!result?.foreground) throw new Error("unconfirmed");
       toast.success("OSIR Anywhere 已打开，正在准备账号连接和实例。");
     } catch (error) {
       const message = typeof error === "string" ? error : "";
-      setActionError(/^(请先登录 OSIR 客户端|Anywhere |账号已改变|无法验证应用版本|无法创建本机安全连接)/.test(message)
-        && message.length < 120 ? message : "暂时无法确认应用已打开，请查看应用或重新检测后重试。");
+      setActionError(
+        /^(请先登录 OSIR 客户端|macOS (?:未能(?:打开|启动) OSIR Anywhere|系统策略拒绝打开)|Anywhere |账号已改变|无法验证应用版本|无法创建本机安全连接)/.test(
+          message,
+        ) && message.length < 120
+          ? message
+          : "暂时无法确认应用已打开，请查看应用或重新检测后重试。",
+      );
     } finally {
       await client.invalidateQueries({ queryKey: ANYWHERE_LOCAL_QUERY });
       actionLock.current = false;
-      setAction(null);
+      if (mounted.current) setAction(null);
     }
   }
   const canInstall =
@@ -169,36 +319,129 @@ function useAnywhereController(desktop: boolean) {
     !installation.isPending &&
     !installation.isError &&
     !local.isFetching &&
-    !["downloading", "ready", "opening", "waiting_installation"].includes(
-      phase ?? "",
-    );
+    !["downloading", "ready", "opening"].includes(phase ?? "") &&
+    (phase !== "waiting_installation" || !installed || updateAvailable);
   async function install() {
     if (!canInstall || actionLock.current) return;
+    const expectedInstallId = installation.data?.installId;
+    if (
+      expectedInstallId == null ||
+      !Number.isSafeInteger(expectedInstallId) ||
+      expectedInstallId < 0
+    )
+      return;
     actionLock.current = true;
     setAction("install");
     setActionError(null);
+    const session = accountSnapshot.current;
+    const targetVersion = release.data?.version;
+    const targetRevision = release.data?.revision ?? 0;
+    // Only this button grants a single, account-bound automatic connection.
+    // Baseline satisfaction is NOT proof that a same-build reinstall finished.
+    let intent: InstallIntent | null =
+      session?.connected &&
+      targetVersion &&
+      validAnywhereBuild(targetVersion, targetRevision)
+        ? {
+            version: targetVersion,
+            revision: targetRevision,
+            generation: session.generation,
+            wasInstalled: !!installed,
+            alreadySatisfied:
+              !!installed &&
+              !!local.data?.version &&
+              compareAnywhereBuild(
+                local.data.version,
+                local.data.revision ?? 0,
+                targetVersion,
+                targetRevision,
+              ) >= 0,
+            waitingSince: null,
+            expiresAt: Date.now() + 2 * INSTALL_WAIT_MS,
+            installId: null,
+          }
+        : null;
+    rememberIntent(intent);
     try {
       await client.cancelQueries({ queryKey: ANYWHERE_INSTALL_QUERY });
-      const result = await invoke<AnywhereInstall>("osir_anywhere_install");
-      if (release.data?.version && !["error", "cancelled"].includes(result.phase))
-        installAndConnect.current = { version: release.data.version, revision: release.data.revision ?? 0 };
+      const before = await local.refetch();
+      if (!mounted.current || (intent && intentRef.current !== intent)) return;
+      if (
+        before.isError ||
+        !before.data ||
+        !["installed", "not_installed"].includes(before.data.status)
+      )
+        throw new Error("unconfirmed installation");
+      const present =
+        before.data.status === "installed" && before.data.installed;
+      if (
+        present &&
+        (!before.data.version ||
+          !validAnywhereBuild(before.data.version, before.data.revision))
+      )
+        throw new Error("unconfirmed version");
+      if (
+        present &&
+        targetVersion &&
+        compareAnywhereBuild(
+          before.data.version!,
+          before.data.revision!,
+          targetVersion,
+          targetRevision,
+        ) >= 0
+      ) {
+        rememberIntent(null);
+        setActionError("已检测到当前或更新版本，请点击打开 Anywhere。");
+        return;
+      }
+      if (intent) {
+        intent = { ...intent, wasInstalled: present, alreadySatisfied: false };
+        rememberIntent(intent);
+      }
+      const result = await invoke<AnywhereInstall>("osir_anywhere_install", {
+        expectedInstallId,
+      });
+      if (!mounted.current) return;
+      if (
+        intent &&
+        intentRef.current === intent &&
+        accountSnapshot.current?.connected &&
+        accountSnapshot.current.generation === intent.generation &&
+        result.phase === "downloading" &&
+        Number.isSafeInteger(result.installId) &&
+        result.installId === expectedInstallId + 1
+      ) {
+        intent = { ...intent, installId: result.installId };
+        rememberIntent(intent);
+      } else if (intent) {
+        rememberIntent(null);
+      }
+      if (["error", "cancelled", "idle"].includes(result.phase))
+        rememberIntent(null);
       client.setQueryData(ANYWHERE_INSTALL_QUERY, result);
       if (result.phase !== "downloading")
         await client.invalidateQueries({ queryKey: ANYWHERE_LOCAL_QUERY });
     } catch {
-      installAndConnect.current = null;
+      if (!mounted.current) return;
+      rememberIntent(null);
       setActionError("安装未完成，请重新检测下载状态后重试。");
       await installation.refetch();
     } finally {
       actionLock.current = false;
-      setAction(null);
+      if (mounted.current) setAction(null);
     }
   }
   async function cancel() {
-    if (!desktop || actionLock.current || phase !== "downloading") return;
+    if (!desktop || actionLock.current) return;
+    if (phase === "waiting_installation" && intentRef.current) {
+      rememberIntent(null);
+      setActionError(null);
+      return;
+    }
+    if (phase !== "downloading") return;
     actionLock.current = true;
     setAction("cancel");
-    installAndConnect.current = null;
+    rememberIntent(null);
     setActionError(null);
     try {
       await client.cancelQueries({ queryKey: ANYWHERE_INSTALL_QUERY });
@@ -215,13 +458,107 @@ function useAnywhereController(desktop: boolean) {
     }
   }
   useEffect(() => {
-    const target = installAndConnect.current;
-    if (!target || !installed || action || local.isFetching || !local.data?.version) return;
-    if (compareAnywhereBuild(local.data.version, local.data.revision ?? 0, target.version, target.revision) >= 0) {
-      installAndConnect.current = null;
-      void launch();
+    const intent = intentRef.current;
+    if (!intent) return;
+    if (
+      local.isError ||
+      installation.isError ||
+      local.data?.status === "error" ||
+      local.data?.status === "unsupported" ||
+      phase === "cancelled" ||
+      phase === "error" ||
+      (intent.wasInstalled && local.data?.status === "not_installed") ||
+      (!action && phase === "idle")
+    ) {
+      rememberIntent(null);
+      return;
     }
-  }, [installed, action, local.isFetching, local.data]);
+    if (
+      phase === "waiting_installation" &&
+      intent.waitingSince === null &&
+      !action
+    ) {
+      rememberIntent({
+        ...intent,
+        waitingSince: Date.now(),
+        expiresAt: Date.now() + INSTALL_WAIT_MS,
+      });
+      // Refetch after handoff; a pre-existing cached installation cannot qualify.
+      void local.refetch();
+    }
+  }, [
+    phase,
+    action,
+    local.isError,
+    local.data,
+    installation.isError,
+    rememberIntent,
+  ]);
+  useEffect(() => {
+    if (!installIntent) return;
+    const timer = setTimeout(
+      () => {
+        if (intentRef.current !== installIntent) return;
+        rememberIntent(null);
+        setActionError(
+          "未能确认安装完成，已停止自动连接。完成安装后请重新检测并点击打开。",
+        );
+      },
+      Math.max(0, installIntent.expiresAt - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [installIntent, rememberIntent]);
+  useEffect(() => {
+    const intent = intentRef.current;
+    const session = accountSnapshot.current;
+    if (
+      !intent ||
+      intent.waitingSince === null ||
+      intent.alreadySatisfied ||
+      !desktop ||
+      action ||
+      actionLock.current ||
+      !session?.connected ||
+      session.generation !== intent.generation ||
+      Date.now() >= intent.expiresAt ||
+      phase !== "waiting_installation" ||
+      !installation.data?.installationComplete ||
+      installation.data.installId !== intent.installId ||
+      installation.data.targetVersion !== intent.version ||
+      installation.data.targetRevision !== intent.revision ||
+      installation.isError ||
+      local.isFetching ||
+      !installed ||
+      local.dataUpdatedAt < intent.waitingSince ||
+      !local.data?.version ||
+      !local.data.path ||
+      !validAnywhereBuild(local.data.version, local.data.revision)
+    )
+      return;
+    // Exact target identity, not >=: an unrelated later/manual installation
+    // must not inherit this button's connection authorization.
+    if (
+      compareAnywhereBuild(
+        local.data.version,
+        local.data.revision!,
+        intent.version,
+        intent.revision,
+      ) === 0
+    ) {
+      void launch(intent);
+    }
+  }, [
+    installIntent,
+    desktop,
+    phase,
+    action,
+    installed,
+    local.isFetching,
+    local.data,
+    local.dataUpdatedAt,
+    installation.isError,
+    installation.data,
+  ]);
   const detectionFailed = local.isError || local.data?.status === "error";
   let label = "检测中";
   let description = "正在检查本机安装状态…";
@@ -231,10 +568,6 @@ function useAnywhereController(desktop: boolean) {
   } else if (detectionFailed) {
     label = "检测异常";
     description = "本机检测失败，请重新检测。";
-  } else if (installed) {
-    label = updateAvailable ? "有修订更新" : local.data?.runtimeStatus === "running" ? "运行中" : "已安装";
-    description = updateAvailable ? "更新 Anywhere 后，使用当前账号和已配置模型直接连接。"
-      : "打开后使用当前 OSIR 账号连接本机，自动添加已配置的工具实例。";
   } else if (local.data?.status === "unsupported") {
     label = "平台暂不支持";
     description = "当前系统暂不支持安装 OSIR Anywhere。";
@@ -248,14 +581,31 @@ function useAnywhereController(desktop: boolean) {
     description = "正在下载安装包，完成后将打开安装器。";
   } else if (phase === "opening") {
     label = "正在打开安装器";
-    description = "请完成系统确认；安装后点击重新检测。";
-  } else if (phase === "waiting_installation") {
+    description = installIntent
+      ? "请完成系统确认，安装完成后将自动检测并打开。"
+      : "请完成系统确认，安装后重新检测并点击打开。";
+  } else if (
+    phase === "waiting_installation" &&
+    (!installed || installIntent)
+  ) {
     label = "等待安装完成";
-    description =
-      "请在安装器中完成安装；macOS 请将应用拖入 Applications，然后重新检测。";
+    description = installIntent
+      ? "请完成安装；macOS 请拖入 Applications。确认安装完成后将自动打开并连接。"
+      : installed
+        ? "正在确认本次安装结果。"
+        : "当前未检测到已安装的 Anywhere，可重新下载安装包继续安装。";
   } else if (phase === "ready") {
     label = "正在准备安装";
     description = "下载已完成，正在检查安装包，随后将打开安装器。";
+  } else if (installed) {
+    label = updateAvailable
+      ? "有修订更新"
+      : local.data?.runtimeStatus === "running"
+        ? "运行中"
+        : "已安装";
+    description = updateAvailable
+      ? "更新 Anywhere 后，使用当前账号和已配置模型直接连接。"
+      : "打开后使用当前 OSIR 账号连接本机，自动添加已配置的工具实例。";
   } else if (
     local.data?.status === "not_installed" &&
     !release.isPending &&
@@ -294,16 +644,38 @@ function useAnywhereController(desktop: boolean) {
     action,
     actionError,
     canInstall,
+    autoConnectPending: !!installIntent,
     redetect,
     launch,
     install,
     cancel,
+    retryingWaitingInstall: phase === "waiting_installation" && !installed,
   };
 }
 
-function compareAnywhereBuild(left: string, leftRevision: number, right: string, rightRevision: number): number {
-  const parts = (value: string) => /^\d+\.\d+\.\d+$/.test(value) ? value.split(".").map(Number) : null;
-  const a = parts(left), b = parts(right);
+function validAnywhereBuild(
+  version: string,
+  revision: number | null | undefined,
+): revision is number {
+  return (
+    /^\d+\.\d+\.\d+$/.test(version) &&
+    Number.isInteger(revision) &&
+    revision != null &&
+    revision >= 0 &&
+    revision <= 65535
+  );
+}
+
+function compareAnywhereBuild(
+  left: string,
+  leftRevision: number,
+  right: string,
+  rightRevision: number,
+): number {
+  const parts = (value: string) =>
+    /^\d+\.\d+\.\d+$/.test(value) ? value.split(".").map(Number) : null;
+  const a = parts(left),
+    b = parts(right);
   if (!a || !b) return 0;
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
   return leftRevision - rightRevision;
