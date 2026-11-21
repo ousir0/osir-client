@@ -58,6 +58,7 @@ mod tray_panel;
 mod update_distribution;
 mod usage_events;
 mod usage_script;
+mod window_fit;
 
 pub use app_config::{AppType, InstalledSkill, McpApps, McpServer, MultiAppConfig, SkillApps};
 pub use codex_config::{
@@ -324,6 +325,7 @@ fn handle_deeplink_url(
                 let _ = window.set_skip_taskbar(false);
             }
             let _ = window.unminimize();
+            fit_main_window(app, &window);
             let _ = window.show();
             let _ = window.set_focus();
             #[cfg(target_os = "linux")]
@@ -1568,7 +1570,10 @@ pub fn run() {
                 } else {
                     // 正常启动模式：显示窗口
                     #[cfg(not(target_os = "windows"))]
-                    let _ = window.show();
+                    {
+                        fit_main_window(app.handle(), &window);
+                        let _ = window.show();
+                    }
                     #[cfg(target_os = "windows")]
                     log::info!("正常启动模式：等待主页面加载完成后显示主窗口");
                     #[cfg(not(target_os = "windows"))]
@@ -2503,6 +2508,12 @@ fn classify_exit_request(code: Option<i32>) -> ExitRequestAction {
 // ============================================================
 // 在应用主动退出前显式持久化窗口状态
 // ============================================================
+
+pub(crate) fn fit_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    if let Some(config) = app.config().app.windows.iter().find(|w| w.label == "main") {
+        window_fit::fit_to_work_area(window, config);
+    }
+}
 
 fn window_state_flags() -> StateFlags {
     StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED

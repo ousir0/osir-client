@@ -10,6 +10,7 @@ use crate::live::patch::{Guarded, WholeFile};
 use crate::live::patch::{KeyPath, LivePatch};
 use crate::mode::operation::{AppWrite, FileChange};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize)]
@@ -28,8 +29,11 @@ struct Record {
     applying: bool,
     files: Vec<File>,
 }
+pub(crate) const RESTORE_CONFLICT: &str =
+    "配置已变更或缺少恢复记录，现有配置未被覆盖。请检查工具配置后重试。";
+
 fn failure() -> String {
-    "原配置恢复记录缺失或配置已变化，未覆盖现有配置".into()
+    RESTORE_CONFLICT.into()
 }
 fn paths(app: &AppType) -> Vec<PathBuf> {
     match app {
@@ -83,7 +87,7 @@ pub(super) fn has_record(app: &AppType) -> Result<bool, String> {
     let Some(record) = read(app)? else {
         return Ok(false);
     };
-    if record.applying || !matches(&record)? {
+    if record.applying || !matches(app, &record)? {
         return Err(failure());
     }
     Ok(record.active)
@@ -318,10 +322,55 @@ pub(super) fn direct_read_only(
     .transpose()
     .map(Option::flatten)
 }
-fn matches(record: &Record) -> Result<bool, String> {
+fn preserves_codex_auth(app: &AppType, record: &Record, file: &File) -> bool {
+    *app == AppType::Codex
+        && record.official_login
+        && file.path == crate::codex_config::get_codex_auth_path()
+        && file.before.is_some()
+        && engine::digest(file.before.as_deref()) == file.expected
+}
+
+fn is_same_codex_login(before: &[u8], current: &[u8]) -> Option<bool> {
+    fn refresh_invariant(bytes: &[u8]) -> Option<(String, Value)> {
+        let mut auth: Value = serde_json::from_slice(bytes).ok()?;
+        if auth.get("auth_mode")?.as_str()? != "chatgpt"
+            || auth.get("OPENAI_API_KEY").is_some_and(|key| !key.is_null())
+        {
+            return None;
+        }
+        let subject = crate::codex_config::extract_codex_auth_user_identity(&auth)?;
+        let auth_object = auth.as_object_mut()?;
+        if let Some(last_refresh) = auth_object.remove("last_refresh") {
+            chrono::DateTime::parse_from_rfc3339(last_refresh.as_str()?).ok()?;
+        }
+        let tokens = auth_object.get_mut("tokens")?.as_object_mut()?;
+        tokens
+            .get("account_id")?
+            .as_str()
+            .filter(|id| !id.is_empty())?;
+        for field in ["access_token", "id_token", "refresh_token"] {
+            let token = tokens.remove(field)?;
+            token.as_str().filter(|value| !value.is_empty())?;
+        }
+        Some((subject, auth))
+    }
+    Some(refresh_invariant(before)? == refresh_invariant(current)?)
+}
+
+fn matches(app: &AppType, record: &Record) -> Result<bool, String> {
     record.files.iter().try_fold(true, |ok, file| {
         let bytes = engine::read_current(&file.path).map_err(|_| failure())?;
-        Ok(ok && engine::digest(bytes.as_deref()) == file.expected)
+        let exact = engine::digest(bytes.as_deref()) == file.expected;
+        // Codex can rotate its own official credentials while attached. Only
+        // accept a refresh on a file we left untouched; no write gains ownership.
+        let refresh =
+            || {
+                preserves_codex_auth(app, record, file)
+                    && file.before.as_deref().zip(bytes.as_deref()).is_some_and(
+                        |(before, current)| is_same_codex_login(before, current) == Some(true),
+                    )
+            };
+        Ok(ok && (exact || refresh()))
     })
 }
 
@@ -369,7 +418,7 @@ pub(crate) fn transaction(
         }
         None => return Ok(None),
     };
-    if record.applying || !matches(&record).map_err(|_| fail())? {
+    if record.applying || !matches(&app, &record).map_err(|_| fail())? {
         return Err(fail());
     }
     let restoring = target.extra.get("nativeRestore").and_then(|v| v.as_bool()) == Some(true);
@@ -487,7 +536,7 @@ pub(super) fn view(
     let Some(record) = read(app)? else {
         return Ok(None);
     };
-    let valid = !record.applying && matches(&record)?;
+    let valid = !record.applying && matches(app, &record)?;
     let available = record.files.iter().any(|f| f.before.is_some());
     Ok(Some(ConnectionModeView {
         mode: if !valid {
@@ -543,15 +592,19 @@ pub(super) fn restore_to(
     let Some(record) = read(app)? else {
         return Ok(false);
     };
-    if !matches(&record)? {
+    if record.applying || !matches(app, &record)? {
         return Err(failure());
     }
     // Missing originals are not a license to turn an empty file into a login.
     if !record.files.iter().any(|f| f.before.is_some()) {
         return Err(failure());
     }
-    let patches: Vec<_> = record
+    let files: Vec<_> = record
         .files
+        .iter()
+        .filter(|file| !preserves_codex_auth(app, &record, file))
+        .collect();
+    let patches: Vec<_> = files
         .iter()
         .map(|file| Guarded {
             expected_pre: file.expected.clone(),
@@ -561,9 +614,8 @@ pub(super) fn restore_to(
             },
         })
         .collect();
-    let changes: Vec<_> = record
-        .files
-        .iter()
+    let changes: Vec<_> = files
+        .into_iter()
         .zip(&patches)
         .map(|(file, patch)| FileChange {
             file: LiveFile::private(&file.path),

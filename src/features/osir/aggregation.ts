@@ -1,5 +1,6 @@
 import { proxyApi } from "@/lib/api";
 import type { Provider } from "@/types";
+import type { ProxyStack } from "@/types/proxy";
 import { modelNames, simpleEditable } from "./providerConfig";
 
 const preferenceKey = "osir.codex.aggregation.enabled";
@@ -25,6 +26,24 @@ export function aggregationCandidates(providers: Provider[]) {
   );
 }
 
+export function hasActiveAggregationMembers(
+  stack: ProxyStack | undefined,
+  providers: Provider[],
+) {
+  if (
+    !stack?.active ||
+    !stack.members.length ||
+    !aggregationCatalogAvailable(stack)
+  )
+    return false;
+  const ids = new Set(stack.members.map((member) => member.providerId));
+  return providers.every((provider) => ids.has(provider.id));
+}
+
+export function aggregationCatalogAvailable(stack: ProxyStack | undefined) {
+  return !!stack && (!stack.notice || stack.notice === "officialModelsBundled");
+}
+
 // Only call after an explicit save or toggle. Native operations own their
 // recovery journal; do not overwrite it with speculative compensating writes.
 export async function applyAggregation(providers: Provider[]) {
@@ -34,7 +53,7 @@ export async function applyAggregation(providers: Provider[]) {
   for (const provider of candidates) {
     await proxyApi.setProxyStackMember("codex", provider.id, true);
   }
-  if (before.mode !== "stack") {
+  if (before.mode !== "stack" || !before.attached) {
     // The native enable transaction commits the explicit default route too.
     await proxyApi.setProxyTakeoverForApp(
       "codex",
@@ -45,7 +64,14 @@ export async function applyAggregation(providers: Provider[]) {
     );
   }
   const after = await proxyApi.getAppMode("codex");
-  if (after.mode !== "stack" || !after.attached) {
+  if (
+    after.mode !== "stack" ||
+    !after.attached ||
+    !hasActiveAggregationMembers(
+      await proxyApi.getProxyStack("codex"),
+      candidates,
+    )
+  ) {
     throw new Error("聚合尚未确认生效，请刷新状态后重试。");
   }
   return true;

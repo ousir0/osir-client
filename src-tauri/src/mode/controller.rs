@@ -4666,6 +4666,61 @@ mod mode_tests {
 
     #[tokio::test]
     #[serial]
+    async fn u1_native_restore_keeps_codex_login_refresh_during_provider_edit() {
+        let _home = Home::new();
+        let official = codex_official();
+        let mut api = codex_row("manual", "https://fixture.invalid/v1", "");
+        let original = "# original fixture\n";
+        let mut auth = chatgpt_login("shared-workspace");
+        auth["tokens"]["id_token"] = json!(crate::codex_config::test_codex_id_token("native-user"));
+        seed_codex(original, Some(&auth));
+        let state = state_with(
+            AppType::Codex,
+            &[official.clone(), api.clone()],
+            &official.id,
+        )
+        .await;
+        set_connection_mode(&state, &AppType::Codex, "api_key", Some(&api.id), false)
+            .await
+            .unwrap();
+        let before = fs::read(codex_auth_path()).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&before).unwrap(), auth);
+        auth["tokens"]["access_token"] = json!("new-fixture-access");
+        auth["tokens"]["refresh_token"] = json!("new-fixture-refresh");
+        auth["last_refresh"] = json!("2026-09-02T00:00:00Z");
+        let refreshed = serde_json::to_vec_pretty(&auth).unwrap();
+
+        let mut other_login = auth.clone();
+        other_login["tokens"]["id_token"] =
+            json!(crate::codex_config::test_codex_id_token("other-user"));
+        let other_bytes = serde_json::to_vec(&other_login).unwrap();
+        fs::write(codex_auth_path(), &other_bytes).unwrap();
+        api.settings_config["modelCatalog"] =
+            json!({ "models": [{ "model": "gpt-5.4" }, { "model": "gpt-5.5" }] });
+        assert!(ProviderService::update(&state, AppType::Codex, None, api.clone()).is_err());
+        assert_eq!(fs::read(codex_auth_path()).unwrap(), other_bytes);
+        assert!(state
+            .db
+            .get_provider_by_id(&api.id, "codex")
+            .unwrap()
+            .unwrap()
+            .settings_config
+            .get("modelCatalog")
+            .is_none());
+
+        fs::write(codex_auth_path(), &refreshed).unwrap();
+        ProviderService::update(&state, AppType::Codex, None, api).unwrap();
+        assert_eq!(codex_catalog()["models"].as_array().unwrap().len(), 2);
+        let restored = set_connection_mode(&state, &AppType::Codex, "native", None, false)
+            .await
+            .unwrap();
+        assert_eq!(restored.mode, "native");
+        assert_eq!(fs::read(codex_auth_path()).unwrap(), refreshed);
+        assert_eq!(codex_text(), original);
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn u1_legacy_managed_switch_does_not_capture_api_as_native() {
         let _home = Home::new();
         let grant = osir_claude_grant();

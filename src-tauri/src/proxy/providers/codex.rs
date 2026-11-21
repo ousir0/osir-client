@@ -243,8 +243,7 @@ fn provider_is_xai_native_responses(provider: &Provider) -> bool {
     }
 
     extract_codex_base_url_from_toml(config_text)
-        .map(|url| url.to_ascii_lowercase())
-        .is_some_and(|url| url.contains("api.x.ai"))
+        .is_some_and(|url| crate::codex_config::codex_url_host(&url) == "api.x.ai")
 }
 
 /// 原生 Responses 透传的响应要不要补迟到的函数调用参数（见 `responses_late_arguments`）：
@@ -2530,15 +2529,22 @@ wire_api = "responses"
         }));
         assert!(provider_needs_responses_namespace_flatten(&grok_key));
 
-        // A non-xAI Responses provider must not be flattened.
-        let other = create_provider(json!({
-            "auth": { "OPENAI_API_KEY": "sk-x" },
-            "config": r#"
+        for url in [
+            "https://api.deepseek.com",
+            "https://api.x.ai.example.com/v1",
+            "https://notapi.x.ai/v1",
+            "https://example.com/api.x.ai/v1",
+            "example.com/?next=https://api.x.ai/v1",
+        ] {
+            let other = create_provider(json!({
+                "auth": { "OPENAI_API_KEY": "sk-x" },
+                "config": format!(r#"
 [model_providers.custom]
-base_url = "https://api.deepseek.com"
+base_url = "{url}"
 wire_api = "responses"
-"#
-        }));
-        assert!(!provider_needs_responses_namespace_flatten(&other));
+"#)
+            }));
+            assert!(!provider_needs_responses_namespace_flatten(&other), "{url}");
+        }
     }
 }

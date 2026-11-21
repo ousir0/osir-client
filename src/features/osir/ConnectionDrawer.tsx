@@ -201,10 +201,6 @@ export function ConnectionDrawer({
     if (pending.current || loadingBase || baseError) return;
     reportBusy(true);
     setError("");
-    if (tool === "gemini") {
-      setModels([]);
-      setDraft((current) => ({ ...current, model: "" }));
-    }
     try {
       if (preview)
         throw new Error("浏览器预览不连接真实服务。请在桌面客户端获取模型。");
@@ -249,18 +245,17 @@ export function ConnectionDrawer({
             .filter(Boolean),
         ),
       ];
-      setModels(modelIds);
-      if (modelIds.length)
-        setDraft((current) => ({
-          ...current,
-          model: defaultConnectionModel(tool, modelIds, current.model),
-        }));
-      if (!modelIds.length)
+      if (!modelIds.length) {
         setError(
           tool === "gemini"
             ? "服务未返回可用模型，请检查密钥、分组权限和服务地址后重试。"
             : "服务未返回可用模型，请检查分组权限或填写准确的模型 ID。",
         );
+        return;
+      }
+      setModels(modelIds);
+      const model = defaultConnectionModel(tool, modelIds, draft.model);
+      if (model !== draft.model) set("model", model);
     } catch (e) {
       setError(connectionError(e, [draft.apiKey, draft.apiKey.trim()]));
     } finally {

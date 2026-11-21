@@ -4,5 +4,5 @@
   "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMzkyQUZBNzAwQ0VEQzcKUldUSDdReHcraW81anhGajdiVzVzMnBaRXFsdUx6bHJhNjFDWVprckFYR0JRRkVBUm5EWGlUSW0K",
   "endpoint": "https://osirclaw.com/api/v1/osir-client/updater/prod.json",
   "downloadBaseUrl": "https://osirclaw.com/client-release/",
-  "notes": "改进 Anywhere 首次打开后的自动连接。\n修复 Codex 既有项目和会话无法显示。\n修复原生生图设置重启后不可用，支持账户密钥和自定义接口的默认生图模型。"
+  "notes": "修复 Codex 官方登录刷新后无法恢复原配置或保存连接的问题。\n获取不到模型时保留已有选择。模型保存后若尚未接入聚合，可以直接重试接入。\n修复部分 Codex 模型手动选择的思考等级未生效，以及部分自定义接口地址被误判为 xAI 的问题。\n修复 Codex 通过 AWS Bedrock 使用 Claude 时，部分带工具的请求被拒绝的问题。\n修复记住的窗口尺寸异常时，重新打开只显示一条白条的问题。"
 }

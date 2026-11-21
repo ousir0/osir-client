@@ -114,6 +114,12 @@ function ModelSelectionDraft({
             .filter(Boolean),
         ),
       ];
+      if (!ids.length) {
+        setError(
+          "服务未返回模型，已保留上次的模型列表。请检查密钥的分组权限。",
+        );
+        return;
+      }
       setVerified(ids);
       setAvailable(
         [...new Set([...selected, ...ids])].filter(
@@ -123,7 +129,6 @@ function ModelSelectionDraft({
       availableBeforeEdits.current = [
         ...new Set([...saved.current.selected, ...ids]),
       ];
-      if (!ids.length) setError("服务未返回模型，请检查密钥的分组权限。");
     } catch {
       if (mounted.current)
         setError(

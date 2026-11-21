@@ -2957,6 +2957,7 @@ pub fn show_main_window(app: &tauri::AppHandle) {
             let _ = window.set_skip_taskbar(false);
         }
         let _ = window.unminimize();
+        crate::fit_main_window(app, &window);
         let _ = window.show();
         let _ = window.set_focus();
         #[cfg(target_os = "linux")]

@@ -465,9 +465,7 @@ fn chat_tool_to_anthropic_tool(chat_tool: &Value) -> Option<Value> {
     if let Some(description) = function.get("description").and_then(|value| value.as_str()) {
         tool["description"] = json!(description);
     }
-    if let Some(strict) = function.get("strict").and_then(|value| value.as_bool()) {
-        tool["strict"] = json!(strict);
-    }
+    // Bedrock rejects the OpenAI-specific `strict` flag on tool definitions.
     Some(tool)
 }
 
@@ -1732,6 +1730,27 @@ mod tests {
         assert_eq!(tools[0]["input_schema"]["type"], "object");
         assert!(tools[0].get("parameters").is_none());
         assert_eq!(tools[1]["name"], "apply_patch");
+    }
+
+    #[test]
+    fn test_request_tools_do_not_forward_openai_strict_flag() {
+        for strict in [true, false] {
+            let input = json!({
+                "model": "claude",
+                "input": [{ "role": "user", "content": "hi" }],
+                "tools": [{
+                    "type": "function",
+                    "name": "get_weather",
+                    "parameters": {"type": "object"},
+                    "strict": strict
+                }]
+            });
+            let result = responses_request_to_anthropic(input, 4096).unwrap();
+            let tool = &result["tools"][0];
+            assert_eq!(tool["name"], "get_weather");
+            assert_eq!(tool["input_schema"]["type"], "object");
+            assert!(tool.get("strict").is_none());
+        }
     }
 
     #[test]

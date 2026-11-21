@@ -190,7 +190,12 @@ pub async fn update_provider(
                 AppError::InvalidInput(_) => {
                     "连接设置已变化或包含不支持的值，请刷新后重试。".to_string()
                 }
-                _ => MANAGED_UNAVAILABLE.to_string(),
+                AppError::Message(message)
+                    if message == crate::mode::controller::native_restore::RESTORE_CONFLICT =>
+                {
+                    message
+                }
+                _ => "暂时无法保存连接设置，请检查工具配置或刷新后重试。".to_string(),
             });
         }
         ProviderService::update_from_editor(

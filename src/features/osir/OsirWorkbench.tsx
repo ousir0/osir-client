@@ -42,6 +42,9 @@ import { Switch } from "@/components/ui/switch";
 import { SupportedToolIcon } from "./SupportedToolIcon";
 import {
   aggregationIntent,
+  aggregationCandidates,
+  aggregationCatalogAvailable,
+  hasActiveAggregationMembers,
   saveAggregationIntent,
   applyAggregation,
   syncSavedAggregation,
@@ -364,15 +367,47 @@ function OsirWorkbenchContent() {
       : currentId;
   const aggregateActive =
     tool === "codex" && mode.data?.mode === "stack" && !!mode.data.attached;
+  const stackMemberIds = new Set(
+    stack.data?.members.map((member) => member.providerId) ?? [],
+  );
+  const aggregationReadsFailed =
+    mode.isError ||
+    stack.isError ||
+    connectionMode.isError ||
+    providers.isError;
+  const aggregationReadsPending =
+    mode.isPending ||
+    stack.isPending ||
+    connectionMode.isPending ||
+    providers.isPending;
+  const aggregateStateConfirmed =
+    aggregateActive &&
+    connectionSource === "api_key" &&
+    !aggregationReadsFailed &&
+    stack.data?.active === true;
+  const aggregateConfirmed =
+    aggregateStateConfirmed &&
+    hasActiveAggregationMembers(stack.data, aggregationCandidates(rows));
+  const canRetryAggregation =
+    desktop &&
+    aggregationEnabled &&
+    !aggregateConfirmed &&
+    !aggregationReadsFailed &&
+    !aggregationReadsPending &&
+    connectionSource === "api_key" &&
+    aggregationCandidates(rows).length > 0;
   const providerInUse = (provider: Provider) =>
     !!connectionSource &&
     !current.isError &&
     !(tool === "codex" && (mode.isError || stack.isError)) &&
     !(tool === "opencode" && openCodeDefault.isError) &&
     (aggregateActive
-      ? !!stack.data?.members.some(
-          (member) => member.providerId === provider.id,
-        )
+      ? aggregateStateConfirmed &&
+        stackMemberIds.has(provider.id) &&
+        (aggregationCatalogAvailable(stack.data) ||
+          stack.data?.members.some(
+            (member) => member.providerId === provider.id && member.route,
+          ))
       : provider.id === activeId);
   const go = (p: Page, groupId?: number) => {
     if (busy || drawer || managementBlocked || p === page) return;
@@ -1263,8 +1298,20 @@ function OsirWorkbenchContent() {
                                       ) : null;
                                     })()}
                                   </div>
-                                  {providerInUse(p) ? (
+                                  {aggregateActive &&
+                                  !aggregateStateConfirmed ? (
+                                    <span className="osir-badge">
+                                      {aggregationReadsPending
+                                        ? "正在核对"
+                                        : "待核对"}
+                                    </span>
+                                  ) : aggregateActive &&
+                                    !stackMemberIds.has(p.id) ? (
+                                    <span className="osir-badge">未接入</span>
+                                  ) : providerInUse(p) ? (
                                     <span className="osir-badge">使用中</span>
+                                  ) : aggregateActive && stack.data?.notice ? (
+                                    <span className="osir-badge">待接入</span>
                                   ) : !aggregateActive ? (
                                     <button
                                       disabled={busy}
@@ -1407,6 +1454,9 @@ function OsirWorkbenchContent() {
                                               await providersApi.update(
                                                 next,
                                                 tool,
+                                                undefined,
+                                                undefined,
+                                                p,
                                               );
                                             if (!confirmed)
                                               throw new Error(
@@ -1414,13 +1464,12 @@ function OsirWorkbenchContent() {
                                               );
                                             try {
                                               await syncSavedAggregation(next);
-                                            } catch (e) {
-                                              throw new Error(
-                                                "模型已保存，聚合未完成：" +
-                                                  connectionError(e),
+                                            } catch {
+                                              toast.warning(
+                                                "模型选择已保存，但未能确认已接入聚合。请刷新检查连接状态后重试。",
                                               );
                                             }
-                                          }, "模型选择已保存，请重启 Codex 读取新目录。");
+                                          }, "模型选择已保存。");
                                           if (!ok) throw new Error("保存失败");
                                         }}
                                       />
@@ -1532,22 +1581,37 @@ function OsirWorkbenchContent() {
                               <p role="status">
                                 {!desktop
                                   ? "仅预览"
-                                  : mode.isError
+                                  : aggregationReadsFailed
                                     ? "状态读取失败，请刷新"
-                                    : mode.isPending
+                                    : aggregationReadsPending
                                       ? "正在读取状态"
-                                      : mode.data?.mode === "stack" &&
-                                          mode.data.attached
-                                        ? aggregationEnabled
-                                          ? "已生效"
-                                          : "仍在生效，关闭未完成，请重试"
-                                        : aggregationEnabled
-                                          ? rows.length
-                                            ? "尚未生效，保存连接后接入"
-                                            : "待添加连接"
-                                          : "已关闭"}
+                                      : aggregateActive && !aggregateConfirmed
+                                        ? "尚未确认全部模型已接入"
+                                        : aggregateConfirmed
+                                          ? aggregationEnabled
+                                            ? "已生效"
+                                            : "仍在生效，关闭未完成，请重试"
+                                          : aggregationEnabled
+                                            ? rows.length
+                                              ? "尚未生效"
+                                              : "待添加连接"
+                                            : "已关闭"}
                               </p>
                             </div>
+                            {canRetryAggregation && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  void action(
+                                    () => applyAggregation(rows),
+                                    "聚合已生效，请重新启动 Codex。",
+                                  )
+                                }
+                              >
+                                重试接入
+                              </button>
+                            )}
                             <Switch
                               aria-labelledby="osir-aggregation-label"
                               checked={aggregationEnabled}

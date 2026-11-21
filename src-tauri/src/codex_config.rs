@@ -97,6 +97,12 @@ pub(crate) fn codex_url_host(url_or_host: &str) -> String {
     let trimmed = url_or_host.trim();
     let rest = trimmed
         .split_once("://")
+        .filter(|(scheme, _)| {
+            !scheme.is_empty()
+                && scheme
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+        })
         .map_or(trimmed, |(_scheme, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     let host_port = authority.rsplit('@').next().unwrap_or(authority);
@@ -2341,6 +2347,15 @@ fn is_codex_official_mirror(entry: &Value, model: &str, official: &Value) -> boo
         CodexCatalogToolProfile::NativeResponses,
         None,
     );
+    if entry
+        .pointer("/model_messages/instructions_template")
+        .is_none()
+        && ["base_instructions", "apply_patch_tool_type"]
+            .iter()
+            .any(|key| entry.get(*key) != expected.get(*key))
+    {
+        return false;
+    }
     [
         "display_name",
         "input_modalities",
@@ -2410,15 +2425,23 @@ fn codex_catalog_from_specs_for_row(
         .enumerate()
         .map(|(index, spec)| {
             let mut entry = match find_codex_official_model(&spec.model, &official) {
-                Some(found) => codex_official_model_entry(
-                    found,
-                    &spec.model,
-                    index,
-                    profile,
-                    // Match Codex's global override and Stack's sink_row_windows:
-                    // a provider-wide window takes precedence over a model's.
-                    configured_context_window.or(spec.context_window),
-                ),
+                Some(found) => {
+                    let mut entry = codex_official_model_entry(
+                        found,
+                        &spec.model,
+                        index,
+                        profile,
+                        configured_context_window.or(spec.context_window),
+                    );
+                    if let Some(obj) = entry.as_object_mut() {
+                        apply_codex_reasoning_level_override(
+                            obj,
+                            found.get("default_reasoning_level").and_then(Value::as_str),
+                            spec,
+                        );
+                    }
+                    entry
+                }
                 None => codex_catalog_model_entry(
                     &template,
                     spec,
@@ -3111,6 +3134,15 @@ pub(crate) fn resolve_cc_switch_catalog_path(
 /// Pure reverse-parsing core: convert Codex catalog JSON text back into the
 /// frontend's simplified model-mapping shape. Returns `None` when the catalog
 /// is unparseable, has no `models` array, or yields zero valid entries.
+fn catalog_reasoning_efforts(row: &Value) -> Vec<&str> {
+    row.get("supported_reasoning_levels")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|level| level.get("effort").and_then(Value::as_str))
+        .collect()
+}
+
 fn build_simplified_catalog_from_texts(config_text: &str, catalog_text: &str) -> Option<Value> {
     let catalog: Value = serde_json::from_str(catalog_text).ok()?;
     let models = catalog.get("models").and_then(|m| m.as_array())?;
@@ -3136,13 +3168,11 @@ fn build_simplified_catalog_from_texts(config_text: &str, catalog_text: &str) ->
         ) {
             continue;
         }
-        // 官方镜像只还原模型名和显式窗口，不能把官方能力当成用户填的存回库里。通用模板没有
-        // `model_messages`（走 Anthropic 的行不照搬）；旧版 ProxyChat 克隆的 gpt-5.5 模板
-        // 有，但带着用户填的显示名、窗口，下面逐项比对不上，照旧还原。
+        // Recover explicit overrides without persisting inherited official defaults.
         if entry
-            .get("model_messages")
-            .and_then(|messages| messages.get("instructions_template"))
+            .pointer("/model_messages/instructions_template")
             .is_some()
+            || entry.get("base_instructions").is_some_and(Value::is_string)
         {
             let official = official.get_or_insert_with(codex_openai_official_models);
             if let Some(found) = find_codex_official_model(model, official)
@@ -3158,6 +3188,17 @@ fn build_simplified_catalog_from_texts(config_text: &str, catalog_text: &str) ->
                     .filter(|window| *window > 0 && Some(*window) != fallback_window)
                 {
                     restored["contextWindow"] = json!(window);
+                }
+                let efforts = catalog_reasoning_efforts(entry);
+                let default = entry.get("default_reasoning_level");
+                if !efforts.is_empty()
+                    && (efforts != catalog_reasoning_efforts(found)
+                        || default != found.get("default_reasoning_level"))
+                {
+                    restored["reasoningLevels"] = json!(efforts);
+                    if let Some(default) = default.and_then(Value::as_str) {
+                        restored["defaultReasoningLevel"] = json!(default);
+                    }
                 }
                 entries.push(restored);
                 continue;
@@ -5338,6 +5379,7 @@ wire_api = "responses"
             "https://notbigmodel.cn/v1",
             "https://example.com/z.ai/v1",
             "https://example.com/?next=https://api.z.ai",
+            "example.com/?next=https://api.z.ai",
             "",
         ] {
             assert!(!codex_url_host_matches_any(url, hosts), "{url}");
@@ -5580,7 +5622,7 @@ wire_api = "responses"
             catalog_for(
                 json!([
                     // 提示词、工具和思考档位保持官方值；未填窗口时也保留官方默认。
-                    { "model": "gpt-6-sol", "reasoningLevels": ["none"] },
+                    { "model": "gpt-6-sol" },
                     { "model": "glm-5" }
                 ]),
                 "",
@@ -5619,6 +5661,34 @@ wire_api = "responses"
         assert!(glm.get("model_messages").is_none());
         assert!(glm.get("apply_patch_tool_type").is_none());
         assert_eq!(glm["shell_type"], "shell_command");
+    }
+
+    #[test]
+    fn mirrored_gpt_reasoning_overrides_survive_catalog_round_trip() {
+        with_official_models(official_gpt_rows(), || {
+            for profile in [
+                CodexCatalogToolProfile::NativeResponses,
+                CodexCatalogToolProfile::ProxyChat,
+            ] {
+                let spec = json!({
+                    "model": "gpt-6-sol",
+                    "reasoningLevels": ["none", "max"],
+                    "defaultReasoningLevel": "max"
+                });
+                let mut models = catalog_for(json!([spec]), "", profile);
+                assert_eq!(catalog_reasoning_efforts(&models[0]), ["none", "max"]);
+                assert_eq!(models[0]["default_reasoning_level"], "max");
+                assert_eq!(models[0]["apply_patch_tool_type"], "freeform");
+                for legacy in [false, true] {
+                    if legacy {
+                        models[0].as_object_mut().unwrap().remove("model_messages");
+                    }
+                    let catalog = json!({ "models": models }).to_string();
+                    let restored = build_simplified_catalog_from_texts("", &catalog).unwrap();
+                    assert_eq!(restored["models"][0], spec);
+                }
+            }
+        });
     }
 
     #[test]
@@ -5791,7 +5861,7 @@ wire_api = "responses"
                 { "model": "gpt-6-sol", "contextWindow": 1_050_000 }
             ] } });
             let member = json!({ "modelCatalog": { "models": [
-                { "model": "gpt-6-sol", "contextWindow": 512_000 }
+                { "model": "gpt-6-sol", "contextWindow": 512_000, "reasoningLevels": ["max"] }
             ] } });
             let catalog = plan_codex_stack_catalog(
                 CodexStackRoute::ThirdParty(CodexCatalogRow {
@@ -5812,6 +5882,9 @@ wire_api = "responses"
             )
             .unwrap();
             let models = catalog["models"].as_array().unwrap();
+            assert_eq!(catalog_reasoning_efforts(&models[0]), ["low", "xhigh"]);
+            assert_eq!(catalog_reasoning_efforts(&models[1]), ["max"]);
+            assert_eq!(models[1]["default_reasoning_level"], "max");
             for (model, window) in models.iter().zip([1_050_000, 512_000]) {
                 assert_eq!(model["context_window"], window);
                 assert_eq!(model["max_context_window"], window);
